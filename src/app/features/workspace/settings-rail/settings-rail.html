@@ -1,0 +1,152 @@
+<div class="rail">
+  <div class="mode-toggle">
+    <button
+      type="button"
+      class="mode-btn"
+      [class.mode-active]="mode() === 'image'"
+      (click)="setMode('image')"
+    >
+      <ng-icon name="lucideImage" size="15" />
+      Image
+    </button>
+    <button
+      type="button"
+      class="mode-btn"
+      [class.mode-active]="mode() === 'video'"
+      (click)="setMode('video')"
+    >
+      <ng-icon name="lucideVideo" size="15" />
+      Video
+    </button>
+  </div>
+
+  <div class="field">
+    <span class="field-label">Model</span>
+    <div class="family-list">
+      @for (f of families(); track f.id) {
+        <button
+          type="button"
+          class="family-card"
+          [class.family-selected]="familyId() === f.id"
+          (click)="selectFamily(f.id)"
+        >
+          <span class="family-top">
+            <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
+            <span class="family-name">{{ f.name }}</span>
+            <span class="family-from">from ${{ minPriceOf(f) | number: '1.2-2' }}</span>
+          </span>
+          <span class="family-blurb">{{ f.blurb }}</span>
+        </button>
+      }
+    </div>
+  </div>
+
+  <app-option-group
+    label="Version"
+    [options]="versionOptions()"
+    [selected]="settings().version"
+    [disabledReason]="notSupported('Version selection')"
+    (changed)="setAxis('version', $event)"
+  />
+
+  <app-option-group
+    label="Aspect ratio"
+    [options]="aspectOptions()"
+    [selected]="settings().aspectRatio"
+    (changed)="setAxis('aspectRatio', $event)"
+  />
+
+  <app-option-group
+    label="Resolution"
+    [axisTooltip]="resolutionAxisTooltip"
+    [options]="resolutionOptions()"
+    [selected]="settings().resolution"
+    [disabledReason]="notSupported('Resolution')"
+    (changed)="setAxis('resolution', $event)"
+  />
+
+  <app-option-group
+    label="Quality"
+    [axisTooltip]="qualityAxisTooltip"
+    [options]="qualityOptions()"
+    [selected]="settings().quality"
+    [disabledReason]="notSupported('A quality/effort dial')"
+    (changed)="setAxis('quality', $event)"
+  />
+
+  <app-option-group
+    label="Duration"
+    [options]="durationOptions()"
+    [selected]="settings().durationS?.toString()"
+    [disabledReason]="notSupported('Duration')"
+    (changed)="setDuration($event)"
+  />
+
+  @if (family().capabilities.audio) {
+    <p class="audio-note">
+      <app-hint text="This model generates a native soundtrack with every clip.">
+        <span>♪ Audio included</span>
+      </app-hint>
+    </p>
+  }
+
+  <div class="field" [class.field-disabled]="!family().capabilities.imageInput">
+    <span class="field-label">
+      Reference image
+      <app-hint
+        text="Attach an image to edit or guide the generation (image-to-image). Not all models accept image input."
+      >
+        <span class="og-info">ⓘ</span>
+      </app-hint>
+    </span>
+    @if (reference(); as ref) {
+      <div class="ref-preview">
+        <img [src]="ref.url" alt="Reference" />
+        <button type="button" class="ref-clear" (click)="setReference(null)" aria-label="Remove reference">
+          <ng-icon name="lucideX" size="14" />
+        </button>
+      </div>
+    } @else {
+      <div class="ref-actions">
+        <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput">
+          <ng-icon name="lucideImagePlus" size="16" />
+          Upload
+          <input
+            type="file"
+            accept="image/*"
+            class="ref-input"
+            [disabled]="!family().capabilities.imageInput"
+            (change)="onFilePicked($event)"
+          />
+        </label>
+        <button
+          type="button"
+          class="ref-drop"
+          [disabled]="!family().capabilities.imageInput"
+          (click)="pickReferenceRequested.emit()"
+        >
+          From library
+        </button>
+      </div>
+    }
+  </div>
+
+  <div class="field">
+    <span class="field-label">Prompt</span>
+    <textarea
+      rows="4"
+      class="prompt-input"
+      placeholder="Describe the {{ mode() }} you want..."
+      [value]="prompt()"
+      (input)="updatePrompt($any($event.target).value)"
+    ></textarea>
+  </div>
+
+  <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
+    <ng-icon name="lucideWandSparkles" size="16" />
+    Generate · ${{ priceUsd() | number: '1.2-2' }}
+  </button>
+  @if (insufficient()) {
+    <p class="insufficient">Balance too low for this configuration — top up from the profile menu.</p>
+  }
+</div>

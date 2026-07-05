@@ -1,0 +1,24 @@
+.muted {
+  color: var(--muted-foreground);
+}
+
+.panel {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.stat-box {
+  background: var(--muted);
+}
+
+.bordered {
+  border-color: var(--border);
+}
+
+.cost-input {
+  border-color: var(--border);
+}
+
+.loss-text {
+  color: var(--loss);
+}

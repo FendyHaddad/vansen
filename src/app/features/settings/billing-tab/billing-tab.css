@@ -1,0 +1,107 @@
+.tab {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tab-title {
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+.small {
+  font-size: 0.8125rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.card-row {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 680px) {
+  .card-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.balance-big {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.topup-row {
+  display: flex;
+  gap: 8px;
+}
+
+.studio-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.studio-btn {
+  align-self: flex-start;
+}
+
+.ledger-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: 110px 90px minmax(0, 1fr) 90px;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+  font-size: 0.8125rem;
+}
+
+.ledger-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-type {
+  font-weight: 600;
+}
+
+.ledger-family {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.credit {
+  color: var(--profit);
+}

@@ -1,0 +1,40 @@
+<div class="tab">
+  <h2 class="tab-title">Profile</h2>
+
+  <div class="panel">
+    <div class="id-row">
+      <span class="avatar-big">{{ initial() }}</span>
+      <div>
+        <p class="id-email">{{ user()?.email }}</p>
+        <p class="muted small">Member since {{ user()?.since | date: 'mediumDate' }}</p>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label hlmLabel for="displayName">Display name</label>
+      <input
+        hlmInput
+        id="displayName"
+        [value]="displayName()"
+        (input)="displayName.set($any($event.target).value)"
+        placeholder="How should we call you?"
+      />
+    </div>
+    <div class="save-row">
+      <button hlmBtn size="sm" (click)="save()">Save</button>
+      @if (saved()) {
+        <span class="muted small">Saved.</span>
+      }
+    </div>
+  </div>
+
+  <div class="panel danger-panel">
+    <h3 class="panel-title">Danger zone</h3>
+    <p class="muted small">
+      Deletes your account, library, balance, and history permanently.
+    </p>
+    <button hlmBtn variant="destructive" size="sm" class="danger-btn" (click)="deleteAccount()">
+      Delete account
+    </button>
+  </div>
+</div>

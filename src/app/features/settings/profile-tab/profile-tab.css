@@ -1,0 +1,78 @@
+.tab {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tab-title {
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+.small {
+  font-size: 0.8125rem;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.id-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.avatar-big {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 650;
+  font-size: 1.125rem;
+}
+
+.id-email {
+  font-weight: 600;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.danger-panel {
+  border-color: color-mix(in oklch, var(--loss) 45%, var(--border));
+}
+
+.danger-btn {
+  align-self: flex-start;
+}

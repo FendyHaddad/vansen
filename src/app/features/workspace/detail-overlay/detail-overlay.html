@@ -1,0 +1,74 @@
+<div class="backdrop" (click)="closed.emit()">
+  <div class="panel" (click)="$event.stopPropagation()">
+    <button type="button" class="close-btn" aria-label="Close" (click)="closed.emit()">
+      <ng-icon name="lucideX" size="16" />
+    </button>
+
+    <div class="panel-grid">
+      <div class="preview">
+        <img [src]="item().mediaUrl" [alt]="item().prompt" />
+      </div>
+
+      <div class="meta">
+        <span class="meta-op">{{ item().op }} · {{ item().familyName }}</span>
+        <p class="meta-prompt">{{ item().prompt }}</p>
+
+        <div class="chip-row">
+          @for (chip of settingsChips(item()); track chip) {
+            <span class="meta-chip">{{ chip }}</span>
+          }
+        </div>
+
+        <dl class="meta-facts">
+          <div>
+            <dt>Price paid</dt>
+            <dd>${{ item().priceUsd | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Created</dt>
+            <dd>{{ item().at | date: 'medium' }}</dd>
+          </div>
+        </dl>
+
+        @if (item().parentId) {
+          <div class="provenance">
+            <span class="prov-label">Edited from</span>
+            @if (parent(); as p) {
+              <button type="button" class="prov-link" (click)="openParent.emit(p.id)">
+                <img [src]="p.mediaUrl" alt="Parent" />
+                <span>{{ p.familyName }}</span>
+              </button>
+            } @else {
+              <span class="muted">(deleted)</span>
+            }
+          </div>
+        }
+
+        <div class="action-col">
+          <button type="button" class="action" (click)="download.emit(item().id)">
+            <ng-icon name="lucideDownload" size="15" />
+            Download
+          </button>
+          @if (item().kind === 'image') {
+            <button type="button" class="action" (click)="upscale.emit(item().id)">
+              <ng-icon name="lucideSparkles" size="15" />
+              Upscale · ${{ upscalePrice | number: '1.2-2' }}
+            </button>
+            <button type="button" class="action" (click)="variation.emit(item().id)">
+              <ng-icon name="lucideSparkles" size="15" />
+              Variation · ${{ item().priceUsd | number: '1.2-2' }}
+            </button>
+            <button type="button" class="action" (click)="edit.emit(item().id)">
+              <ng-icon name="lucidePencil" size="15" />
+              Edit →
+            </button>
+          }
+          <button type="button" class="action action-danger" (click)="confirmDelete()">
+            <ng-icon name="lucideTrash2" size="15" />
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

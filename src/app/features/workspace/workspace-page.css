@@ -1,0 +1,116 @@
+.workspace {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+/* Header — vanrot-style bar */
+
+.ws-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.ws-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.ws-brand::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  background: url('https://assets.vankode.com/app-logo.svg') center / contain no-repeat;
+}
+
+.ws-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.balance-chip {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 0.875rem;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 50%, transparent);
+}
+
+.balance-low {
+  border-color: color-mix(in oklch, var(--loss) 60%, transparent);
+  color: var(--loss);
+}
+
+/* Layout */
+
+.ws-main {
+  flex: 1;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 1fr;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+@media (min-width: 960px) {
+  .ws-main {
+    grid-template-columns: 320px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.generator {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 18px;
+  position: sticky;
+  top: 80px;
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
+}
+
+.pick-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border));
+  background: color-mix(in oklch, var(--primary) 8%, transparent);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 10px 14px;
+  font-size: 0.8125rem;
+  margin-bottom: 14px;
+}
+
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

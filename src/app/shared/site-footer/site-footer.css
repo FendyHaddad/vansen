@@ -1,0 +1,179 @@
+.site-footer {
+  position: relative;
+  display: block;
+  margin-top: 160px;
+  background: var(--background);
+  overflow: hidden;
+}
+
+.site-footer-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 88px 56px 0;
+}
+
+.site-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--foreground);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.site-brand::before {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  background: url('https://assets.vankode.com/app-logo.svg') center / contain no-repeat;
+  content: '';
+}
+
+.site-footer-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 340px;
+}
+
+.site-footer-tagline {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: left;
+}
+
+.site-footer-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  font-size: 14px;
+}
+
+.site-footer-nav-title {
+  color: var(--muted-foreground);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.site-footer-nav a {
+  color: var(--foreground);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.site-footer-nav a:hover {
+  color: var(--muted-foreground);
+}
+
+.site-footer-models {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.site-footer-models-body {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.site-footer-models-note {
+  color: var(--muted-foreground);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.site-footer-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.site-footer-plan {
+  padding: 10px 16px;
+  border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--foreground) 4%, transparent);
+  color: var(--foreground);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.site-footer-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 80px;
+  padding: 22px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
+  color: var(--muted-foreground);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.site-footer-wordmark {
+  margin: 40px 0 -0.14em;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklch, var(--foreground) 24%, transparent),
+    color-mix(in oklch, var(--foreground) 2%, transparent) 84%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-size: clamp(88px, 19.5vw, 330px);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 0.8;
+  text-align: center;
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .site-footer {
+    margin-top: 96px;
+  }
+
+  .site-footer-inner {
+    padding: 64px 24px 0;
+  }
+
+  .site-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 44px;
+  }
+
+  .site-footer-meta {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 56px;
+  }
+
+  .site-footer-wordmark {
+    margin-top: 28px;
+  }
+}

@@ -1,0 +1,224 @@
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+  padding: 4px;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 0;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.mode-active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-disabled {
+  opacity: 0.4;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+
+.og-info {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.family-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.family-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.family-card:hover {
+  background: color-mix(in oklch, var(--muted) 55%, transparent);
+}
+
+.family-selected {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 9%, transparent);
+}
+
+.family-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.family-logo {
+  height: 14px;
+  width: auto;
+  opacity: 0.9;
+}
+
+.family-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.family-from {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.family-blurb {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  line-height: 1.35;
+}
+
+.audio-note {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.ref-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ref-drop {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 0;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.ref-drop:hover:not(.ref-blocked):not(:disabled) {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  color: var(--foreground);
+}
+
+.ref-blocked,
+.ref-drop:disabled {
+  cursor: not-allowed;
+}
+
+.ref-input {
+  display: none;
+}
+
+.ref-preview {
+  position: relative;
+  width: 96px;
+}
+
+.ref-preview img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: calc(var(--radius) - 4px);
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.ref-clear {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.prompt-input {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 10px 12px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.prompt-input:focus {
+  outline: 2px solid color-mix(in oklch, var(--ring) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.insufficient {
+  font-size: 0.75rem;
+  color: var(--warn);
+  text-align: center;
+}

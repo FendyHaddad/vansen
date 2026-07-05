@@ -1,0 +1,104 @@
+<div class="library-head">
+  <h1>{{ pickMode() ? 'Pick a reference' : 'Library' }}</h1>
+  <span class="muted">{{ visible().length }} of {{ items().length }}</span>
+</div>
+
+<div class="filter-row">
+  @for (f of filters; track f.id) {
+    <button
+      type="button"
+      class="filter-chip"
+      [class.filter-active]="filter() === f.id"
+      (click)="filter.set(f.id)"
+    >
+      {{ f.label }}
+    </button>
+  }
+</div>
+
+@if (visible().length === 0) {
+  <div class="library-empty">
+    <ng-icon name="lucideWandSparkles" size="26" class="muted" />
+    @if (items().length === 0 && samplePrompts().length) {
+      <p>Nothing here yet. Try one of these:</p>
+      <div class="sample-row">
+        @for (sample of samplePrompts(); track sample) {
+          <button type="button" class="sample-chip" (click)="promptPicked.emit(sample)">
+            {{ sample }}
+          </button>
+        }
+      </div>
+    } @else {
+      <p>Nothing matches this filter.</p>
+    }
+  </div>
+} @else {
+  <div class="library-grid">
+    @for (item of visible(); track item.id) {
+      <figure class="gen-card" (click)="onCardClick(item)">
+        <div class="gen-thumb">
+          @if (item.status === 'pending') {
+            <div class="gen-pending">
+              <span class="spinner"></span>
+              Generating…
+            </div>
+          } @else {
+            <img [src]="item.mediaUrl" [alt]="item.prompt" />
+            @if (item.kind === 'video') {
+              <span class="video-tag">
+                <ng-icon name="lucideVideo" size="12" />
+                {{ item.settings.durationS ?? 5 }}s
+              </span>
+            }
+            @if (item.op === 'edit' || item.op === 'upscale') {
+              <span class="op-tag">{{ item.op === 'edit' ? 'edited' : 'upscaled' }}</span>
+            }
+            @if (!pickMode()) {
+              <div class="qa-overlay">
+                <button
+                  type="button"
+                  class="qa"
+                  aria-label="Download"
+                  (click)="download.emit(item.id); $event.stopPropagation()"
+                >
+                  <ng-icon name="lucideDownload" size="13" />
+                </button>
+                @if (item.kind === 'image') {
+                  <button
+                    type="button"
+                    class="qa"
+                    (click)="upscale.emit(item.id); $event.stopPropagation()"
+                  >
+                    Upscale ${{ upscalePrice | number: '1.2-2' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="qa"
+                    (click)="variation.emit(item.id); $event.stopPropagation()"
+                  >
+                    <ng-icon name="lucideSparkles" size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    class="qa"
+                    aria-label="Edit"
+                    (click)="edit.emit(item.id); $event.stopPropagation()"
+                  >
+                    <ng-icon name="lucidePencil" size="13" />
+                  </button>
+                }
+              </div>
+            }
+          }
+        </div>
+        <figcaption class="gen-meta">
+          <div class="gen-topline">
+            <span class="gen-model">{{ item.familyName }}</span>
+            <span class="gen-price">${{ item.priceUsd | number: '1.2-2' }}</span>
+          </div>
+          <p class="gen-prompt">{{ item.prompt }}</p>
+        </figcaption>
+      </figure>
+    }
+  </div>
+}

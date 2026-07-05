@@ -1,0 +1,12 @@
+<div class="stage">
+  <img #img [src]="imageUrl()" alt="Source" draggable="false" />
+  <canvas
+    #canvas
+    class="mask-layer"
+    [class.mask-enabled]="enabled()"
+    (pointerdown)="onPointerDown($event)"
+    (pointermove)="onPointerMove($event)"
+    (pointerup)="onPointerUp()"
+    (pointercancel)="onPointerUp()"
+  ></canvas>
+</div>

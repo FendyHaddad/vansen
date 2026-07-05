@@ -1,0 +1,26 @@
+.stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.stage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 220px);
+  border-radius: calc(var(--radius) - 4px);
+  user-select: none;
+}
+
+.mask-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: calc(var(--radius) - 4px);
+  pointer-events: none;
+  touch-action: none;
+}
+
+.mask-enabled {
+  pointer-events: auto;
+  cursor: crosshair;
+}

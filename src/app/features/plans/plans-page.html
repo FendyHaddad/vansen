@@ -1,0 +1,137 @@
+<div class="min-h-screen">
+  <app-site-header />
+
+  <section class="mx-auto max-w-4xl px-6 pb-4 pt-12 text-center">
+    <span hlmBadge variant="secondary" class="mb-4">Pricing</span>
+    <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">
+      Pay for what you create.
+    </h1>
+    <p class="muted mx-auto mt-4 max-w-xl text-lg">
+      No subscription for generating. Top up a balance, spend it on any model at the
+      price shown, and keep everything in your Studio for $5 a month.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 py-10">
+    <div class="grid gap-5 lg:grid-cols-5">
+      <div hlmCard class="lg:col-span-3">
+        <div hlmCardHeader>
+          <h2 hlmCardTitle>Top up credits</h2>
+          <p hlmCardDescription>
+            One-time payment, from $20. Your balance never expires while Studio is
+            active.
+          </p>
+        </div>
+        <div hlmCardContent>
+          <div class="chip-row" role="radiogroup" aria-label="Top-up amount">
+            @for (option of topUpOptions; track option.amount) {
+              <button
+                type="button"
+                class="chip"
+                role="radio"
+                [class.chip-active]="selectedAmount() === option.amount"
+                [attr.aria-checked]="selectedAmount() === option.amount"
+                (click)="selectedAmount.set(option.amount)"
+              >
+                ${{ option.amount }}
+                @if (option.popular) {
+                  <span class="chip-tag">Popular</span>
+                }
+              </button>
+            }
+          </div>
+
+          <div class="breakdown">
+            <div class="breakdown-row">
+              <span class="muted">Due today</span>
+              <span class="breakdown-value">${{ selectedAmount() | number: '1.0-0' }}</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="muted">Generation balance</span>
+              <span class="breakdown-value">${{ usableBalance() | number: '1.0-0' }}</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="muted">First month of Studio</span>
+              <span class="breakdown-value">Included</span>
+            </div>
+            <p class="muted breakdown-note">
+              ${{ usableBalance() | number: '1.0-0' }} goes roughly
+              {{ imageEstimate() }} images or {{ clipEstimate() }} video clips — mix
+              freely.
+            </p>
+          </div>
+        </div>
+        <div hlmCardFooter>
+          <a routerLink="/login" hlmBtn class="w-full">
+            Top up ${{ selectedAmount() }}
+            <ng-icon name="lucideArrowRight" size="16" />
+          </a>
+        </div>
+      </div>
+
+      <div hlmCard class="studio-card lg:col-span-2">
+        <div hlmCardHeader>
+          <div class="flex items-center justify-between">
+            <h2 hlmCardTitle>Studio</h2>
+            <span hlmBadge variant="secondary">$5 / month</span>
+          </div>
+          <p hlmCardDescription>
+            Your workspace. Keeps your library online and your balance alive.
+          </p>
+        </div>
+        <div hlmCardContent>
+          <ul class="space-y-3 text-sm">
+            @for (perk of studioPerks; track perk.text) {
+              <li class="flex items-start gap-2.5">
+                <ng-icon [name]="perk.icon" class="perk-icon text-primary" size="16" />
+                {{ perk.text }}
+              </li>
+            }
+          </ul>
+        </div>
+        <div hlmCardFooter>
+          <p class="muted text-xs">
+            First month included with your first top-up. Cancel anytime — 30-day grace
+            to download everything.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-4xl px-6 py-12">
+    <h2 class="text-center text-2xl font-semibold tracking-tight">
+      What generations cost
+    </h2>
+    <p class="muted mx-auto mt-3 max-w-xl text-center">
+      Fixed price per output, always shown before you generate. A few examples:
+    </p>
+    <div class="price-grid mt-8">
+      @for (example of examplePrices; track example.name) {
+        <div class="price-cell">
+          <span class="price-kind" [class.price-kind-video]="example.kind === 'video'">
+            {{ example.kind }}
+          </span>
+          <span class="price-name">{{ example.name }}</span>
+          <span class="price-value">${{ example.price | number: '1.2-2' }}</span>
+        </div>
+      }
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-3xl px-6 py-12">
+    <h2 class="text-center text-2xl font-semibold tracking-tight">Questions, answered</h2>
+    <div class="mt-8 space-y-4">
+      @for (faq of faqs; track faq.question) {
+        <div hlmCard>
+          <div hlmCardHeader>
+            <h3 hlmCardTitle class="text-base">{{ faq.question }}</h3>
+            <p hlmCardDescription>{{ faq.answer }}</p>
+          </div>
+        </div>
+      }
+    </div>
+  </section>
+
+  <app-site-footer />
+</div>

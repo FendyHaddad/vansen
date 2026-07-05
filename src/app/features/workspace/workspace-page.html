@@ -1,0 +1,58 @@
+<div class="workspace">
+  <header class="ws-header">
+    <a routerLink="/app" class="ws-brand">Vansen</a>
+    <div class="ws-header-right">
+      <span class="balance-chip" [class.balance-low]="balanceUsd() < 1">
+        ${{ balanceUsd() | number: '1.2-2' }}
+      </span>
+      <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
+        Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
+      </span>
+      <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
+    </div>
+  </header>
+
+  <main class="ws-main">
+    <aside class="generator">
+      <app-settings-rail
+        (generateRequested)="onGenerate($event)"
+        (pickReferenceRequested)="startReferencePick()"
+      />
+    </aside>
+
+    <section class="library">
+      @if (pickingReference()) {
+        <div class="pick-banner">
+          Choosing a reference image — click any image, or
+          <button type="button" class="linkish" (click)="pickingReference.set(false)">cancel</button>
+        </div>
+      }
+      <app-library-grid
+        [items]="generations()"
+        [pickMode]="pickingReference()"
+        [samplePrompts]="samplePrompts"
+        (picked)="onReferencePicked($event)"
+        (opened)="onOpened($event)"
+        (download)="onDownload($event)"
+        (upscale)="onUpscale($event)"
+        (variation)="onVariation($event)"
+        (edit)="onEdit($event)"
+        (promptPicked)="usePrompt($event)"
+      />
+    </section>
+  </main>
+
+  @if (openedItem(); as opened) {
+    <app-detail-overlay
+      [item]="opened"
+      [parent]="openedParent()"
+      (closed)="openedId.set(null)"
+      (download)="onDownload($event)"
+      (upscale)="onUpscale($event)"
+      (variation)="onVariation($event)"
+      (edit)="onEdit($event)"
+      (deleted)="onDeleted($event)"
+      (openParent)="onOpened($event)"
+    />
+  }
+</div>

@@ -1,0 +1,56 @@
+<div class="tab">
+  <h2 class="tab-title">Preferences</h2>
+
+  <div class="panel">
+    <div class="pref-row">
+      <label hlmLabel for="prefMode">Default mode</label>
+      <select id="prefMode" class="pref-select" [value]="prefs().defaultMode" (change)="setMode($any($event.target).value)">
+        <option value="image">Image</option>
+        <option value="video">Video</option>
+      </select>
+    </div>
+
+    <div class="pref-row">
+      <label hlmLabel for="prefImage">Default image model</label>
+      <select id="prefImage" class="pref-select" [value]="prefs().defaultImageFamily" (change)="setImageFamily($any($event.target).value)">
+        @for (f of imageFamilies; track f.id) {
+          <option [value]="f.id" [selected]="prefs().defaultImageFamily === f.id">{{ f.name }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="pref-row">
+      <label hlmLabel for="prefVideo">Default video model</label>
+      <select id="prefVideo" class="pref-select" [value]="prefs().defaultVideoFamily" (change)="setVideoFamily($any($event.target).value)">
+        @for (f of videoFamilies; track f.id) {
+          <option [value]="f.id" [selected]="prefs().defaultVideoFamily === f.id">{{ f.name }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="pref-row">
+      <label hlmLabel for="prefAspect">Default aspect ratio</label>
+      <select id="prefAspect" class="pref-select" [value]="prefs().defaultAspect" (change)="setAspect($any($event.target).value)">
+        @for (ar of aspects; track ar) {
+          <option [value]="ar" [selected]="prefs().defaultAspect === ar">{{ ar }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="pref-row">
+      <label hlmLabel for="prefThreshold">Confirm generations over ($)</label>
+      <input
+        id="prefThreshold"
+        type="number"
+        min="0"
+        step="0.5"
+        class="pref-select"
+        [value]="prefs().confirmOverUsd"
+        (input)="setThreshold($any($event.target).value)"
+      />
+      <p class="muted small">
+        Anything priced above this asks for confirmation before charging.
+      </p>
+    </div>
+  </div>
+</div>

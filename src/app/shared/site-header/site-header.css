@@ -1,0 +1,46 @@
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  background: var(--background);
+}
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--foreground);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.site-brand::before {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  background: url('https://assets.vankode.com/app-logo.svg') center / contain no-repeat;
+  content: '';
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  font-size: 14px;
+}
+
+.site-nav a:not([hlmBtn]) {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.site-nav a:not([hlmBtn]):hover {
+  color: var(--foreground);
+}

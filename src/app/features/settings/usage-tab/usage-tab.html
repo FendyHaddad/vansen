@@ -1,0 +1,47 @@
+<div class="tab">
+  <h2 class="tab-title">Usage — this month</h2>
+
+  <div class="stat-row">
+    <div class="panel stat">
+      <span class="muted small">Total spend</span>
+      <span class="stat-big">${{ totalSpend() | number: '1.2-2' }}</span>
+    </div>
+    <div class="panel stat">
+      <span class="muted small">Operations</span>
+      <span class="stat-big">{{ totalOps() }}</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">By operation</h3>
+    @for (row of byType(); track row.label) {
+      <div class="usage-row">
+        <span class="usage-label">{{ row.label }}</span>
+        <span class="muted small">{{ row.count }}×</span>
+        <div class="bar-track">
+          <!-- data-driven width; a stylesheet class cannot express per-row percentages -->
+          <div class="bar-fill" [style.width.%]="row.pct"></div>
+        </div>
+        <span class="usage-amount">${{ row.spendUsd | number: '1.2-2' }}</span>
+      </div>
+    } @empty {
+      <p class="muted small">Nothing yet this month.</p>
+    }
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">By model</h3>
+    @for (row of byFamily(); track row.label) {
+      <div class="usage-row">
+        <span class="usage-label">{{ row.label }}</span>
+        <span class="muted small">{{ row.count }}×</span>
+        <div class="bar-track">
+          <div class="bar-fill" [style.width.%]="row.pct"></div>
+        </div>
+        <span class="usage-amount">${{ row.spendUsd | number: '1.2-2' }}</span>
+      </div>
+    } @empty {
+      <p class="muted small">Nothing yet this month.</p>
+    }
+  </div>
+</div>

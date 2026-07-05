@@ -1,0 +1,47 @@
+<div class="settings">
+  <header class="ws-header">
+    <div class="header-left">
+      <a routerLink="/app" class="back-link">
+        <ng-icon name="lucideArrowLeft" size="16" />
+        Workspace
+      </a>
+      <span class="header-title">Settings</span>
+    </div>
+    <div class="ws-header-right">
+      <span class="balance-chip">${{ balanceUsd() | number: '1.2-2' }}</span>
+      <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
+    </div>
+  </header>
+
+  <main class="settings-main">
+    <nav class="tab-nav" aria-label="Settings sections">
+      @for (tab of tabs; track tab.id) {
+        <button
+          type="button"
+          class="tab-link"
+          [class.tab-active]="active() === tab.id"
+          (click)="active.set(tab.id)"
+        >
+          {{ tab.label }}
+        </button>
+      }
+    </nav>
+
+    <section class="tab-content">
+      @switch (active()) {
+        @case ('profile') {
+          <app-profile-tab />
+        }
+        @case ('billing') {
+          <app-billing-tab />
+        }
+        @case ('usage') {
+          <app-usage-tab />
+        }
+        @case ('preferences') {
+          <app-preferences-tab />
+        }
+      }
+    </section>
+  </main>
+</div>

@@ -1,0 +1,26 @@
+<div class="og" [class.og-disabled]="!options()?.length">
+  <span class="og-label">
+    {{ label() }}
+    @if (axisTooltip()) {
+      <app-hint [text]="axisTooltip()"><span class="og-info">ⓘ</span></app-hint>
+    }
+  </span>
+  @if (options()?.length) {
+    <div class="og-chips">
+      @for (option of options()!; track option.value) {
+        <app-hint [text]="option.tooltip">
+          <button
+            type="button"
+            class="og-chip"
+            [class.og-active]="selected() === option.value"
+            (click)="changed.emit(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </app-hint>
+      }
+    </div>
+  } @else {
+    <app-hint [text]="disabledReason()"><span class="og-na">Not available</span></app-hint>
+  }
+</div>

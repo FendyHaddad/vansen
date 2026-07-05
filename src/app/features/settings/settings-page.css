@@ -1,0 +1,119 @@
+.settings {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: var(--foreground);
+}
+
+.header-title {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.ws-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.balance-chip {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 0.875rem;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 50%, transparent);
+}
+
+.settings-main {
+  flex: 1;
+  display: grid;
+  gap: 32px;
+  grid-template-columns: 1fr;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+@media (min-width: 760px) {
+  .settings-main {
+    grid-template-columns: 180px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.tab-nav {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  position: sticky;
+  top: 88px;
+}
+
+@media (min-width: 760px) {
+  .tab-nav {
+    flex-direction: column;
+  }
+}
+
+.tab-link {
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.tab-link:hover {
+  color: var(--foreground);
+}
+
+.tab-active {
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  color: var(--foreground);
+}
+
+.tab-content {
+  min-width: 0;
+}

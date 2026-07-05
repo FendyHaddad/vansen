@@ -1,0 +1,9 @@
+:host {
+  display: inline-flex;
+}
+
+.hint-trigger {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}

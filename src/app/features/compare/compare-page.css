@@ -1,0 +1,248 @@
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+.small {
+  font-size: 0.8125rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.page-header h1 {
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.page-header p {
+  margin-top: 6px;
+  max-width: 560px;
+}
+
+.header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.temp-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--warn) 55%, transparent);
+  color: var(--warn);
+}
+
+.back-link {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: var(--foreground);
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 20px 24px;
+}
+
+.panel-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.controls-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.controls-grid input,
+.controls-grid select {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+
+.controls-grid input:focus,
+.controls-grid select:focus {
+  outline: 2px solid color-mix(in oklch, var(--ring) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.controls .small {
+  margin-top: 14px;
+}
+
+.duel {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 860px) {
+  .duel {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.side-head h2 {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+
+.side-tag {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.figures {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.figures > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+}
+
+.figures dt {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.figures dd {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.figure-strong dt,
+.figure-strong dd {
+  font-weight: 650;
+  color: var(--foreground);
+  font-size: 0.9375rem;
+}
+
+.profit-text {
+  color: var(--profit);
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.loss-text {
+  color: var(--loss);
+}
+
+.verdict {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+  padding: 18px 24px;
+}
+
+@media (min-width: 640px) {
+  .verdict {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.verdict-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.verdict-item strong {
+  font-size: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+
+.dim-cell {
+  font-weight: 600;
+  white-space: nowrap;
+}

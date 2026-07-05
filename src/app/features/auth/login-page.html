@@ -1,0 +1,55 @@
+<div class="grid min-h-screen lg:grid-cols-2">
+  <aside class="artwork relative hidden overflow-hidden lg:block">
+    <div class="orb orb-one"></div>
+    <div class="orb orb-two"></div>
+    <div class="orb orb-three"></div>
+    <div class="grain"></div>
+    <div class="relative z-10 flex h-full flex-col justify-between p-10">
+      <a routerLink="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
+        <ng-icon name="lucideSparkles" size="20" />
+        Vansen
+      </a>
+      <blockquote class="max-w-md">
+        <p class="text-2xl font-medium leading-snug">
+          “Every model worth using, one prompt box, one credit balance.”
+        </p>
+        <footer class="artwork-caption mt-4 text-sm">
+          Veo · Sora · Nano Banana · FLUX · Kling · Seedance
+        </footer>
+      </blockquote>
+    </div>
+  </aside>
+
+  <main class="flex items-center justify-center px-6 py-12">
+    <div class="w-full max-w-sm">
+      <a routerLink="/" class="mb-8 flex items-center gap-2 text-lg font-semibold lg:hidden">
+        <ng-icon name="lucideSparkles" class="text-primary" size="20" />
+        Vansen
+      </a>
+      <h1 class="text-2xl font-semibold tracking-tight">Sign in</h1>
+      <p class="muted mt-1 text-sm">Enter your email to access your workspace.</p>
+
+      <form (submit)="$event.preventDefault(); submit()" class="mt-8 space-y-4">
+        <div class="space-y-2">
+          <label hlmLabel for="email">Email</label>
+          <input
+            id="email"
+            hlmInput
+            type="email"
+            class="w-full"
+            placeholder="you@example.com"
+            [value]="email()"
+            (input)="updateEmail($any($event.target).value)"
+          />
+        </div>
+        <button hlmBtn type="submit" class="w-full" [disabled]="!email().trim()">
+          Continue
+        </button>
+      </form>
+
+      <p class="muted mt-6 text-center text-xs">
+        Stub auth — real Supabase sign-in wires in once the schema lands.
+      </p>
+    </div>
+  </main>
+</div>

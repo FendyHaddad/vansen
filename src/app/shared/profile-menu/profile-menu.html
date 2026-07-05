@@ -1,0 +1,32 @@
+<button
+  type="button"
+  class="avatar-btn"
+  [hlmDropdownMenuTrigger]="menu"
+  align="end"
+  aria-label="Profile menu"
+>
+  {{ initial() }}
+</button>
+
+<ng-template #menu>
+  <div hlmDropdownMenu class="profile-dropdown">
+    <div class="menu-head">
+      <span class="menu-email">{{ email() }}</span>
+      <span class="menu-balance">${{ balanceUsd() | number: '1.2-2' }}</span>
+    </div>
+    <hlm-dropdown-menu-separator />
+    <button hlmDropdownMenuItem (triggered)="topUp.emit()">
+      <ng-icon name="lucidePlus" size="15" />
+      Top up $20
+    </button>
+    <a hlmDropdownMenuItem routerLink="/app/settings">
+      <ng-icon name="lucideSettings" size="15" />
+      Settings
+    </a>
+    <hlm-dropdown-menu-separator />
+    <button hlmDropdownMenuItem (triggered)="signOut.emit()">
+      <ng-icon name="lucideLogOut" size="15" />
+      Sign out
+    </button>
+  </div>
+</ng-template>

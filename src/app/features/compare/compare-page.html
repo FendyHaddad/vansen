@@ -1,0 +1,301 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Business model comparison</h1>
+      <p class="muted">
+        Subscription (Higgsfield-style) vs pay-as-you-go with markup (OpenRouter-style).
+        Adjust the scenario, watch both sides recompute.
+      </p>
+    </div>
+    <div class="header-meta">
+      <span class="temp-badge">Temporary — internal only</span>
+      <a routerLink="/admin/pricing" class="back-link">Pricing calculator →</a>
+    </div>
+  </header>
+
+  <section class="panel controls">
+    <h2 class="panel-title">Scenario — one user, one month</h2>
+    <div class="controls-grid">
+      <label>
+        Images / month
+        <input
+          type="number"
+          min="0"
+          [value]="imagesPerMonth()"
+          (input)="imagesPerMonth.set(+$any($event.target).value || 0)"
+        />
+      </label>
+      <label>
+        Image model
+        <select
+          [value]="imageModelId()"
+          (change)="imageModelId.set($any($event.target).value)"
+        >
+          @for (model of imageModels; track model.id) {
+            <option [value]="model.id" [selected]="model.id === imageModelId()">
+              {{ model.name }} — ${{ model.usdCost | number: '1.3-3' }}
+            </option>
+          }
+        </select>
+      </label>
+      <label>
+        Videos / month
+        <input
+          type="number"
+          min="0"
+          [value]="videosPerMonth()"
+          (input)="videosPerMonth.set(+$any($event.target).value || 0)"
+        />
+      </label>
+      <label>
+        Video model
+        <select
+          [value]="videoModelId()"
+          (change)="videoModelId.set($any($event.target).value)"
+        >
+          @for (model of videoModels; track model.id) {
+            <option [value]="model.id" [selected]="model.id === videoModelId()">
+              {{ model.name }} — ${{ model.usdCost | number: '1.2-2' }}
+            </option>
+          }
+        </select>
+      </label>
+      <label>
+        PAYG margin %
+        <input
+          type="number"
+          min="0"
+          max="90"
+          [value]="paygMarginPct()"
+          (input)="paygMarginPct.set(+$any($event.target).value || 0)"
+        />
+      </label>
+      <label>
+        Storage fee $ / month
+        <input
+          type="number"
+          min="0"
+          step="0.5"
+          [value]="storageFeeUsd()"
+          (input)="storageFeeUsd.set(+$any($event.target).value || 0)"
+        />
+      </label>
+      <label>
+        Top-up size $
+        <input
+          type="number"
+          min="1"
+          [value]="topupUsd()"
+          (input)="topupUsd.set(+$any($event.target).value || 1)"
+        />
+      </label>
+    </div>
+    <p class="muted small">
+      Raw provider cost for this scenario:
+      <strong>${{ providerCost() | number: '1.2-2' }}</strong> · est. new storage
+      {{ storageGb() | number: '1.2-2' }} GB (~${{ storageCost() | number: '1.3-3' }}/mo
+      Supabase overage)
+    </p>
+  </section>
+
+  <section class="duel">
+    <div class="panel side">
+      <div class="side-head">
+        <h2>Subscription</h2>
+        <span class="side-tag">current spec</span>
+      </div>
+      <p class="muted small">
+        $15 / 200 credits (image only) · $30 / 500 credits (video unlocked) · credit
+        $0.075 · credits priced at 40% target net margin · $15 packs for overflow.
+      </p>
+      @if (sub().impossible) {
+        <p class="loss-text">Credit pricing impossible with current config.</p>
+      } @else {
+        <dl class="figures">
+          <div>
+            <dt>Credits needed</dt>
+            <dd>{{ sub().creditsNeeded | number: '1.0-0' }}</dd>
+          </div>
+          <div>
+            <dt>Tier chosen</dt>
+            <dd>{{ sub().tierName }} (${{ sub().tierPrice }})</dd>
+          </div>
+          <div>
+            <dt>Extra packs</dt>
+            <dd>{{ sub().packs }} × $15 = ${{ sub().packCost | number: '1.0-0' }}</dd>
+          </div>
+          <div class="figure-strong">
+            <dt>User pays / month</dt>
+            <dd>${{ sub().userPays | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Provider cost</dt>
+            <dd>−${{ sub().providerCost | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Stripe fees</dt>
+            <dd>−${{ sub().stripeFees | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Storage cost</dt>
+            <dd>−${{ sub().storageCost | number: '1.3-3' }}</dd>
+          </div>
+          <div class="figure-strong">
+            <dt>Our net</dt>
+            <dd [class.profit-text]="sub().net >= 0" [class.loss-text]="sub().net < 0">
+              ${{ sub().net | number: '1.2-2' }} ({{ sub().netPct | percent: '1.0-1' }})
+            </dd>
+          </div>
+        </dl>
+      }
+    </div>
+
+    <div class="panel side">
+      <div class="side-head">
+        <h2>Pay as you go</h2>
+        <span class="side-tag">proposal</span>
+      </div>
+      <p class="muted small">
+        Generation billed at provider cost / (1 − {{ paygMarginPct() }}%) ·
+        ${{ storageFeeUsd() | number: '1.0-2' }}/mo storage fee · top-ups of
+        ${{ topupUsd() }}.
+      </p>
+      @if (payg().impossible) {
+        <p class="loss-text">Margin ≥ 100% — price undefined.</p>
+      } @else {
+        <dl class="figures">
+          <div>
+            <dt>Generation spend</dt>
+            <dd>${{ payg().genSpend | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Storage fee</dt>
+            <dd>${{ payg().storageFee | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Top-ups needed</dt>
+            <dd>{{ payg().topups }} × ${{ topupUsd() }}</dd>
+          </div>
+          <div class="figure-strong">
+            <dt>User pays / month</dt>
+            <dd>${{ payg().userPays | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Provider cost</dt>
+            <dd>−${{ payg().providerCost | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Stripe fees</dt>
+            <dd>−${{ payg().stripeFees | number: '1.2-2' }}</dd>
+          </div>
+          <div>
+            <dt>Storage cost</dt>
+            <dd>−${{ payg().storageCost | number: '1.3-3' }}</dd>
+          </div>
+          <div class="figure-strong">
+            <dt>Our net</dt>
+            <dd [class.profit-text]="payg().net >= 0" [class.loss-text]="payg().net < 0">
+              ${{ payg().net | number: '1.2-2' }} ({{ payg().netPct | percent: '1.0-1' }})
+            </dd>
+          </div>
+        </dl>
+      }
+    </div>
+  </section>
+
+  <section class="verdict">
+    <div class="verdict-item">
+      <span class="muted small">Cheaper for the user</span>
+      @if (userDelta() > 0) {
+        <strong class="profit-text">
+          PAYG — saves ${{ userDelta() | number: '1.2-2' }}/mo
+        </strong>
+      } @else if (userDelta() < 0) {
+        <strong class="profit-text">
+          Subscription — saves ${{ -userDelta() | number: '1.2-2' }}/mo
+        </strong>
+      } @else {
+        <strong>Tie</strong>
+      }
+    </div>
+    <div class="verdict-item">
+      <span class="muted small">More profit for us</span>
+      @if (netDelta() > 0) {
+        <strong class="profit-text">
+          Subscription — +${{ netDelta() | number: '1.2-2' }}/mo per user
+        </strong>
+      } @else if (netDelta() < 0) {
+        <strong class="profit-text">
+          PAYG — +${{ -netDelta() | number: '1.2-2' }}/mo per user
+        </strong>
+      } @else {
+        <strong>Tie</strong>
+      }
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">Price per generation — what the user sees</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Provider cost</th>
+            <th>Subscription price</th>
+            <th>PAYG price ({{ paygMarginPct() }}% margin)</th>
+            <th>Cheaper</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of examples(); track row.model.id) {
+            <tr>
+              <td>
+                {{ row.model.name }}
+                <span class="muted small">· {{ row.model.provider }}</span>
+              </td>
+              <td>${{ row.model.usdCost | number: '1.3-3' }}</td>
+              <td>
+                {{ row.subCredits }} cr = ${{ row.subPrice | number: '1.3-3' }}
+              </td>
+              <td>${{ row.paygPrice | number: '1.3-3' }}</td>
+              <td>
+                @if (row.cheaper === 'payg') {
+                  <span class="profit-text">PAYG</span>
+                } @else if (row.cheaper === 'sub') {
+                  <span class="warn-text">Subscription</span>
+                } @else {
+                  <span class="muted">Tie</span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2 class="panel-title">Structural trade-offs</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Dimension</th>
+            <th>Subscription</th>
+            <th>Pay as you go</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of tradeoffs; track row.dim) {
+            <tr>
+              <td class="dim-cell">{{ row.dim }}</td>
+              <td>{{ row.sub }}</td>
+              <td>{{ row.payg }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
