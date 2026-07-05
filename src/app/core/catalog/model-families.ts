@@ -7,6 +7,8 @@ export interface FamilyOption {
   value: string;
   label: string;
   tooltip: string;
+  /** Small highlight tag rendered on the chip, e.g. "Latest". Also marks the default. */
+  tag?: string;
 }
 
 export interface GenerationSettings {
@@ -15,6 +17,8 @@ export interface GenerationSettings {
   resolution?: string;
   quality?: string;
   durationS?: number;
+  /** Outputs per run (1–4). Price multiplies per output. */
+  batch?: number;
 }
 
 export interface ModelFamily {
@@ -70,8 +74,13 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     blurb: 'Fast, cheap, great all-rounder. The default choice.',
     capabilities: {
       versions: [
-        { value: '2', label: '2', tooltip: 'Gemini 3.1 Flash Image — current generation, up to 4K.' },
         { value: '1', label: '1', tooltip: 'Gemini 2.5 Flash Image — cheapest, ~1K output only.' },
+        {
+          value: '2',
+          label: '2',
+          tag: 'Latest',
+          tooltip: 'Gemini 3.1 Flash Image — current generation, up to 4K.',
+        },
       ],
       aspectRatios: AR_IMAGE,
       resolutions: [
@@ -114,9 +123,14 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     blurb: 'Quality dial for compute effort; v2 adds true 4K and masked edits.',
     capabilities: {
       versions: [
-        { value: '2', label: '2', tooltip: 'Latest. Any resolution up to 3840px, masked editing.' },
-        { value: '1.5', label: '1.5', tooltip: 'Previous generation, ~1K output.' },
         { value: '1', label: '1', tooltip: 'Original GPT Image, ~1K output.' },
+        { value: '1.5', label: '1.5', tooltip: 'Previous generation, ~1K output.' },
+        {
+          value: '2',
+          label: '2',
+          tag: 'Latest',
+          tooltip: 'Newest GPT Image. Any resolution up to 3840px, masked editing.',
+        },
       ],
       aspectRatios: AR_IMAGE,
       resolutions: [
@@ -302,12 +316,14 @@ export function familyById(id: string): ModelFamily | undefined {
 
 export function defaultSettings(family: ModelFamily): GenerationSettings {
   const c = family.capabilities;
+  const defaultVersion = c.versions?.find((v) => v.tag === 'Latest') ?? c.versions?.[0];
   return {
-    version: c.versions?.[0]?.value,
+    version: defaultVersion?.value,
     aspectRatio: c.aspectRatios[0],
     resolution: c.resolutions?.[0]?.value,
     quality: c.qualities ? 'medium' : undefined,
     durationS: c.durations?.[0],
+    batch: 1,
   };
 }
 

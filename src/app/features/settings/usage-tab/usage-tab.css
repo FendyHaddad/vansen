@@ -1,13 +1,19 @@
 .tab {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
+}
+
+.tab-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .tab-title {
-  font-size: 1.25rem;
+  font-size: 1.375rem;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .muted {
@@ -18,14 +24,23 @@
   font-size: 0.8125rem;
 }
 
+.eyebrow {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+}
+
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
-  padding: 20px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .panel-title {
@@ -36,19 +51,30 @@
 .stat-row {
   display: grid;
   gap: 18px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .stat-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.stat {
+  gap: 6px;
 }
 
 .stat-big {
   font-size: 1.75rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
   letter-spacing: -0.02em;
 }
 
 .usage-row {
   display: grid;
-  grid-template-columns: 130px 40px minmax(0, 1fr) 80px;
+  grid-template-columns: 130px 42px minmax(0, 1fr) 80px;
   gap: 12px;
   align-items: center;
   font-size: 0.8125rem;
@@ -62,8 +88,13 @@
   white-space: nowrap;
 }
 
+.usage-count {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
+}
+
 .bar-track {
-  height: 6px;
+  height: 8px;
   border-radius: 999px;
   background: color-mix(in oklch, var(--muted) 70%, transparent);
   overflow: hidden;
@@ -72,11 +103,16 @@
 .bar-fill {
   height: 100%;
   border-radius: 999px;
-  background: var(--primary);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--primary) 70%, transparent),
+    var(--primary)
+  );
 }
 
 .usage-amount {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
   font-weight: 600;
 }

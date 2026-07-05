@@ -1,40 +1,55 @@
 <div class="tab">
-  <h2 class="tab-title">Profile</h2>
+  <header class="tab-head">
+    <h2 class="tab-title">Profile</h2>
+    <p class="muted">Who you are on Vansen.</p>
+  </header>
 
-  <div class="panel">
+  <div class="panel identity-panel">
     <div class="id-row">
       <span class="avatar-big">{{ initial() }}</span>
-      <div>
-        <p class="id-email">{{ user()?.email }}</p>
-        <p class="muted small">Member since {{ user()?.since | date: 'mediumDate' }}</p>
+      <div class="id-text">
+        <p class="id-email">{{ user()?.displayName || user()?.email }}</p>
+        <p class="muted small">
+          {{ user()?.email }} · member since {{ user()?.since | date: 'mediumDate' }}
+        </p>
       </div>
     </div>
 
-    <div class="form-row">
-      <label hlmLabel for="displayName">Display name</label>
-      <input
-        hlmInput
-        id="displayName"
-        [value]="displayName()"
-        (input)="displayName.set($any($event.target).value)"
-        placeholder="How should we call you?"
-      />
-    </div>
-    <div class="save-row">
-      <button hlmBtn size="sm" (click)="save()">Save</button>
-      @if (saved()) {
-        <span class="muted small">Saved.</span>
-      }
+    <div class="divider"></div>
+
+    <div class="setting-row">
+      <div class="setting-text">
+        <label hlmLabel for="displayName">Display name</label>
+        <p class="muted small">Shown in your workspace instead of your email.</p>
+      </div>
+      <div class="setting-control name-control">
+        <input
+          hlmInput
+          id="displayName"
+          [value]="displayName()"
+          (input)="displayName.set($any($event.target).value)"
+          placeholder="Your name"
+        />
+        <button hlmBtn size="sm" variant="outline" (click)="save()">
+          {{ saved() ? 'Saved ✓' : 'Save' }}
+        </button>
+      </div>
     </div>
   </div>
 
   <div class="panel danger-panel">
-    <h3 class="panel-title">Danger zone</h3>
-    <p class="muted small">
-      Deletes your account, library, balance, and history permanently.
-    </p>
-    <button hlmBtn variant="destructive" size="sm" class="danger-btn" (click)="deleteAccount()">
-      Delete account
-    </button>
+    <div class="setting-row">
+      <div class="setting-text">
+        <h3 class="panel-title danger-title">Delete account</h3>
+        <p class="muted small">
+          Library, balance, and history are wiped permanently. There is no undo.
+        </p>
+      </div>
+      <div class="setting-control">
+        <button hlmBtn variant="destructive" size="sm" (click)="deleteAccount()">
+          Delete account
+        </button>
+      </div>
+    </div>
   </div>
 </div>

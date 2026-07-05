@@ -2,7 +2,13 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideArrowLeft } from '@ng-icons/lucide';
+import {
+  lucideActivity,
+  lucideArrowLeft,
+  lucideCreditCard,
+  lucideSlidersHorizontal,
+  lucideUser,
+} from '@ng-icons/lucide';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
@@ -28,7 +34,15 @@ type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
     UsageTab,
     PreferencesTab,
   ],
-  providers: [provideIcons({ lucideArrowLeft })],
+  providers: [
+    provideIcons({
+      lucideArrowLeft,
+      lucideUser,
+      lucideCreditCard,
+      lucideActivity,
+      lucideSlidersHorizontal,
+    }),
+  ],
 })
 export class SettingsPage {
   private readonly auth = inject(AuthService);
@@ -38,11 +52,16 @@ export class SettingsPage {
   readonly balanceUsd = this.ledger.balanceUsd;
 
   readonly active = signal<SettingsTab>('profile');
-  readonly tabs: { id: SettingsTab; label: string }[] = [
-    { id: 'profile', label: 'Profile' },
-    { id: 'billing', label: 'Billing' },
-    { id: 'usage', label: 'Usage' },
-    { id: 'preferences', label: 'Preferences' },
+  readonly tabs: { id: SettingsTab; label: string; icon: string; hint: string }[] = [
+    { id: 'profile', label: 'Profile', icon: 'lucideUser', hint: 'Identity and account' },
+    { id: 'billing', label: 'Billing', icon: 'lucideCreditCard', hint: 'Balance, Studio, history' },
+    { id: 'usage', label: 'Usage', icon: 'lucideActivity', hint: 'This month at a glance' },
+    {
+      id: 'preferences',
+      label: 'Preferences',
+      icon: 'lucideSlidersHorizontal',
+      hint: 'Defaults for the workspace',
+    },
   ];
 
   topUp(): void {

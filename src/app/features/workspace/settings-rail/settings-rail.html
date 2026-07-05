@@ -21,74 +21,49 @@
   </div>
 
   <div class="field">
-    <span class="field-label">Model</span>
-    <div class="family-list">
-      @for (f of families(); track f.id) {
-        <button
-          type="button"
-          class="family-card"
-          [class.family-selected]="familyId() === f.id"
-          (click)="selectFamily(f.id)"
-        >
-          <span class="family-top">
-            <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
-            <span class="family-name">{{ f.name }}</span>
-            <span class="family-from">from ${{ minPriceOf(f) | number: '1.2-2' }}</span>
-          </span>
-          <span class="family-blurb">{{ f.blurb }}</span>
-        </button>
-      }
-    </div>
+    <span class="field-label">
+      Model
+      <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
+        <span class="og-info">ⓘ</span>
+      </app-hint>
+    </span>
+    <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
+      <img [src]="family().logo" [alt]="family().provider" class="family-logo" />
+      <span class="model-trigger-name">{{ family().name }}</span>
+      <span class="model-trigger-price">from ${{ minPriceOf(family()) | number: '1.2-2' }}</span>
+      <ng-icon name="lucideChevronDown" size="14" />
+    </button>
+    <ng-template #modelMenu>
+      <div hlmDropdownMenu class="model-menu">
+        @for (f of families(); track f.id) {
+          <button
+            hlmDropdownMenuItem
+            class="model-item"
+            [class.model-item-active]="familyId() === f.id"
+            (triggered)="selectFamily(f.id)"
+          >
+            <span class="model-item-top">
+              <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
+              <span class="model-item-name">{{ f.name }}</span>
+              <span class="model-item-price">from ${{ minPriceOf(f) | number: '1.2-2' }}</span>
+            </span>
+            <span class="model-item-blurb">{{ f.blurb }}</span>
+          </button>
+        }
+      </div>
+    </ng-template>
   </div>
 
-  <app-option-group
-    label="Version"
-    [options]="versionOptions()"
-    [selected]="settings().version"
-    [disabledReason]="notSupported('Version selection')"
-    (changed)="setAxis('version', $event)"
-  />
-
-  <app-option-group
-    label="Aspect ratio"
-    [options]="aspectOptions()"
-    [selected]="settings().aspectRatio"
-    (changed)="setAxis('aspectRatio', $event)"
-  />
-
-  <app-option-group
-    label="Resolution"
-    [axisTooltip]="resolutionAxisTooltip"
-    [options]="resolutionOptions()"
-    [selected]="settings().resolution"
-    [disabledReason]="notSupported('Resolution')"
-    (changed)="setAxis('resolution', $event)"
-  />
-
-  <app-option-group
-    label="Quality"
-    [axisTooltip]="qualityAxisTooltip"
-    [options]="qualityOptions()"
-    [selected]="settings().quality"
-    [disabledReason]="notSupported('A quality/effort dial')"
-    (changed)="setAxis('quality', $event)"
-  />
-
-  <app-option-group
-    label="Duration"
-    [options]="durationOptions()"
-    [selected]="settings().durationS?.toString()"
-    [disabledReason]="notSupported('Duration')"
-    (changed)="setDuration($event)"
-  />
-
-  @if (family().capabilities.audio) {
-    <p class="audio-note">
-      <app-hint text="This model generates a native soundtrack with every clip.">
-        <span>♪ Audio included</span>
-      </app-hint>
-    </p>
-  }
+  <div class="field">
+    <span class="field-label">Prompt</span>
+    <textarea
+      rows="4"
+      class="prompt-input"
+      placeholder="Describe the {{ mode() }} you want..."
+      [value]="prompt()"
+      (input)="updatePrompt($any($event.target).value)"
+    ></textarea>
+  </div>
 
   <div class="field" [class.field-disabled]="!family().capabilities.imageInput">
     <span class="field-label">
@@ -102,7 +77,12 @@
     @if (reference(); as ref) {
       <div class="ref-preview">
         <img [src]="ref.url" alt="Reference" />
-        <button type="button" class="ref-clear" (click)="setReference(null)" aria-label="Remove reference">
+        <button
+          type="button"
+          class="ref-clear"
+          (click)="setReference(null)"
+          aria-label="Remove reference"
+        >
           <ng-icon name="lucideX" size="14" />
         </button>
       </div>
@@ -131,22 +111,79 @@
     }
   </div>
 
-  <div class="field">
-    <span class="field-label">Prompt</span>
-    <textarea
-      rows="4"
-      class="prompt-input"
-      placeholder="Describe the {{ mode() }} you want..."
-      [value]="prompt()"
-      (input)="updatePrompt($any($event.target).value)"
-    ></textarea>
-  </div>
+  <app-option-group
+    label="Version"
+    [axisTooltip]="axisTooltips.version"
+    [options]="versionOptions()"
+    [selected]="settings().version"
+    [disabledReason]="notSupported('Version selection')"
+    (changed)="setAxis('version', $event)"
+  />
+
+  <app-option-group
+    label="Aspect ratio"
+    [axisTooltip]="axisTooltips.aspect"
+    [options]="aspectOptions()"
+    [selected]="settings().aspectRatio"
+    (changed)="setAxis('aspectRatio', $event)"
+  />
+
+  <app-option-group
+    label="Resolution"
+    [axisTooltip]="axisTooltips.resolution"
+    [options]="resolutionOptions()"
+    [selected]="settings().resolution"
+    [disabledReason]="notSupported('Resolution')"
+    (changed)="setAxis('resolution', $event)"
+  />
+
+  <app-option-group
+    label="Quality"
+    [axisTooltip]="axisTooltips.quality"
+    [options]="qualityOptions()"
+    [selected]="settings().quality"
+    [disabledReason]="notSupported('A quality/effort dial')"
+    (changed)="setAxis('quality', $event)"
+  />
+
+  @if (mode() === 'video') {
+    <app-option-group
+      label="Duration"
+      [axisTooltip]="axisTooltips.duration"
+      [options]="durationOptions()"
+      [selected]="settings().durationS?.toString()"
+      [disabledReason]="notSupported('Duration')"
+      (changed)="setDuration($event)"
+    />
+  }
+
+  <app-option-group
+    label="Batch"
+    [axisTooltip]="axisTooltips.batch"
+    [options]="batchOptions"
+    [selected]="batch().toString()"
+    (changed)="setBatch($event)"
+  />
+
+  @if (family().capabilities.audio) {
+    <p class="audio-note">
+      <app-hint text="This model generates a native soundtrack with every clip.">
+        <span>♪ Audio included</span>
+      </app-hint>
+    </p>
+  }
 
   <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
     <ng-icon name="lucideWandSparkles" size="16" />
-    Generate · ${{ priceUsd() | number: '1.2-2' }}
+    Generate
+    @if (batch() > 1) {
+      ×{{ batch() }}
+    }
+    · ${{ priceUsd() | number: '1.2-2' }}
   </button>
   @if (insufficient()) {
-    <p class="insufficient">Balance too low for this configuration — top up from the profile menu.</p>
+    <p class="insufficient">
+      Balance too low for this configuration — top up from the profile menu.
+    </p>
   }
 </div>

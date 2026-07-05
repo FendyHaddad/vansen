@@ -42,4 +42,5 @@
   font-size: 0.8125rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
 }

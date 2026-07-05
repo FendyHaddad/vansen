@@ -9,6 +9,7 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
+  lucideChevronDown,
   lucideImage,
   lucideImagePlus,
   lucideVideo,
@@ -16,6 +17,7 @@ import {
   lucideX,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
+import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import {
   FamilyOption,
   GenerationSettings,
@@ -36,6 +38,9 @@ export interface GenerateRequest {
   prompt: string;
   referenceId: string | null;
   referenceUrl: string | null;
+  /** Outputs requested in this run. */
+  batch: number;
+  /** Total price for the whole batch. */
   priceUsd: number;
 }
 
@@ -44,18 +49,31 @@ export interface ReferenceSelection {
   url: string;
 }
 
-const QUALITY_AXIS_TOOLTIP =
-  'Compute effort the model spends — detail and text fidelity, not pixels.';
-const RESOLUTION_AXIS_TOOLTIP = 'Output pixel size. More pixels, bigger file, higher cost.';
+const AXIS_TOOLTIPS = {
+  version:
+    'Model generation. Newer versions produce better results; price and options differ per version.',
+  aspect: 'Shape of the output — width : height. Does not change the price.',
+  resolution: 'Output pixel size. More pixels, bigger file, higher cost.',
+  quality: 'Compute effort the model spends — detail and text fidelity, not pixels.',
+  duration: 'Clip length in seconds. Video price scales with duration.',
+  batch: 'Outputs per run — get up to 4 takes on the same prompt. You pay per output.',
+} as const;
 
 @Component({
   selector: 'app-settings-rail',
   templateUrl: './settings-rail.html',
   styleUrl: './settings-rail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint],
+  imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint, ...HlmDropdownMenuImports],
   providers: [
-    provideIcons({ lucideImage, lucideVideo, lucideWandSparkles, lucideImagePlus, lucideX }),
+    provideIcons({
+      lucideImage,
+      lucideVideo,
+      lucideWandSparkles,
+      lucideImagePlus,
+      lucideX,
+      lucideChevronDown,
+    }),
   ],
 })
 export class SettingsRail {
@@ -70,6 +88,8 @@ export class SettingsRail {
   readonly settings = signal<GenerationSettings>(defaultSettings(firstFamilyOf('image')));
   readonly prompt = signal('');
   readonly reference = signal<ReferenceSelection | null>(null);
+
+  readonly axisTooltips = AXIS_TOOLTIPS;
 
   constructor() {
     // Apply user preferences as starting state
@@ -135,14 +155,22 @@ export class SettingsRail {
     }));
   });
 
-  readonly priceUsd = computed(() => userPriceUsd(this.family(), this.settings()));
+  readonly batchOptions: FamilyOption[] = [1, 2, 3, 4].map((n) => ({
+    value: String(n),
+    label: String(n),
+    tooltip:
+      n === 1
+        ? 'Single output.'
+        : `${n} different takes on the same prompt in one run — ${n}× the price.`,
+  }));
+
+  readonly batch = computed(() => this.settings().batch ?? 1);
+  readonly unitPriceUsd = computed(() => userPriceUsd(this.family(), this.settings()));
+  readonly priceUsd = computed(() => this.unitPriceUsd() * this.batch());
   readonly insufficient = computed(() => this.priceUsd() > this.ledger.balanceUsd());
   readonly canGenerate = computed(
     () => this.prompt().trim().length > 0 && !this.insufficient(),
   );
-
-  readonly qualityAxisTooltip = QUALITY_AXIS_TOOLTIP;
-  readonly resolutionAxisTooltip = RESOLUTION_AXIS_TOOLTIP;
 
   minPriceOf(family: ModelFamily): number {
     const c = family.capabilities;
@@ -194,6 +222,10 @@ export class SettingsRail {
     this.settings.update((s) => ({ ...s, durationS: Number(value) }));
   }
 
+  setBatch(value: string): void {
+    this.settings.update((s) => ({ ...s, batch: Number(value) }));
+  }
+
   updatePrompt(value: string): void {
     this.prompt.set(value);
   }
@@ -219,6 +251,7 @@ export class SettingsRail {
       prompt: this.prompt().trim(),
       referenceId: this.reference()?.id ?? null,
       referenceUrl: this.reference()?.url ?? null,
+      batch: this.batch(),
       priceUsd: this.priceUsd(),
     });
     this.prompt.set('');

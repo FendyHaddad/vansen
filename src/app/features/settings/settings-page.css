@@ -50,6 +50,7 @@
 
 .balance-chip {
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
   font-weight: 650;
   font-size: 0.875rem;
   padding: 4px 12px;
@@ -61,17 +62,17 @@
 .settings-main {
   flex: 1;
   display: grid;
-  gap: 32px;
+  gap: 40px;
   grid-template-columns: 1fr;
   width: 100%;
-  max-width: 1000px;
+  max-width: 1060px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 40px 24px 80px;
 }
 
-@media (min-width: 760px) {
+@media (min-width: 800px) {
   .settings-main {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
     align-items: start;
   }
 }
@@ -81,37 +82,76 @@
   flex-direction: row;
   gap: 4px;
   position: sticky;
-  top: 88px;
+  top: 92px;
+  overflow-x: auto;
 }
 
-@media (min-width: 760px) {
+@media (min-width: 800px) {
   .tab-nav {
     flex-direction: column;
   }
 }
 
 .tab-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
   text-align: left;
-  padding: 8px 12px;
-  border: none;
-  border-radius: calc(var(--radius) - 4px);
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
-  font-weight: 550;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
-    color 0.12s ease;
+    color 0.12s ease,
+    border-color 0.12s ease;
+  white-space: nowrap;
 }
 
 .tab-link:hover {
   color: var(--foreground);
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
 }
 
 .tab-active {
-  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  background: var(--card);
+  border-color: var(--border);
   color: var(--foreground);
+}
+
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: calc(var(--radius) - 4px);
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  flex-shrink: 0;
+}
+
+.tab-active .tab-icon {
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+
+.tab-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tab-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.tab-hint {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
 }
 
 .tab-content {

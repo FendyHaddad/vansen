@@ -1,13 +1,19 @@
 .tab {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
+}
+
+.tab-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .tab-title {
-  font-size: 1.25rem;
+  font-size: 1.375rem;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .muted {
@@ -22,10 +28,10 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
-  padding: 20px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .panel-title {
@@ -36,43 +42,75 @@
 .id-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
 .avatar-big {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--muted);
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--primary) 55%, var(--muted)),
+    color-mix(in oklch, var(--primary) 15%, var(--muted))
+  );
+  color: var(--primary-foreground);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 650;
-  font-size: 1.125rem;
+  font-weight: 700;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.id-text {
+  min-width: 0;
 }
 
 .id-email {
-  font-weight: 600;
+  font-weight: 650;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.form-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: 360px;
+.divider {
+  height: 1px;
+  background: color-mix(in oklch, var(--border) 60%, transparent);
 }
 
-.save-row {
+.setting-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.setting-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 220px;
+  flex: 1;
+}
+
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.name-control input {
+  width: 220px;
 }
 
 .danger-panel {
-  border-color: color-mix(in oklch, var(--loss) 45%, var(--border));
+  border-color: color-mix(in oklch, var(--loss) 40%, var(--border));
+  background: color-mix(in oklch, var(--loss) 4%, var(--card));
 }
 
-.danger-btn {
-  align-self: flex-start;
+.danger-title {
+  color: var(--loss);
 }

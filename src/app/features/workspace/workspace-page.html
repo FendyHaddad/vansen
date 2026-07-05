@@ -1,36 +1,66 @@
-<div class="workspace">
-  <header class="ws-header">
-    <a routerLink="/app" class="ws-brand">Vansen</a>
-    <div class="ws-header-right">
-      <span class="balance-chip" [class.balance-low]="balanceUsd() < 1">
-        ${{ balanceUsd() | number: '1.2-2' }}
-      </span>
-      <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-        Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
-      </span>
-      <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
+<div class="shell">
+  <aside class="sidebar">
+    <div class="side-head">
+      <a routerLink="/app" class="ws-brand">Vansen</a>
+      <span class="side-sub">Workspace</span>
     </div>
-  </header>
 
-  <main class="ws-main">
-    <aside class="generator">
+    <div class="side-scroll">
       <app-settings-rail
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
       />
-    </aside>
+    </div>
 
-    <section class="library">
+    <div class="side-foot">
+      <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
+      <div class="side-user">
+        <span class="side-user-name">{{ user()?.displayName || 'Creator' }}</span>
+        <span class="side-user-email">{{ user()?.email }}</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <div class="crumbs">
+        <span class="crumb-root">Workspace</span>
+        <span class="crumb-sep">›</span>
+        <span class="crumb-current">Library</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search-box">
+          <ng-icon name="lucideSearch" size="14" />
+          <input
+            type="search"
+            placeholder="Search your library..."
+            [value]="searchTerm()"
+            (input)="searchTerm.set($any($event.target).value)"
+          />
+        </div>
+        <span class="balance-chip" [class.balance-low]="balanceUsd() < 1">
+          ${{ balanceUsd() | number: '1.2-2' }}
+        </span>
+        <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
+          Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
+        </span>
+      </div>
+    </header>
+
+    <main class="content">
       @if (pickingReference()) {
         <div class="pick-banner">
           Choosing a reference image — click any image, or
-          <button type="button" class="linkish" (click)="pickingReference.set(false)">cancel</button>
+          <button type="button" class="linkish" (click)="pickingReference.set(false)">
+            cancel
+          </button>
         </div>
       }
       <app-library-grid
         [items]="generations()"
         [pickMode]="pickingReference()"
         [samplePrompts]="samplePrompts"
+        [search]="searchTerm()"
         (picked)="onReferencePicked($event)"
         (opened)="onOpened($event)"
         (download)="onDownload($event)"
@@ -39,8 +69,8 @@
         (edit)="onEdit($event)"
         (promptPicked)="usePrompt($event)"
       />
-    </section>
-  </main>
+    </main>
+  </div>
 
   @if (openedItem(); as opened) {
     <app-detail-overlay

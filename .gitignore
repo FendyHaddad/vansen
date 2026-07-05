@@ -42,3 +42,36 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# --- Secrets & environment (never commit) ---
+.env
+.env.*
+!.env.example
+*.local
+src/environments/environment.local.ts
+
+# API keys / certificates
+*.pem
+*.key
+*.p12
+secrets/
+credentials/
+
+# Supabase — local state & secrets stay out; config.toml and migrations stay IN
+supabase/.env
+supabase/.env.*
+supabase/.temp/
+supabase/.branches/
+supabase/functions/**/.env
+supabase/seed-secrets.sql
+
+# Stripe
+stripe-webhook-secret*
+.stripe/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Build artifacts & logs
+*.log
+.angular/

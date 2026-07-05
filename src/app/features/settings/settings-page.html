@@ -22,7 +22,13 @@
           [class.tab-active]="active() === tab.id"
           (click)="active.set(tab.id)"
         >
-          {{ tab.label }}
+          <span class="tab-icon">
+            <ng-icon [name]="tab.icon" size="16" />
+          </span>
+          <span class="tab-text">
+            <span class="tab-label">{{ tab.label }}</span>
+            <span class="tab-hint">{{ tab.hint }}</span>
+          </span>
         </button>
       }
     </nav>

@@ -1,7 +1,7 @@
 .og {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .og-disabled {
@@ -25,34 +25,104 @@
   letter-spacing: 0;
 }
 
-.og-chips {
+.og-trigger {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.og-chip {
-  padding: 6px 12px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
   border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 4px);
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 8px 10px;
+  font-size: 0.8125rem;
+  font-weight: 550;
   cursor: pointer;
-  transition:
-    border-color 0.12s ease,
-    color 0.12s ease;
+  transition: border-color 0.12s ease;
 }
 
-.og-chip:hover {
+.og-trigger:hover {
   border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
 }
 
-.og-active {
-  border-color: var(--primary);
-  color: var(--foreground);
+.og-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.og-chevron {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.og-tag {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.og-menu {
+  min-width: 264px;
+  max-width: 320px;
+  padding: 4px;
+}
+
+.og-item {
+  padding: 8px 10px;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.og-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
+.og-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.og-item-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.og-check {
+  margin-left: auto;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.og-item-desc {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  white-space: normal;
+}
+
+.ratio-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.ratio-icon {
+  display: inline-block;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.75;
 }
 
 .og-na {

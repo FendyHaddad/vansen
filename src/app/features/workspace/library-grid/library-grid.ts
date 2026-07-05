@@ -27,6 +27,7 @@ export class LibraryGrid {
   readonly items = input.required<GenerationItem[]>();
   readonly pickMode = input(false);
   readonly samplePrompts = input<string[]>([]);
+  readonly search = input('');
 
   readonly opened = output<string>();
   readonly picked = output<string>();
@@ -49,7 +50,11 @@ export class LibraryGrid {
 
   readonly visible = computed(() => {
     const f = this.filter();
+    const q = this.search().trim().toLowerCase();
     return this.items().filter((i) => {
+      if (q && !i.prompt.toLowerCase().includes(q) && !i.familyName.toLowerCase().includes(q)) {
+        return false;
+      }
       if (f === 'all') return true;
       if (f === 'image') return i.kind === 'image' && (i.op === 'generate' || i.op === 'variation');
       if (f === 'video') return i.kind === 'video';

@@ -5,21 +5,57 @@
       <app-hint [text]="axisTooltip()"><span class="og-info">ⓘ</span></app-hint>
     }
   </span>
+
   @if (options()?.length) {
-    <div class="og-chips">
-      @for (option of options()!; track option.value) {
-        <app-hint [text]="option.tooltip">
-          <button
-            type="button"
-            class="og-chip"
-            [class.og-active]="selected() === option.value"
-            (click)="changed.emit(option.value)"
-          >
-            {{ option.label }}
-          </button>
-        </app-hint>
+    <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="menu" align="start">
+      @if (selectedOption(); as sel) {
+        @if (ratioBox(sel); as box) {
+          <span class="ratio-icon-wrap">
+            <!-- data-driven shape: per-ratio width/height cannot come from a stylesheet class -->
+            <span class="ratio-icon" [style.width.px]="box.w" [style.height.px]="box.h"></span>
+          </span>
+        }
+        <span class="og-trigger-label">{{ sel.label }}</span>
+        @if (sel.tag) {
+          <span class="og-tag">{{ sel.tag }}</span>
+        }
       }
-    </div>
+      <ng-icon name="lucideChevronDown" size="13" class="og-chevron" />
+    </button>
+
+    <ng-template #menu>
+      <div hlmDropdownMenu class="og-menu">
+        @for (option of options()!; track option.value) {
+          <button
+            hlmDropdownMenuItem
+            class="og-item"
+            (triggered)="changed.emit(option.value)"
+          >
+            <span class="og-item-main">
+              <span class="og-item-head">
+                @if (ratioBox(option); as box) {
+                  <span class="ratio-icon-wrap">
+                    <span
+                      class="ratio-icon"
+                      [style.width.px]="box.w"
+                      [style.height.px]="box.h"
+                    ></span>
+                  </span>
+                }
+                <span class="og-item-label">{{ option.label }}</span>
+                @if (option.tag) {
+                  <span class="og-tag">{{ option.tag }}</span>
+                }
+                @if (selected() === option.value) {
+                  <ng-icon name="lucideCheck" size="13" class="og-check" />
+                }
+              </span>
+              <span class="og-item-desc">{{ option.tooltip }}</span>
+            </span>
+          </button>
+        }
+      </div>
+    </ng-template>
   } @else {
     <app-hint [text]="disabledReason()"><span class="og-na">Not available</span></app-hint>
   }

@@ -8,7 +8,8 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
-import { HlmButton } from '@spartan-ng/helm/button';
+import { NgIcon, provideIcons } from '@ng-icons/core';
+import { lucideSearch } from '@ng-icons/lucide';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
@@ -34,13 +35,14 @@ const SAMPLE_PROMPTS = [
   imports: [
     DecimalPipe,
     RouterLink,
-    HlmButton,
+    NgIcon,
     HlmBadge,
     ProfileMenu,
     SettingsRail,
     LibraryGrid,
     DetailOverlay,
   ],
+  providers: [provideIcons({ lucideSearch })],
 })
 export class WorkspacePage {
   private readonly auth = inject(AuthService);
@@ -59,6 +61,9 @@ export class WorkspacePage {
 
   /** True while the user is choosing a library item as edit reference. */
   readonly pickingReference = signal(false);
+
+  /** Top-bar library search. */
+  readonly searchTerm = signal('');
 
   /** Open item in the detail overlay, null = closed. */
   readonly openedId = signal<string | null>(null);
@@ -80,19 +85,24 @@ export class WorkspacePage {
       return;
     }
     const op = req.referenceId || req.referenceUrl ? 'edit' : 'generate';
-    if (!this.ledger.charge(op, req.priceUsd, req.family.id, req.family.name)) return;
-    this.store.add({
-      kind: req.family.kind,
-      familyId: req.family.id,
-      familyName: req.family.name,
-      op,
-      prompt: req.prompt,
-      settings: req.settings,
-      priceUsd: req.priceUsd,
-      // Edits reuse the reference image so provenance is visible in the stub
-      mediaUrl: op === 'edit' && req.referenceUrl ? req.referenceUrl : this.store.placeholderFor(),
-      parentId: req.referenceId ?? undefined,
-    });
+    const note = req.batch > 1 ? `${req.family.name} ×${req.batch}` : req.family.name;
+    if (!this.ledger.charge(op, req.priceUsd, req.family.id, note)) return;
+    const unitPrice = req.priceUsd / req.batch;
+    for (let i = 0; i < req.batch; i++) {
+      this.store.add({
+        kind: req.family.kind,
+        familyId: req.family.id,
+        familyName: req.family.name,
+        op,
+        prompt: req.prompt,
+        settings: req.settings,
+        priceUsd: unitPrice,
+        // Edits reuse the reference image so provenance is visible in the stub
+        mediaUrl:
+          op === 'edit' && req.referenceUrl ? req.referenceUrl : this.store.placeholderFor(),
+        parentId: req.referenceId ?? undefined,
+      });
+    }
     this.rail().setReference(null);
   }
 

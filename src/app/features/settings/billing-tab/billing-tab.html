@@ -1,10 +1,14 @@
 <div class="tab">
-  <h2 class="tab-title">Billing</h2>
+  <header class="tab-head">
+    <h2 class="tab-title">Billing</h2>
+    <p class="muted">Balance, Studio membership, and every transaction.</p>
+  </header>
 
   <div class="card-row">
     <div class="panel balance-panel">
-      <span class="muted small">Generation balance</span>
+      <span class="eyebrow">Generation balance</span>
       <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
+      <p class="muted small">Never expires while Studio is active.</p>
       <div class="topup-row">
         @for (amount of topUpAmounts; track amount) {
           <button hlmBtn size="sm" variant="outline" (click)="topUp(amount)">
@@ -16,7 +20,7 @@
 
     <div class="panel studio-panel">
       <div class="studio-head">
-        <span class="muted small">Studio</span>
+        <span class="eyebrow">Studio</span>
         <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
           {{ studioActive() ? 'Active' : 'Lapsed' }}
         </span>
@@ -28,7 +32,7 @@
         @if (renewsAt(); as renews) {
           <p class="muted small">Renews {{ renews | date: 'mediumDate' }}</p>
         }
-        <button hlmBtn size="sm" variant="outline" class="studio-btn" (click)="cancelStudio()">
+        <button hlmBtn size="sm" variant="ghost" class="studio-btn" (click)="cancelStudio()">
           Cancel Studio
         </button>
       } @else {
@@ -42,13 +46,26 @@
     </div>
   </div>
 
-  <div class="panel">
-    <h3 class="panel-title">Transactions</h3>
+  <div class="panel ledger-panel">
+    <div class="panel-head">
+      <h3 class="panel-title">Transactions</h3>
+      <span class="muted small">{{ entries().length }} entries</span>
+    </div>
     <div class="ledger-table">
+      <div class="ledger-row ledger-header">
+        <span>Date</span>
+        <span>Type</span>
+        <span>Detail</span>
+        <span class="ledger-amount-col">Amount</span>
+      </div>
       @for (entry of entries(); track entry.id) {
         <div class="ledger-row">
           <span class="ledger-date muted">{{ entry.at | date: 'MMM d, HH:mm' }}</span>
-          <span class="ledger-type">{{ typeLabel(entry.type) }}</span>
+          <span>
+            <span class="type-badge" [class]="'type-' + entry.type">
+              {{ typeLabel(entry.type) }}
+            </span>
+          </span>
           <span class="ledger-family muted">{{ entry.note ?? familyName(entry.familyId) }}</span>
           <span class="ledger-amount" [class.credit]="entry.amountUsd > 0">
             {{ entry.amountUsd > 0 ? '+' : '−' }}${{ abs(entry.amountUsd) | number: '1.2-2' }}

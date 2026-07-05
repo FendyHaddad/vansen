@@ -1,13 +1,19 @@
 .tab {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
+}
+
+.tab-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .tab-title {
-  font-size: 1.25rem;
+  font-size: 1.375rem;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 .muted {
@@ -22,17 +28,31 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
-  padding: 20px;
+  padding: 8px 22px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
 }
 
-.pref-row {
+.divider {
+  height: 1px;
+  background: color-mix(in oklch, var(--border) 55%, transparent);
+}
+
+.pref-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 0;
+  flex-wrap: wrap;
+}
+
+.pref-text {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-width: 360px;
+  gap: 3px;
+  min-width: 220px;
+  flex: 1;
 }
 
 .pref-select {
@@ -42,9 +62,20 @@
   color: var(--foreground);
   padding: 8px 10px;
   font-size: 0.875rem;
+  min-width: 180px;
 }
 
 .pref-select:focus {
   outline: 2px solid color-mix(in oklch, var(--ring) 60%, transparent);
   outline-offset: 1px;
+}
+
+.threshold-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.threshold-input {
+  min-width: 110px;
 }

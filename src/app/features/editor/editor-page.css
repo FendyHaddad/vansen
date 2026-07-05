@@ -54,6 +54,7 @@
 
 .balance-chip {
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
   font-weight: 650;
   font-size: 0.875rem;
   padding: 4px 12px;
@@ -68,9 +69,7 @@
   gap: 24px;
   grid-template-columns: 1fr;
   width: 100%;
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 24px;
+  padding: 20px;
 }
 
 @media (min-width: 960px) {
