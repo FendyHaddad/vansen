@@ -10,11 +10,9 @@
       <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
       <p class="muted small">Never expires while Studio is active.</p>
       <div class="topup-row">
-        @for (amount of topUpAmounts; track amount) {
-          <button hlmBtn size="sm" variant="outline" (click)="topUp(amount)">
-            +${{ amount }}
-          </button>
-        }
+        <app-hint text="Top-ups and Studio checkout arrive with Stripe — phase 2 of the MVP.">
+          <span class="phase-chip">Top-ups arrive with Stripe · phase 2</span>
+        </app-hint>
       </div>
     </div>
 
@@ -22,26 +20,21 @@
       <div class="studio-head">
         <span class="eyebrow">Studio</span>
         <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-          {{ studioActive() ? 'Active' : 'Lapsed' }}
+          {{ studioActive() ? 'Active' : 'Inactive' }}
         </span>
       </div>
       <p class="small">
         $5/month — keeps your library online, prompts saved, and your balance alive.
       </p>
-      @if (studioActive()) {
-        @if (renewsAt(); as renews) {
-          <p class="muted small">Renews {{ renews | date: 'mediumDate' }}</p>
-        }
-        <button hlmBtn size="sm" variant="ghost" class="studio-btn" (click)="cancelStudio()">
-          Cancel Studio
-        </button>
-      } @else {
+      @if (subscription(); as sub) {
         <p class="muted small">
-          Lapsed — 30-day grace to download, then the library is deleted.
+          {{ sub.plan }} · {{ sub.status }}
+          @if (sub.currentPeriodEnd) {
+            · renews {{ sub.currentPeriodEnd | date: 'mediumDate' }}
+          }
         </p>
-        <button hlmBtn size="sm" class="studio-btn" (click)="reactivateStudio()">
-          Reactivate · $5
-        </button>
+      } @else {
+        <p class="muted small">No membership yet — activation comes with Stripe (phase 2).</p>
       }
     </div>
   </div>
@@ -60,7 +53,7 @@
       </div>
       @for (entry of entries(); track entry.id) {
         <div class="ledger-row">
-          <span class="ledger-date muted">{{ entry.at | date: 'MMM d, HH:mm' }}</span>
+          <span class="ledger-date muted">{{ entry.createdAt | date: 'MMM d, HH:mm' }}</span>
           <span>
             <span class="type-badge" [class]="'type-' + entry.type">
               {{ typeLabel(entry.type) }}
@@ -72,7 +65,7 @@
           </span>
         </div>
       } @empty {
-        <p class="muted small">No transactions yet.</p>
+        <p class="muted small">No transactions yet — your first top-up lands here.</p>
       }
     </div>
   </div>

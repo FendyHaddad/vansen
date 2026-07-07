@@ -71,15 +71,24 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Google',
     logo: '/logos/google.svg',
     kind: 'image',
-    blurb: 'Fast, cheap, great all-rounder. The default choice.',
+    blurb: 'Google’s all-rounder — Fast, Standard, and Pro tiers.',
     capabilities: {
       versions: [
-        { value: '1', label: '1', tooltip: 'Gemini 2.5 Flash Image — cheapest, ~1K output only.' },
         {
-          value: '2',
-          label: '2',
+          value: 'fast',
+          label: 'Fast',
+          tooltip: 'Gemini 2.5 Flash Image — quickest and cheapest, ~1K output only.',
+        },
+        {
+          value: 'standard',
+          label: 'Standard',
           tag: 'Latest',
           tooltip: 'Gemini 3.1 Flash Image — current generation, up to 4K.',
+        },
+        {
+          value: 'pro',
+          label: 'Pro',
+          tooltip: 'Gemini 3 Pro Image — top fidelity for complex scenes and text.',
         },
       ],
       aspectRatios: AR_IMAGE,
@@ -91,28 +100,11 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       imageInput: true,
       maskInput: false,
     },
-    providerCost: (s) =>
-      s.version === '1'
-        ? 0.039
-        : ({ '1K': 0.067, '2K': 0.101, '4K': 0.151 }[s.resolution ?? '1K'] ?? 0.067),
-  },
-  {
-    id: 'nano-banana-pro',
-    name: 'Nano Banana Pro',
-    provider: 'Google',
-    logo: '/logos/google.svg',
-    kind: 'image',
-    blurb: 'Gemini 3 Pro Image — top fidelity for complex scenes and text.',
-    capabilities: {
-      aspectRatios: AR_IMAGE,
-      resolutions: [
-        { value: '2K', label: '1K–2K', tooltip: 'Same price for 1K and 2K output on Pro.' },
-        { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] },
-      ],
-      imageInput: true,
-      maskInput: false,
+    providerCost: (s) => {
+      if (s.version === 'fast') return 0.039;
+      if (s.version === 'pro') return s.resolution === '4K' ? 0.24 : 0.134;
+      return { '1K': 0.067, '2K': 0.101, '4K': 0.151 }[s.resolution ?? '1K'] ?? 0.067;
     },
-    providerCost: (s) => (s.resolution === '4K' ? 0.24 : 0.134),
   },
   {
     id: 'gpt-image',

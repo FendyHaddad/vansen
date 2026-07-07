@@ -30,8 +30,7 @@
     <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
       <img [src]="family().logo" [alt]="family().provider" class="family-logo" />
       <span class="model-trigger-name">{{ family().name }}</span>
-      <span class="model-trigger-price">from ${{ minPriceOf(family()) | number: '1.2-2' }}</span>
-      <ng-icon name="lucideChevronDown" size="14" />
+      <ng-icon name="lucideChevronDown" size="14" class="model-chevron" />
     </button>
     <ng-template #modelMenu>
       <div hlmDropdownMenu class="model-menu">
@@ -45,7 +44,6 @@
             <span class="model-item-top">
               <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
               <span class="model-item-name">{{ f.name }}</span>
-              <span class="model-item-price">from ${{ minPriceOf(f) | number: '1.2-2' }}</span>
             </span>
             <span class="model-item-blurb">{{ f.blurb }}</span>
           </button>
@@ -88,17 +86,12 @@
       </div>
     } @else {
       <div class="ref-actions">
-        <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput">
-          <ng-icon name="lucideImagePlus" size="16" />
-          Upload
-          <input
-            type="file"
-            accept="image/*"
-            class="ref-input"
-            [disabled]="!family().capabilities.imageInput"
-            (change)="onFilePicked($event)"
-          />
-        </label>
+        <app-hint text="Uploading your own reference arrives with real generation (phase 3). Pick from your library for now.">
+          <span class="ref-drop ref-blocked">
+            <ng-icon name="lucideImagePlus" size="16" />
+            Upload
+          </span>
+        </app-hint>
         <button
           type="button"
           class="ref-drop"

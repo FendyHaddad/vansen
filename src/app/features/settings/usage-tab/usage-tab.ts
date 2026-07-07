@@ -20,13 +20,17 @@ interface UsageRow {
 export class UsageTab {
   private readonly ledger = inject(LedgerService);
 
+  constructor() {
+    if (!this.ledger.entriesLoaded()) void this.ledger.loadEntries();
+  }
+
   private readonly monthDebits = computed(() => {
     const now = new Date();
     return this.ledger
       .entries()
       .filter((e) => e.amountUsd < 0 && e.type !== 'studio_fee')
       .filter((e) => {
-        const d = new Date(e.at);
+        const d = new Date(e.createdAt);
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
       });
   });
@@ -46,7 +50,9 @@ export class UsageTab {
     }),
   );
 
-  private rowsBy(keyOf: (e: { type: string; familyId?: string; amountUsd: number }) => string): UsageRow[] {
+  private rowsBy(
+    keyOf: (e: { type: string; familyId?: string | null; amountUsd: number }) => string,
+  ): UsageRow[] {
     const groups = new Map<string, { count: number; spend: number }>();
     for (const e of this.monthDebits()) {
       const key = keyOf(e);

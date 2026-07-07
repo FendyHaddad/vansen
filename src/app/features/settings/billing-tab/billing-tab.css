@@ -89,6 +89,16 @@
   margin-top: 4px;
 }
 
+.phase-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
 .studio-head {
   display: flex;
   align-items: center;

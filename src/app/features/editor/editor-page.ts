@@ -23,6 +23,8 @@ import {
 import { HlmButton } from '@spartan-ng/helm/button';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
+import { ApiError } from '../../core/api/api-service';
+import { GenerationOp } from '../../core/enums';
 import { GenerationStore } from '../../core/generations/generation-store';
 import {
   FamilyOption,
@@ -111,13 +113,16 @@ export class EditorPage {
   );
 
   constructor() {
-    // Unknown/deleted id → back to workspace
+    if (!this.store.loaded()) void this.store.load();
+    // Unknown/deleted id → back to workspace (only once the library is loaded)
     effect(() => {
-      if (this.routeId() !== null && !this.item()) {
+      if (this.store.loaded() && this.routeId() !== null && !this.item()) {
         this.router.navigate(['/app']);
       }
     });
   }
+
+  readonly notice = signal('');
 
   readonly versionOptions = computed<FamilyOption[] | null>(
     () => this.family().capabilities.versions ?? null,
@@ -134,6 +139,9 @@ export class EditorPage {
     const list = f.capabilities.resolutions;
     if (!list) return null;
     if (f.id === 'gpt-image' && this.settings().version !== '2') {
+      return list.filter((o) => o.value === '1K');
+    }
+    if (f.id === 'nano-banana' && this.settings().version === 'fast') {
       return list.filter((o) => o.value === '1K');
     }
     return list;
@@ -159,48 +167,45 @@ export class EditorPage {
     return `${axis} is not supported by ${this.family().name}.`;
   }
 
-  applyEdit(): void {
+  async applyEdit(): Promise<void> {
     const source = this.item();
     if (!source || !this.canApply()) return;
-    const price = this.priceUsd();
-    // Mask exported here would be sent to the provider once real dispatch lands
-    const mask = this.maskSupported() ? this.maskCanvas()?.exportMaskPng() : null;
-    const note = mask ? `${this.family().name} · masked edit` : `${this.family().name} · edit`;
-    if (!this.ledger.charge('edit', price, this.family().id, note)) return;
-    const newId = this.store.add({
-      kind: 'image',
-      familyId: this.family().id,
-      familyName: this.family().name,
-      op: 'edit',
-      prompt: this.prompt().trim(),
-      settings: { ...this.settings() },
-      priceUsd: price,
-      // Stub: edits reuse the source image so the provenance chain is visible
-      mediaUrl: source.mediaUrl,
-      parentId: source.id,
-    });
-    this.prompt.set('');
-    this.maskCanvas()?.clear();
-    this.router.navigate(['/app/edit', newId]);
+    // Mask export rides along once real dispatch lands (phase 3)
+    if (this.maskSupported()) this.maskCanvas()?.exportMaskPng();
+    try {
+      const items = await this.store.create({
+        familyId: this.family().id,
+        op: GenerationOp.Edit,
+        prompt: this.prompt().trim(),
+        settings: { ...this.settings() },
+        batch: 1,
+        parentId: source.id,
+      });
+      this.prompt.set('');
+      this.maskCanvas()?.clear();
+      this.notice.set('');
+      if (items[0]) this.router.navigate(['/app/edit', items[0].id]);
+    } catch (e) {
+      this.notice.set(e instanceof ApiError ? e.message : 'Edit failed');
+    }
   }
 
-  upscale(): void {
+  async upscale(): Promise<void> {
     const source = this.item();
     if (!source) return;
-    const price = upscaleUserPriceUsd();
-    if (!this.ledger.charge('upscale', price, 'magnific', 'Magnific Precision v2')) return;
-    const newId = this.store.add({
-      kind: 'image',
-      familyId: 'magnific',
-      familyName: 'Magnific Precision v2',
-      op: 'upscale',
-      prompt: source.prompt,
-      settings: source.settings,
-      priceUsd: price,
-      mediaUrl: source.mediaUrl,
-      parentId: source.id,
-    });
-    this.router.navigate(['/app/edit', newId]);
+    try {
+      const items = await this.store.create({
+        op: GenerationOp.Upscale,
+        prompt: source.prompt,
+        settings: source.settings,
+        batch: 1,
+        parentId: source.id,
+      });
+      this.notice.set('');
+      if (items[0]) this.router.navigate(['/app/edit', items[0].id]);
+    } catch (e) {
+      this.notice.set(e instanceof ApiError ? e.message : 'Upscale failed');
+    }
   }
 
   download(): void {
@@ -219,11 +224,11 @@ export class EditorPage {
   }
 
   topUp(): void {
-    this.ledger.add({ type: 'topup', amountUsd: 20, note: 'Top-up' });
+    this.notice.set('Top-ups arrive with Stripe in phase 2.');
   }
 
-  signOut(): void {
-    this.auth.signOut();
+  async signOut(): Promise<void> {
+    await this.auth.signOut();
     this.router.navigate(['/']);
   }
 }

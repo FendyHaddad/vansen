@@ -134,6 +134,10 @@ export class SettingsRail {
     if (f.id === 'gpt-image' && this.settings().version !== '2') {
       return list.filter((o) => o.value === '1K');
     }
+    // Nano Banana Fast outputs ~1K only
+    if (f.id === 'nano-banana' && this.settings().version === 'fast') {
+      return list.filter((o) => o.value === '1K');
+    }
     // Veo Fast has no 4K
     if (f.id === 'veo' && this.settings().version === 'fast') {
       return list.filter((o) => o.value !== '4K');
@@ -171,32 +175,6 @@ export class SettingsRail {
   readonly canGenerate = computed(
     () => this.prompt().trim().length > 0 && !this.insufficient(),
   );
-
-  minPriceOf(family: ModelFamily): number {
-    const c = family.capabilities;
-    const versions = c.versions?.map((v) => v.value) ?? [undefined];
-    const resolutions = c.resolutions?.map((r) => r.value) ?? [undefined];
-    const qualities = c.qualities?.map((q) => q.value) ?? [undefined];
-    const durationS = c.durations ? Math.min(...c.durations) : undefined;
-    let min = Infinity;
-    for (const version of versions) {
-      for (const resolution of resolutions) {
-        for (const quality of qualities) {
-          min = Math.min(
-            min,
-            userPriceUsd(family, {
-              version,
-              aspectRatio: c.aspectRatios[0],
-              resolution,
-              quality,
-              durationS,
-            }),
-          );
-        }
-      }
-    }
-    return min;
-  }
 
   notSupported(axis: string): string {
     return `${axis} is not supported by ${this.family().name}.`;

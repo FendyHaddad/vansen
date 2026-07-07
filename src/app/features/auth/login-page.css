@@ -49,3 +49,90 @@
   background-image: radial-gradient(oklch(1 0 0 / 7%) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: currentColor;
+  text-decoration: none;
+  font-size: 1.05rem;
+}
+
+.site-brand::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  background: url('https://assets.vankode.com/app-logo.svg') center / contain no-repeat;
+}
+
+.google-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.google-btn:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+
+.google-logo {
+  height: 16px;
+  width: auto;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in oklch, var(--border) 70%, transparent);
+}
+
+.confirm-note {
+  border: 1px solid color-mix(in oklch, var(--profit) 50%, var(--border));
+  background: color-mix(in oklch, var(--profit) 8%, transparent);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 10px 14px;
+  font-size: 0.8125rem;
+  margin-bottom: 16px;
+}
+
+.error-line {
+  font-size: 0.8125rem;
+  color: var(--loss);
+}
+
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}

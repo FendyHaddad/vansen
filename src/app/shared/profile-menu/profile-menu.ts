@@ -19,7 +19,7 @@ export class ProfileMenu {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
 
-  readonly email = computed(() => this.auth.user()?.email ?? '');
+  readonly email = this.auth.userEmail;
   readonly initial = computed(() => (this.email().charAt(0) || '?').toUpperCase());
   readonly balanceUsd = this.ledger.balanceUsd;
 

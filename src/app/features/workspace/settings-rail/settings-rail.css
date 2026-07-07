@@ -93,14 +93,10 @@
   white-space: nowrap;
 }
 
-.model-trigger-price {
+.model-chevron {
   margin-left: auto;
-  font-size: 0.6875rem;
-  font-weight: 500;
   color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-app-mono);
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .family-logo {
@@ -139,15 +135,6 @@
 .model-item-name {
   font-size: 0.8125rem;
   font-weight: 600;
-}
-
-.model-item-price {
-  margin-left: auto;
-  font-size: 0.6875rem;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-app-mono);
-  white-space: nowrap;
 }
 
 .model-item-blurb {

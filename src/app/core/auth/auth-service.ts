@@ -1,67 +1,54 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { LedgerService } from '../ledger/ledger-service';
+import { Injectable, computed, signal } from '@angular/core';
+import { Session } from '@supabase/supabase-js';
+import { supabase } from '../supabase/supabase-client';
 
-export interface SessionUser {
-  email: string;
-  displayName?: string;
-  /** Studio membership keeps the library online and the balance alive. */
-  studioActive: boolean;
-  /** ISO timestamp of account creation (stub). */
-  since: string;
-}
-
-const STORAGE_KEY = 'vansen.session';
-
+/**
+ * Real Supabase auth. Session/SSO only — profile data (display name, studio,
+ * balance) lives in the API-backed stores, not here.
+ */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly ledger = inject(LedgerService);
-  private readonly session = signal<SessionUser | null>(restoreSession());
+  private readonly sessionSig = signal<Session | null>(null);
+  private readonly readyPromise: Promise<void>;
 
-  readonly user = this.session.asReadonly();
-  readonly isAuthed = computed(() => this.session() !== null);
-  readonly studioActive = computed(() => this.session()?.studioActive ?? false);
+  readonly session = this.sessionSig.asReadonly();
+  readonly isAuthed = computed(() => this.sessionSig() !== null);
+  readonly userEmail = computed(() => this.sessionSig()?.user.email ?? '');
+  readonly userSince = computed(() => this.sessionSig()?.user.created_at ?? '');
 
-  signIn(email: string): void {
-    const user: SessionUser = { email, studioActive: true, since: new Date().toISOString() };
-    this.session.set(user);
-    persistSession(user);
-    // Stub: demo account starts with the $20 first top-up ($15 usable, Studio month included)
-    this.ledger.seedIfEmpty();
+  constructor() {
+    this.readyPromise = supabase.auth.getSession().then(({ data }) => {
+      this.sessionSig.set(data.session);
+    });
+    supabase.auth.onAuthStateChange((_event, session) => {
+      this.sessionSig.set(session);
+    });
   }
 
-  updateProfile(patch: Partial<Pick<SessionUser, 'displayName' | 'studioActive'>>): void {
-    const current = this.session();
-    if (!current) return;
-    const user = { ...current, ...patch };
-    this.session.set(user);
-    persistSession(user);
+  /** Guards await this so a page refresh restores the session before routing. */
+  whenReady(): Promise<void> {
+    return this.readyPromise;
   }
 
-  signOut(): void {
-    this.session.set(null);
-    persistSession(null);
+  async signInGoogle(): Promise<void> {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${location.origin}/app` },
+    });
+    if (error) throw new Error(error.message);
   }
-}
 
-function restoreSession(): SessionUser | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<SessionUser>;
-    // Older stub sessions (tier/credits/balance shapes) are invalid now
-    if (typeof parsed.email !== 'string' || typeof parsed.studioActive !== 'boolean') return null;
-    return { since: new Date().toISOString(), ...parsed } as SessionUser;
-  } catch {
-    return null;
+  async signInEmail(email: string, password: string): Promise<void> {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
   }
-}
 
-function persistSession(user: SessionUser | null): void {
-  if (typeof localStorage === 'undefined') return;
-  if (!user) {
-    localStorage.removeItem(STORAGE_KEY);
-    return;
+  async signUpEmail(email: string, password: string): Promise<void> {
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+
+  async signOut(): Promise<void> {
+    await supabase.auth.signOut();
+  }
 }

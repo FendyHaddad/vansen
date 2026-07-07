@@ -114,3 +114,7 @@
 .danger-title {
   color: var(--loss);
 }
+
+.error-text {
+  color: var(--loss);
+}

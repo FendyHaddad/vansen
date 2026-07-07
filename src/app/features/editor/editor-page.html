@@ -134,7 +134,10 @@
           Apply edit · ${{ priceUsd() | number: '1.2-2' }}
         </button>
         @if (insufficient()) {
-          <p class="insufficient">Balance too low — top up from the profile menu.</p>
+          <p class="insufficient">Balance too low — top-ups arrive with Stripe in phase 2.</p>
+        }
+        @if (notice()) {
+          <p class="insufficient">{{ notice() }}</p>
         }
       </aside>
 

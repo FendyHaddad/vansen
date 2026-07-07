@@ -1,118 +1,73 @@
-import { Injectable, signal } from '@angular/core';
-import { GenerationSettings, ModelKind } from '../catalog/model-families';
+import { Injectable, inject, signal } from '@angular/core';
+import { ApiService } from '../api/api-service';
+import {
+  CreateGenerationRequest,
+  CreateGenerationResponse,
+  GenerationDto,
+  GenerationsResponse,
+} from '../api/dtos';
+import { GenerationOp } from '../enums';
+import { LedgerService } from '../ledger/ledger-service';
 
-export type GenerationOp = 'generate' | 'edit' | 'upscale' | 'variation';
+export type { GenerationOp };
+export type GenerationItem = GenerationDto;
 
-export interface GenerationItem {
-  id: string;
-  at: string; // ISO timestamp
-  kind: ModelKind;
-  familyId: string;
-  familyName: string;
-  op: GenerationOp;
-  prompt: string;
-  settings: GenerationSettings;
-  priceUsd: number;
-  status: 'pending' | 'done';
-  mediaUrl: string;
-  parentId?: string;
-}
-
-const STORAGE_KEY = 'vansen.generations';
-
-/** Placeholder outputs until real generation wires in (all verified loadable). */
-const PLACEHOLDER_MEDIA = [
-  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=640&q=80',
-  'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=640&q=80',
-  'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=640&q=80',
-  'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=640&q=80',
-  'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=640&q=80',
-  'https://images.unsplash.com/photo-1483347756197-71ef80e95f73?w=640&q=80',
-];
-
+/** API-backed library. Server assigns prices, media, and ids. */
 @Injectable({ providedIn: 'root' })
 export class GenerationStore {
-  private readonly state = signal<GenerationItem[]>(restore());
-  private seedCounter = this.state().length;
+  private readonly api = inject(ApiService);
+  private readonly ledger = inject(LedgerService);
+
+  private readonly itemsSig = signal<GenerationDto[]>([]);
+  private readonly loadedSig = signal(false);
 
   /** Newest first. */
-  readonly items = this.state.asReadonly();
+  readonly items = this.itemsSig.asReadonly();
+  readonly loaded = this.loadedSig.asReadonly();
 
-  byId(id: string): GenerationItem | undefined {
-    return this.state().find((item) => item.id === id);
+  byId(id: string): GenerationDto | undefined {
+    return this.itemsSig().find((item) => item.id === id);
   }
 
   /** Ancestors (via parentId) + self + descendants, oldest first. */
-  chainFor(id: string): GenerationItem[] {
-    const all = this.state();
-    const chain: GenerationItem[] = [];
-    // walk up
+  chainFor(id: string): GenerationDto[] {
+    const all = this.itemsSig();
+    const chain: GenerationDto[] = [];
     let current = this.byId(id);
     while (current) {
       chain.unshift(current);
       current = current.parentId ? this.byId(current.parentId) : undefined;
     }
-    // walk down from id
     let frontier = [id];
     while (frontier.length) {
       const children = all.filter((i) => i.parentId && frontier.includes(i.parentId));
       chain.push(...children.filter((c) => !chain.includes(c)));
       frontier = children.map((c) => c.id);
     }
-    return chain.sort((a, b) => a.at.localeCompare(b.at));
+    return chain.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  add(item: Omit<GenerationItem, 'id' | 'at' | 'status'>): string {
-    const id = crypto.randomUUID();
-    const entry: GenerationItem = {
-      ...item,
-      id,
-      at: new Date().toISOString(),
-      status: 'pending',
-    };
-    this.state.update((list) => [entry, ...list]);
-    persist(this.state());
-    // Stub latency: real dispatch is an Edge Function + provider webhook/poll
-    setTimeout(() => {
-      this.state.update((list) =>
-        list.map((i) => (i.id === id ? { ...i, status: 'done' as const } : i)),
-      );
-      persist(this.state());
-    }, 1400);
-    return id;
+  async load(): Promise<void> {
+    const response = await this.api.get<GenerationsResponse>('/generations');
+    this.itemsSig.set(response.items);
+    this.loadedSig.set(true);
   }
 
-  remove(id: string): void {
-    this.state.update((list) => list.filter((i) => i.id !== id));
-    persist(this.state());
+  /** Charges on the server, prepends the created items, updates the balance. */
+  async create(request: CreateGenerationRequest): Promise<GenerationDto[]> {
+    const response = await this.api.post<CreateGenerationResponse>('/generations', request);
+    this.itemsSig.update((list) => [...response.items, ...list]);
+    this.ledger.setBalance(response.balanceUsd);
+    return response.items;
   }
 
-  clear(): void {
-    this.state.set([]);
-    persist([]);
+  async remove(id: string): Promise<void> {
+    await this.api.delete(`/generations/${id}`);
+    this.itemsSig.update((list) => list.filter((i) => i.id !== id));
   }
 
-  placeholderFor(seed?: number): string {
-    const n = seed ?? this.seedCounter++;
-    return PLACEHOLDER_MEDIA[Math.abs(n) % PLACEHOLDER_MEDIA.length];
+  reset(): void {
+    this.itemsSig.set([]);
+    this.loadedSig.set(false);
   }
-}
-
-function restore(): GenerationItem[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? (parsed as GenerationItem[]).map((i) => ({ ...i, status: 'done' as const }))
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function persist(items: GenerationItem[]): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }

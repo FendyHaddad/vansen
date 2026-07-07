@@ -8,9 +8,9 @@
     <div class="id-row">
       <span class="avatar-big">{{ initial() }}</span>
       <div class="id-text">
-        <p class="id-email">{{ user()?.displayName || user()?.email }}</p>
+        <p class="id-email">{{ profile()?.displayName || email() }}</p>
         <p class="muted small">
-          {{ user()?.email }} · member since {{ user()?.since | date: 'mediumDate' }}
+          {{ email() }} · member since {{ profile()?.createdAt | date: 'mediumDate' }}
         </p>
       </div>
     </div>
@@ -35,6 +35,9 @@
         </button>
       </div>
     </div>
+    @if (error()) {
+      <p class="small error-text">{{ error() }}</p>
+    }
   </div>
 
   <div class="panel danger-panel">

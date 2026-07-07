@@ -15,8 +15,8 @@
     <div class="side-foot">
       <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
       <div class="side-user">
-        <span class="side-user-name">{{ user()?.displayName || 'Creator' }}</span>
-        <span class="side-user-email">{{ user()?.email }}</span>
+        <span class="side-user-name">{{ displayName() || 'Creator' }}</span>
+        <span class="side-user-email">{{ userEmail() }}</span>
       </div>
     </div>
   </aside>
@@ -48,6 +48,14 @@
     </header>
 
     <main class="content">
+      @if (notice()) {
+        <div class="notice-banner">
+          {{ notice() }}
+          <button type="button" class="notice-close" aria-label="Dismiss" (click)="notice.set('')">
+            <ng-icon name="lucideX" size="13" />
+          </button>
+        </div>
+      }
       @if (pickingReference()) {
         <div class="pick-banner">
           Choosing a reference image — click any image, or

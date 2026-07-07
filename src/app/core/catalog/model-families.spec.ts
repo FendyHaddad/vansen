@@ -8,16 +8,27 @@ import {
 } from './model-families';
 
 describe('model families', () => {
-  it('has 5 image and 5 video families', () => {
-    expect(MODEL_FAMILIES.filter((f) => f.kind === 'image').length).toBe(5);
+  it('has 4 image and 5 video families', () => {
+    expect(MODEL_FAMILIES.filter((f) => f.kind === 'image').length).toBe(4);
     expect(MODEL_FAMILIES.filter((f) => f.kind === 'video').length).toBe(5);
   });
 
-  it('nano banana v1 flat cost, v2 priced by resolution', () => {
+  it('nano banana tiers: fast flat, standard by resolution, pro premium', () => {
     const nb = familyById('nano-banana')!;
-    expect(nb.providerCost({ version: '1', aspectRatio: '1:1' })).toBeCloseTo(0.039);
-    expect(nb.providerCost({ version: '2', aspectRatio: '1:1', resolution: '1K' })).toBeCloseTo(0.067);
-    expect(nb.providerCost({ version: '2', aspectRatio: '1:1', resolution: '4K' })).toBeCloseTo(0.151);
+    expect(nb.providerCost({ version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039);
+    expect(
+      nb.providerCost({ version: 'standard', aspectRatio: '1:1', resolution: '1K' }),
+    ).toBeCloseTo(0.067);
+    expect(
+      nb.providerCost({ version: 'standard', aspectRatio: '1:1', resolution: '4K' }),
+    ).toBeCloseTo(0.151);
+    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '2K' })).toBeCloseTo(0.134);
+    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '4K' })).toBeCloseTo(0.24);
+  });
+
+  it('nano banana defaults to the Standard (Latest) tier', () => {
+    const nb = familyById('nano-banana')!;
+    expect(defaultSettings(nb).version).toBe('standard');
   });
 
   it('gpt image priced by version x quality, v2 4K doubles', () => {
@@ -60,7 +71,7 @@ describe('model families', () => {
 
   it('user price applies 33% margin', () => {
     const nb = familyById('nano-banana')!;
-    expect(userPriceUsd(nb, { version: '1', aspectRatio: '1:1' })).toBeCloseTo(0.039 / 0.67);
+    expect(userPriceUsd(nb, { version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039 / 0.67);
     expect(upscaleUserPriceUsd()).toBeCloseTo(0.25 / 0.67);
     expect(upscaleUserPriceUsd(true)).toBeCloseTo(1.5 / 0.67);
   });

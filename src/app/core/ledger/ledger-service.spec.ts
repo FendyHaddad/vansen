@@ -1,39 +1,47 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { TestBed } from '@angular/core/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiService } from '../api/api-service';
 import { LedgerService } from './ledger-service';
 
 describe('LedgerService', () => {
-  beforeEach(() => localStorage.clear());
+  const apiMock = { get: vi.fn() };
 
-  it('seeds first topup once', () => {
-    const l = new LedgerService();
-    l.seedIfEmpty();
-    l.seedIfEmpty();
-    expect(l.balanceUsd()).toBeCloseTo(15);
-    expect(l.entries().length).toBe(2);
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ApiService, useValue: apiMock }],
+    });
+    apiMock.get.mockReset();
   });
 
-  it('charge debits and refuses overdraft', () => {
-    const l = new LedgerService();
-    l.seedIfEmpty();
-    expect(l.charge('generate', 0.1, 'nano-banana')).toBe(true);
-    expect(l.balanceUsd()).toBeCloseTo(14.9);
-    expect(l.charge('generate', 999)).toBe(false);
-    expect(l.balanceUsd()).toBeCloseTo(14.9);
+  it('starts at zero and takes server-pushed balances', () => {
+    const ledger = TestBed.inject(LedgerService);
+    expect(ledger.balanceUsd()).toBe(0);
+    ledger.setBalance(14.42);
+    expect(ledger.balanceUsd()).toBe(14.42);
   });
 
-  it('restores from localStorage', () => {
-    const a = new LedgerService();
-    a.seedIfEmpty();
-    a.charge('generate', 1);
-    const b = new LedgerService();
-    expect(b.balanceUsd()).toBeCloseTo(14);
+  it('loads entries from GET /ledger', async () => {
+    apiMock.get.mockResolvedValue({
+      entries: [
+        { id: '1', type: 'topup', amountUsd: 20, familyId: null, note: null, createdAt: 'now' },
+      ],
+    });
+    const ledger = TestBed.inject(LedgerService);
+    await ledger.loadEntries();
+    expect(apiMock.get).toHaveBeenCalledWith('/ledger');
+    expect(ledger.entries().length).toBe(1);
+    expect(ledger.entriesLoaded()).toBe(true);
   });
 
-  it('reset clears everything', () => {
-    const l = new LedgerService();
-    l.seedIfEmpty();
-    l.reset();
-    expect(l.entries().length).toBe(0);
-    expect(new LedgerService().entries().length).toBe(0);
+  it('reset clears everything', async () => {
+    apiMock.get.mockResolvedValue({ entries: [] });
+    const ledger = TestBed.inject(LedgerService);
+    ledger.setBalance(5);
+    await ledger.loadEntries();
+    ledger.reset();
+    expect(ledger.balanceUsd()).toBe(0);
+    expect(ledger.entries().length).toBe(0);
+    expect(ledger.entriesLoaded()).toBe(false);
   });
 });

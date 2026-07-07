@@ -60,7 +60,7 @@ export class LandingPage {
     {
       icon: 'lucideImage',
       title: 'Image generation',
-      body: 'Nano Banana, Nano Banana Pro, GPT Image, FLUX and Seedream — the top image models behind one prompt box.',
+      body: 'Nano Banana (Fast to Pro), GPT Image, FLUX and Seedream — the top image models behind one prompt box.',
     },
     {
       icon: 'lucideVideo',

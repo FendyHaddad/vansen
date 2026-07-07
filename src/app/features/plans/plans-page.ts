@@ -102,7 +102,7 @@ export class PlansPage {
     {
       name: 'Nano Banana image (1K)',
       kind: 'image',
-      price: userPriceUsd(familyById('nano-banana')!, { version: '2', aspectRatio: '1:1', resolution: '1K' }),
+      price: userPriceUsd(familyById('nano-banana')!, { version: 'standard', aspectRatio: '1:1', resolution: '1K' }),
     },
     {
       name: 'GPT Image 2 (medium, 1K)',

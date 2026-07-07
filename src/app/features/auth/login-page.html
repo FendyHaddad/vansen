@@ -5,13 +5,10 @@
     <div class="orb orb-three"></div>
     <div class="grain"></div>
     <div class="relative z-10 flex h-full flex-col justify-between p-10">
-      <a routerLink="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
-        <ng-icon name="lucideSparkles" size="20" />
-        Vansen
-      </a>
+      <a routerLink="/" class="site-brand">Vansen</a>
       <blockquote class="max-w-md">
         <p class="text-2xl font-medium leading-snug">
-          “Every model worth using, one prompt box, one credit balance.”
+          “Every model worth using, one prompt box, one balance.”
         </p>
         <footer class="artwork-caption mt-4 text-sm">
           Veo · Sora · Nano Banana · FLUX · Kling · Seedance
@@ -22,33 +19,75 @@
 
   <main class="flex items-center justify-center px-6 py-12">
     <div class="w-full max-w-sm">
-      <a routerLink="/" class="mb-8 flex items-center gap-2 text-lg font-semibold lg:hidden">
-        <ng-icon name="lucideSparkles" class="text-primary" size="20" />
-        Vansen
-      </a>
-      <h1 class="text-2xl font-semibold tracking-tight">Sign in</h1>
-      <p class="muted mt-1 text-sm">Enter your email to access your workspace.</p>
+      <a routerLink="/" class="site-brand mb-8 lg:hidden">Vansen</a>
+      <h1 class="text-2xl font-semibold tracking-tight">
+        {{ mode() === 'signin' ? 'Sign in' : 'Create your account' }}
+      </h1>
+      <p class="muted mt-1 text-sm">
+        {{
+          mode() === 'signin'
+            ? 'Welcome back — pick up where you left off.'
+            : 'A minute from your first generation.'
+        }}
+      </p>
 
-      <form (submit)="$event.preventDefault(); submit()" class="mt-8 space-y-4">
+      <button type="button" class="google-btn mt-8" (click)="signInGoogle()">
+        <img src="/logos/google.svg" alt="" class="google-logo" />
+        Continue with Google
+      </button>
+
+      <div class="divider">
+        <span>or with email</span>
+      </div>
+
+      @if (signupDone()) {
+        <div class="confirm-note">
+          Account created. Check your inbox to confirm your email, then sign in.
+        </div>
+      }
+
+      <form (submit)="$event.preventDefault(); submit()" class="space-y-4">
         <div class="space-y-2">
           <label hlmLabel for="email">Email</label>
           <input
             id="email"
             hlmInput
             type="email"
+            autocomplete="email"
             class="w-full"
             placeholder="you@example.com"
             [value]="email()"
-            (input)="updateEmail($any($event.target).value)"
+            (input)="email.set($any($event.target).value)"
           />
         </div>
-        <button hlmBtn type="submit" class="w-full" [disabled]="!email().trim()">
-          Continue
+        <div class="space-y-2">
+          <label hlmLabel for="password">Password</label>
+          <input
+            id="password"
+            hlmInput
+            type="password"
+            [autocomplete]="mode() === 'signin' ? 'current-password' : 'new-password'"
+            class="w-full"
+            placeholder="••••••••"
+            [value]="password()"
+            (input)="password.set($any($event.target).value)"
+          />
+        </div>
+
+        @if (error()) {
+          <p class="error-line">{{ error() }}</p>
+        }
+
+        <button hlmBtn type="submit" class="w-full" [disabled]="busy()">
+          {{ busy() ? 'One moment…' : submitLabel() }}
         </button>
       </form>
 
-      <p class="muted mt-6 text-center text-xs">
-        Stub auth — real Supabase sign-in wires in once the schema lands.
+      <p class="muted mt-6 text-center text-sm">
+        {{ mode() === 'signin' ? 'New to Vansen?' : 'Already have an account?' }}
+        <button type="button" class="linkish" (click)="toggleMode()">
+          {{ mode() === 'signin' ? 'Create an account' : 'Sign in' }}
+        </button>
       </p>
     </div>
   </main>

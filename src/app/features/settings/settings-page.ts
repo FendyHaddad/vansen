@@ -65,11 +65,11 @@ export class SettingsPage {
   ];
 
   topUp(): void {
-    this.ledger.add({ type: 'topup', amountUsd: 20, note: 'Top-up' });
+    alert('Top-ups arrive with Stripe in phase 2 — balance stays at $0 until then.');
   }
 
-  signOut(): void {
-    this.auth.signOut();
+  async signOut(): Promise<void> {
+    await this.auth.signOut();
     this.router.navigate(['/']);
   }
 }

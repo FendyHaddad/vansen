@@ -9,13 +9,15 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideSearch } from '@ng-icons/lucide';
+import { lucideSearch, lucideX } from '@ng-icons/lucide';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { GenerationStore } from '../../core/generations/generation-store';
+import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
-import { upscaleUserPriceUsd } from '../../core/catalog/model-families';
+import { ApiError } from '../../core/api/api-service';
+import { GenerationOp } from '../../core/enums';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { SettingsRail, GenerateRequest } from './settings-rail/settings-rail';
 import { LibraryGrid } from './library-grid/library-grid';
@@ -42,20 +44,22 @@ const SAMPLE_PROMPTS = [
     LibraryGrid,
     DetailOverlay,
   ],
-  providers: [provideIcons({ lucideSearch })],
+  providers: [provideIcons({ lucideSearch, lucideX })],
 })
 export class WorkspacePage {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
   private readonly store = inject(GenerationStore);
+  private readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
   private readonly router = inject(Router);
 
   readonly rail = viewChild.required(SettingsRail);
 
-  readonly user = this.auth.user;
+  readonly userEmail = this.auth.userEmail;
+  readonly displayName = this.profileStore.displayName;
   readonly balanceUsd = this.ledger.balanceUsd;
-  readonly studioActive = this.auth.studioActive;
+  readonly studioActive = this.profileStore.studioActive;
   readonly generations = this.store.items;
   readonly samplePrompts = SAMPLE_PROMPTS;
 
@@ -76,7 +80,30 @@ export class WorkspacePage {
     return parentId ? (this.store.byId(parentId) ?? null) : null;
   });
 
-  onGenerate(req: GenerateRequest): void {
+  /** Inline notice banner (errors, phase hints). */
+  readonly notice = signal('');
+
+  constructor() {
+    void this.refresh();
+  }
+
+  private async refresh(): Promise<void> {
+    try {
+      await Promise.all([this.profileStore.load(), this.store.load()]);
+    } catch (e) {
+      this.showError(e, 'Could not load your workspace');
+    }
+  }
+
+  private showError(e: unknown, fallback: string): void {
+    if (e instanceof ApiError && e.code === 'insufficient_balance') {
+      this.notice.set('Balance too low — top-ups arrive with Stripe in phase 2.');
+      return;
+    }
+    this.notice.set(e instanceof ApiError ? e.message : fallback);
+  }
+
+  async onGenerate(req: GenerateRequest): Promise<void> {
     const threshold = this.prefsService.prefs().confirmOverUsd;
     if (
       req.priceUsd > threshold &&
@@ -84,26 +111,21 @@ export class WorkspacePage {
     ) {
       return;
     }
-    const op = req.referenceId || req.referenceUrl ? 'edit' : 'generate';
-    const note = req.batch > 1 ? `${req.family.name} ×${req.batch}` : req.family.name;
-    if (!this.ledger.charge(op, req.priceUsd, req.family.id, note)) return;
-    const unitPrice = req.priceUsd / req.batch;
-    for (let i = 0; i < req.batch; i++) {
-      this.store.add({
-        kind: req.family.kind,
+    const op = req.referenceId ? GenerationOp.Edit : GenerationOp.Generate;
+    try {
+      await this.store.create({
         familyId: req.family.id,
-        familyName: req.family.name,
         op,
         prompt: req.prompt,
         settings: req.settings,
-        priceUsd: unitPrice,
-        // Edits reuse the reference image so provenance is visible in the stub
-        mediaUrl:
-          op === 'edit' && req.referenceUrl ? req.referenceUrl : this.store.placeholderFor(),
+        batch: req.batch,
         parentId: req.referenceId ?? undefined,
       });
+      this.rail().setReference(null);
+      this.notice.set('');
+    } catch (e) {
+      this.showError(e, 'Generation failed');
     }
-    this.rail().setReference(null);
   }
 
   startReferencePick(): void {
@@ -122,8 +144,12 @@ export class WorkspacePage {
     this.openedId.set(id);
   }
 
-  onDeleted(id: string): void {
-    this.store.remove(id);
+  async onDeleted(id: string): Promise<void> {
+    try {
+      await this.store.remove(id);
+    } catch (e) {
+      this.showError(e, 'Delete failed');
+    }
     this.openedId.set(null);
   }
 
@@ -138,39 +164,38 @@ export class WorkspacePage {
     a.remove();
   }
 
-  onUpscale(id: string): void {
+  async onUpscale(id: string): Promise<void> {
     const item = this.store.byId(id);
     if (!item || item.kind !== 'image') return;
-    const price = upscaleUserPriceUsd();
-    if (!this.ledger.charge('upscale', price, 'magnific', 'Magnific Precision v2')) return;
-    this.store.add({
-      kind: 'image',
-      familyId: 'magnific',
-      familyName: 'Magnific Precision v2',
-      op: 'upscale',
-      prompt: item.prompt,
-      settings: item.settings,
-      priceUsd: price,
-      mediaUrl: item.mediaUrl,
-      parentId: item.id,
-    });
+    try {
+      await this.store.create({
+        op: GenerationOp.Upscale,
+        prompt: item.prompt,
+        settings: item.settings,
+        batch: 1,
+        parentId: item.id,
+      });
+      this.notice.set('');
+    } catch (e) {
+      this.showError(e, 'Upscale failed');
+    }
   }
 
-  onVariation(id: string): void {
+  async onVariation(id: string): Promise<void> {
     const item = this.store.byId(id);
     if (!item) return;
-    if (!this.ledger.charge('generate', item.priceUsd, item.familyId, `${item.familyName} · variation`)) return;
-    this.store.add({
-      kind: item.kind,
-      familyId: item.familyId,
-      familyName: item.familyName,
-      op: 'variation',
-      prompt: item.prompt,
-      settings: item.settings,
-      priceUsd: item.priceUsd,
-      mediaUrl: this.store.placeholderFor(),
-      parentId: item.id,
-    });
+    try {
+      await this.store.create({
+        familyId: item.familyId,
+        op: GenerationOp.Variation,
+        prompt: item.prompt,
+        settings: item.settings,
+        batch: 1,
+      });
+      this.notice.set('');
+    } catch (e) {
+      this.showError(e, 'Variation failed');
+    }
   }
 
   onEdit(id: string): void {
@@ -182,12 +207,14 @@ export class WorkspacePage {
   }
 
   topUp(): void {
-    // Stub: real flow goes through Stripe Checkout
-    this.ledger.add({ type: 'topup', amountUsd: 20, note: 'Top-up' });
+    this.notice.set('Top-ups arrive with Stripe in phase 2 — balance stays at $0 until then.');
   }
 
-  signOut(): void {
-    this.auth.signOut();
+  async signOut(): Promise<void> {
+    await this.auth.signOut();
+    this.ledger.reset();
+    this.store.reset();
+    this.profileStore.reset();
     this.router.navigate(['/']);
   }
 }

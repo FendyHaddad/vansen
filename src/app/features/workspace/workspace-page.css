@@ -186,6 +186,27 @@
   padding: 20px;
 }
 
+.notice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid color-mix(in oklch, var(--warn) 50%, var(--border));
+  background: color-mix(in oklch, var(--warn) 7%, transparent);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 10px 14px;
+  font-size: 0.8125rem;
+  margin-bottom: 14px;
+}
+
+.notice-close {
+  display: inline-flex;
+  border: none;
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
 .pick-banner {
   display: flex;
   align-items: center;

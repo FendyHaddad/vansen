@@ -161,6 +161,56 @@ stub with a ledger (`core/ledger/ledger-service.ts`) that mirrors the future
 - Provider API keys and Stripe secrets live in Edge Function secrets, NEVER in client.
 - Webhook endpoints verify provider/Stripe signatures before trusting payloads.
 
+### Multi-tenant provider key policy (decided 2026-07-06)
+
+Vansen holds ONE org account/key per provider (plus fal.ai as aggregator for
+Seedream/Seedance/Kling/FLUX). Users never see or touch keys — they call our dispatch
+Edge Function, which checks balance and calls the provider with our key. This is the
+standard wrapper model (OpenRouter/fal/Higgsfield); providers permit apps, they forbid
+raw key sharing — which we never do.
+
+**Org-ban prevention (top priority — one user's bad prompt must never burn the org key):**
+
+1. **Pre-dispatch moderation gate.** Every prompt runs through a moderation check inside
+   the dispatch function BEFORE any provider call. Flagged prompt → job rejected, no
+   provider request ever happens, strike recorded. The provider never sees the bad
+   request, so there is nothing to ban.
+2. **Per-user safety identifiers.** Every provider request carries a hashed user id
+   (OpenAI `safety_identifier`; equivalent metadata where supported). Providers then
+   throttle/flag that end user, not the org account. Built for exactly this case.
+3. **Strike system.** `users.strikes` counter: flagged prompt = strike; N strikes =
+   auto-suspend generation, manual review. Repeat abusers banned before a provider
+   ever complains.
+4. **Per-user rate limits** on dispatch (RPC-enforced), so no single account can spray
+   requests.
+5. **Provider-native safety settings** always on (Gemini safety settings, OpenAI
+   moderation defaults) — second net behind our gate.
+6. **Kill switch per model/provider.** `models.enabled` flag — if a provider raises any
+   abuse signal, disable dispatch for that provider instantly while investigating.
+7. **Full audit trail.** Every job row stores user id, prompt, model, moderation verdict,
+   provider request id — we can answer any provider abuse inquiry with the exact user
+   and act on it.
+
+Cost-runaway containment: prepaid balance is a hard per-user cap by construction; add a
+global daily spend alarm per provider and Stripe Radar on top-ups.
+
+### Account-sharing prevention
+
+One Vansen account = one person. Balance is shared-by-nature (drains fast if shared —
+partial self-limiting), but Studio is flat $5/mo, so enforce:
+
+- **Concurrent session cap.** Supabase Auth tracks refresh tokens/sessions; allow max 2
+  active sessions (laptop + phone). New device beyond cap forces logout of oldest.
+- **Session heuristics.** Flag accounts with parallel activity from distant IPs /
+  impossible travel or >3 devices per week → soft warning, then generation pause
+  pending re-verification (email OTP).
+- **Dispatch concurrency guard.** One account cannot run generations from two IPs at
+  the same second repeatedly — RPC counts overlapping dispatch origins; sustained
+  overlap = sharing signal, feeds the same flag.
+- No password sharing enforcement theater beyond that — heuristics + session cap catch
+  the economic abuse (Studio fee split), and prepaid balance means shared generation
+  spend still gets paid for.
+
 ## Coding standards (Vankode standards — enforce strictly everywhere)
 
 - Guard clauses and early returns. No nested if.
@@ -172,6 +222,15 @@ stub with a ledger (`core/ledger/ledger-service.ts`) that mirrors the future
 - Angular 22 idioms only: signals, @if/@for, standalone, Signal Forms, zoneless.
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
   spartan already provides; copy them in, style via Tailwind + CSS variables.
+
+## Status (2026-07-07)
+
+**MVP Foundation shipped** (spec: `docs/superpowers/specs/2026-07-07-mvp-foundation-design.md`):
+Supabase project `bnorhcxhvxydkgvcxjad` (ap-southeast-1), 4-table schema + RPCs with
+RLS deny-all + gateway-only execute, `api` Edge Function (Hono) as the sole data path,
+real auth (email/password + Google pending OAuth credentials), Angular fully API-backed.
+Generation output still placeholder media; balances $0 until Stripe (phase 2 — includes
+promo codes for launch pricing). Phase 3 wires real providers + Storage + moderation gate.
 
 ## Delivery order
 
