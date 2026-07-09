@@ -4,37 +4,83 @@
     <p class="muted">Balance, Studio membership, and every transaction.</p>
   </header>
 
+  @if (error()) {
+    <p class="error-line">{{ error() }}</p>
+  }
+
   <div class="card-row">
     <div class="panel balance-panel">
       <span class="eyebrow">Generation balance</span>
       <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
-      <p class="muted small">Never expires while Studio is active.</p>
+      <p class="muted small">
+        {{
+          needsStudio()
+            ? 'First purchase includes your first month of Studio (+$5).'
+            : 'Never expires while Studio is active.'
+        }}
+      </p>
       <div class="topup-row">
-        <app-hint text="Top-ups and Studio checkout arrive with Stripe — phase 2 of the MVP.">
-          <span class="phase-chip">Top-ups arrive with Stripe · phase 2</span>
-        </app-hint>
+        @for (credits of presets; track credits) {
+          <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="topUp(credits)">
+            +${{ credits }}
+            @if (needsStudio()) {
+              <span class="due-hint">due ${{ dueFor(credits) }}</span>
+            }
+          </button>
+        }
       </div>
+      <button type="button" class="reconcile-link" [disabled]="busy()" (click)="reconcile()">
+        Didn’t receive your credits?
+      </button>
+      @if (reconcileResult(); as result) {
+        <p class="muted small">{{ result }}</p>
+      }
     </div>
 
     <div class="panel studio-panel">
       <div class="studio-head">
         <span class="eyebrow">Studio</span>
         <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-          {{ studioActive() ? 'Active' : 'Inactive' }}
+          {{ studioActive() ? (canceledPending() ? 'Ending' : 'Active') : 'Inactive' }}
         </span>
       </div>
       <p class="small">
         $5/month — keeps your library online, prompts saved, and your balance alive.
       </p>
+
       @if (subscription(); as sub) {
-        <p class="muted small">
-          {{ sub.plan }} · {{ sub.status }}
-          @if (sub.currentPeriodEnd) {
-            · renews {{ sub.currentPeriodEnd | date: 'mediumDate' }}
+        @if (canceledPending()) {
+          <p class="warn-text small">
+            Studio ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — your library is
+            deleted 30 days after unless you reactivate.
+          </p>
+        } @else if (studioActive() && sub.currentPeriodEnd) {
+          <p class="muted small">Renews {{ sub.currentPeriodEnd | date: 'mediumDate' }}</p>
+        }
+        @if (graceDaysLeft(); as days) {
+          <p class="warn-text small">
+            Studio lapsed — {{ days }} day{{ days === 1 ? '' : 's' }} left to download your
+            library or reactivate before deletion.
+          </p>
+        }
+        <div class="studio-actions">
+          @if (studioActive()) {
+            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="portal()">
+              Manage Studio
+            </button>
+          } @else {
+            <button hlmBtn size="sm" [disabled]="busy()" (click)="reactivate()">
+              Reactivate · $5
+            </button>
+            <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
+              Billing history
+            </button>
           }
-        </p>
+        </div>
       } @else {
-        <p class="muted small">No membership yet — activation comes with Stripe (phase 2).</p>
+        <p class="muted small">
+          No membership yet — your first top-up includes the first month.
+        </p>
       }
     </div>
   </div>

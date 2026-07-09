@@ -24,6 +24,7 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ApiError } from '../../core/api/api-service';
+import { BillingService } from '../../core/billing/billing-service';
 import { GenerationOp } from '../../core/enums';
 import { GenerationStore } from '../../core/generations/generation-store';
 import {
@@ -71,6 +72,7 @@ export class EditorPage {
   private readonly router = inject(Router);
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
+  private readonly billing = inject(BillingService);
   private readonly store = inject(GenerationStore);
 
   readonly maskCanvas = viewChild(MaskCanvas);
@@ -223,8 +225,12 @@ export class EditorPage {
     this.router.navigate(['/app/edit', id]);
   }
 
-  topUp(): void {
-    this.notice.set('Top-ups arrive with Stripe in phase 2.');
+  async topUp(): Promise<void> {
+    try {
+      await this.billing.checkout(20);
+    } catch (e) {
+      this.notice.set(e instanceof ApiError ? e.message : 'Could not start checkout');
+    }
   }
 
   async signOut(): Promise<void> {

@@ -225,6 +225,15 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 
 ## Status (2026-07-07)
 
+**Phase 2 — Money shipped, test mode** (spec: `docs/superpowers/specs/2026-07-07-mvp-phase2-stripe-design.md`):
+Stripe hosted checkout live — first purchase $15 ($10 credits + $5/mo Studio mixed cart),
+top-ups from $10, signature-verified `stripe-webhook` function as sole `topup` writer,
+`webhook_events` dedupe + `ledger_entries.stripe_ref UNIQUE` (double-credit impossible,
+verified), `/billing/reconcile` self-heal (verified restoring a deleted credit,
+idempotent), Billing Portal for cancel/card/invoices, 30-day-grace purge cron (dry-run
+verified), account deletion cancels the Stripe subscription. Promo codes = Stripe-native
+coupons, zero code. Live keys flip at phase 4 once bank authorization clears.
+
 **MVP Foundation shipped** (spec: `docs/superpowers/specs/2026-07-07-mvp-foundation-design.md`):
 Supabase project `bnorhcxhvxydkgvcxjad` (ap-southeast-1), 4-table schema + RPCs with
 RLS deny-all + gateway-only execute, `api` Edge Function (Hono) as the sole data path,

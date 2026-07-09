@@ -7,7 +7,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideSearch, lucideX } from '@ng-icons/lucide';
 import { HlmBadge } from '@spartan-ng/helm/badge';
@@ -16,6 +16,7 @@ import { LedgerService } from '../../core/ledger/ledger-service';
 import { GenerationStore } from '../../core/generations/generation-store';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
+import { BillingService } from '../../core/billing/billing-service';
 import { ApiError } from '../../core/api/api-service';
 import { GenerationOp } from '../../core/enums';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
@@ -52,7 +53,9 @@ export class WorkspacePage {
   private readonly store = inject(GenerationStore);
   private readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
+  private readonly billing = inject(BillingService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly rail = viewChild.required(SettingsRail);
 
@@ -60,6 +63,7 @@ export class WorkspacePage {
   readonly displayName = this.profileStore.displayName;
   readonly balanceUsd = this.ledger.balanceUsd;
   readonly studioActive = this.profileStore.studioActive;
+  readonly graceDaysLeft = this.profileStore.graceDaysLeft;
   readonly generations = this.store.items;
   readonly samplePrompts = SAMPLE_PROMPTS;
 
@@ -84,7 +88,34 @@ export class WorkspacePage {
   readonly notice = signal('');
 
   constructor() {
-    void this.refresh();
+    void this.refresh().then(() => this.handleCheckoutReturn());
+  }
+
+  /** Stripe redirects back with ?checkout=success|canceled; webhook may lag a second. */
+  private handleCheckoutReturn(): void {
+    const result = this.route.snapshot.queryParamMap.get('checkout');
+    if (!result) return;
+    this.router.navigate([], { queryParams: {}, replaceUrl: true });
+    if (result === 'canceled') {
+      this.notice.set('Checkout canceled — nothing was charged.');
+      return;
+    }
+    if (result !== 'success') return;
+    const before = this.balanceUsd();
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts += 1;
+      await this.profileStore.load();
+      if (this.balanceUsd() !== before) {
+        clearInterval(poll);
+        this.notice.set(`Payment received — balance $${this.balanceUsd().toFixed(2)}.`);
+      } else if (attempts >= 6) {
+        clearInterval(poll);
+        this.notice.set(
+          'Payment received — credits are on the way. If they don’t appear, use “Didn’t receive your credits?” in Billing.',
+        );
+      }
+    }, 1000);
   }
 
   private async refresh(): Promise<void> {
@@ -97,7 +128,7 @@ export class WorkspacePage {
 
   private showError(e: unknown, fallback: string): void {
     if (e instanceof ApiError && e.code === 'insufficient_balance') {
-      this.notice.set('Balance too low — top-ups arrive with Stripe in phase 2.');
+      this.notice.set('Balance too low — top up to continue.');
       return;
     }
     this.notice.set(e instanceof ApiError ? e.message : fallback);
@@ -206,8 +237,20 @@ export class WorkspacePage {
     this.rail().updatePrompt(value);
   }
 
-  topUp(): void {
-    this.notice.set('Top-ups arrive with Stripe in phase 2 — balance stays at $0 until then.');
+  async topUp(): Promise<void> {
+    try {
+      await this.billing.checkout(20);
+    } catch (e) {
+      this.showError(e, 'Could not start checkout');
+    }
+  }
+
+  async reactivateStudio(): Promise<void> {
+    try {
+      await this.billing.reactivateStudio();
+    } catch (e) {
+      this.showError(e, 'Could not start checkout');
+    }
   }
 
   async signOut(): Promise<void> {

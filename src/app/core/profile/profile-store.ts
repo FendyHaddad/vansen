@@ -22,8 +22,20 @@ export class ProfileStore {
   readonly displayName = computed(() => this.profileSig()?.displayName ?? '');
   readonly studioActive = computed(() => {
     const sub = this.subscriptionSig();
-    if (!sub || sub.status !== SubscriptionStatus.Active) return false;
+    if (!sub) return false;
+    // 'canceled' still runs until the paid period ends
+    if (sub.status === SubscriptionStatus.Expired) return false;
     return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
+  });
+
+  /** Days left in the 30-day post-lapse grace window; null when not lapsed/out of grace. */
+  readonly graceDaysLeft = computed(() => {
+    const sub = this.subscriptionSig();
+    if (!sub || !sub.currentPeriodEnd) return null;
+    const ended = new Date(sub.currentPeriodEnd).getTime();
+    if (this.studioActive() || ended > Date.now()) return null;
+    const left = 30 - Math.floor((Date.now() - ended) / 86_400_000);
+    return left > 0 ? left : null;
   });
 
   async load(): Promise<void> {

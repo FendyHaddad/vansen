@@ -75,3 +75,17 @@ export interface CreateGenerationResponse {
   items: GenerationDto[];
   balanceUsd: number;
 }
+
+export interface CheckoutRequest {
+  creditsUsd?: number;
+  studioOnly?: boolean;
+}
+
+export interface CheckoutResponse {
+  url: string;
+}
+
+export interface ReconcileResponse {
+  credited: number;
+  balanceUsd: number;
+}

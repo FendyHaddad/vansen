@@ -11,6 +11,7 @@ import {
 } from '@ng-icons/lucide';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
+import { BillingService } from '../../core/billing/billing-service';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { ProfileTab } from './profile-tab/profile-tab';
 import { BillingTab } from './billing-tab/billing-tab';
@@ -47,6 +48,7 @@ type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
 export class SettingsPage {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
+  private readonly billing = inject(BillingService);
   private readonly router = inject(Router);
 
   readonly balanceUsd = this.ledger.balanceUsd;
@@ -65,7 +67,7 @@ export class SettingsPage {
   ];
 
   topUp(): void {
-    alert('Top-ups arrive with Stripe in phase 2 — balance stays at $0 until then.');
+    void this.billing.checkout(20);
   }
 
   async signOut(): Promise<void> {

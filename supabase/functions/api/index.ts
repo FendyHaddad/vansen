@@ -4,6 +4,7 @@
 import { Hono } from 'jsr:@hono/hono';
 import { cors } from 'jsr:@hono/hono/cors';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import Stripe from 'npm:stripe@17';
 import {
   UPSCALER,
   familyById,
@@ -19,6 +20,14 @@ const admin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
+
+const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
+  apiVersion: '2024-06-20',
+  httpClient: Stripe.createFetchHttpClient(),
+});
+const STUDIO_PRICE_ID = Deno.env.get('STRIPE_STUDIO_PRICE_ID')!;
+const APP_ORIGIN = 'http://localhost:4200';
+const TOPUP_PRESETS = [10, 20, 50, 100];
 
 const PLACEHOLDER_MEDIA = [
   'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=640&q=80',
@@ -137,6 +146,28 @@ async function balanceOf(userId: string): Promise<number> {
   return Number(data ?? 0);
 }
 
+async function stripeCustomerFor(userId: string, email: string): Promise<string> {
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('stripe_customer_id')
+    .eq('id', userId)
+    .single();
+  if (profile?.stripe_customer_id) return profile.stripe_customer_id;
+  const customer = await stripe.customers.create({ email, metadata: { user_id: userId } });
+  await admin.from('profiles').update({ stripe_customer_id: customer.id }).eq('id', userId);
+  return customer.id;
+}
+
+async function hasActiveStudio(userId: string): Promise<boolean> {
+  const { data } = await admin
+    .from('subscriptions')
+    .select('status,current_period_end')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!data || data.status !== 'active') return false;
+  return !data.current_period_end || new Date(data.current_period_end) > new Date();
+}
+
 app.get('/profile', async (c) => {
   const userId = c.get('userId');
   const [{ data: profile, error }, balanceUsd, { data: subscription }] = await Promise.all([
@@ -180,6 +211,24 @@ app.patch('/profile', async (c) => {
 
 app.delete('/profile', async (c) => {
   const userId = c.get('userId');
+  // Cancel any live Stripe subscription first — no charges to dead accounts
+  const { data: prof } = await admin
+    .from('profiles')
+    .select('stripe_customer_id')
+    .eq('id', userId)
+    .single();
+  if (prof?.stripe_customer_id) {
+    try {
+      const subs = await stripe.subscriptions.list({
+        customer: prof.stripe_customer_id,
+        status: 'active',
+      });
+      for (const sub of subs.data) await stripe.subscriptions.cancel(sub.id);
+    } catch (e) {
+      console.error('subscription cancel on delete failed:', e);
+      return fail(c, 400, 'delete_failed', 'Could not cancel Studio — try again');
+    }
+  }
   const { error } = await admin.rpc('fn_delete_account', { p_user: userId });
   if (error) return fail(c, 400, 'delete_failed', error.message);
   const { error: authError } = await admin.auth.admin.deleteUser(userId);
@@ -310,6 +359,99 @@ app.post('/generations', async (c) => {
 
   const balanceUsd = await balanceOf(userId);
   return c.json({ items: (data ?? []).map(toGenerationDto), balanceUsd });
+});
+
+app.post('/billing/checkout', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const studioOnly = body.studioOnly === true;
+  const creditsUsd = Number(body.creditsUsd);
+  if (!studioOnly && !TOPUP_PRESETS.includes(creditsUsd)) {
+    return fail(c, 400, 'invalid_amount', `creditsUsd must be one of ${TOPUP_PRESETS.join(', ')} (min $10)`);
+  }
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const active = await hasActiveStudio(userId);
+    const needsStudio = studioOnly || !active;
+
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+    if (needsStudio) lineItems.push({ price: STUDIO_PRICE_ID, quantity: 1 });
+    if (!studioOnly) {
+      lineItems.push({
+        price_data: {
+          currency: 'usd',
+          product_data: { name: 'Vansen generation credits' },
+          unit_amount: creditsUsd * 100,
+        },
+        quantity: 1,
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer,
+      mode: needsStudio ? 'subscription' : 'payment',
+      line_items: lineItems,
+      allow_promotion_codes: true,
+      success_url: `${APP_ORIGIN}/app?checkout=success`,
+      cancel_url: `${APP_ORIGIN}/app?checkout=canceled`,
+      metadata: { user_id: userId, credits_usd: studioOnly ? '0' : String(creditsUsd) },
+      subscription_data: needsStudio ? { metadata: { user_id: userId } } : undefined,
+    });
+    return c.json({ url: session.url });
+  } catch (e) {
+    console.error('checkout_failed:', e);
+    return fail(c, 400, 'billing_failed', 'Could not start checkout');
+  }
+});
+
+app.post('/billing/portal', async (c) => {
+  try {
+    const customer = await stripeCustomerFor(c.get('userId'), c.get('email'));
+    const portal = await stripe.billingPortal.sessions.create({
+      customer,
+      return_url: `${APP_ORIGIN}/app/settings`,
+    });
+    return c.json({ url: portal.url });
+  } catch (e) {
+    console.error('portal_failed:', e);
+    return fail(c, 400, 'billing_failed', 'Could not open billing portal');
+  }
+});
+
+app.post('/billing/reconcile', async (c) => {
+  const userId = c.get('userId');
+  try {
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('stripe_customer_id')
+      .eq('id', userId)
+      .single();
+    if (!profile?.stripe_customer_id) {
+      return c.json({ credited: 0, balanceUsd: await balanceOf(userId) });
+    }
+    const sessions = await stripe.checkout.sessions.list({
+      customer: profile.stripe_customer_id,
+      limit: 100,
+    });
+    let credited = 0;
+    for (const s of sessions.data) {
+      if (s.payment_status !== 'paid') continue;
+      const credits = Number(s.metadata?.credits_usd ?? 0);
+      if (!credits) continue;
+      const { error } = await admin.from('ledger_entries').insert({
+        user_id: userId,
+        type: 'topup',
+        amount_usd: credits,
+        note: 'Top-up (reconciled)',
+        stripe_ref: s.id,
+      });
+      if (!error) credited += 1; // unique(stripe_ref) bounces already-credited sessions
+    }
+    return c.json({ credited, balanceUsd: await balanceOf(userId) });
+  } catch (e) {
+    console.error('reconcile_failed:', e);
+    return fail(c, 400, 'billing_failed', 'Reconcile failed');
+  }
 });
 
 app.delete('/generations/:id', async (c) => {

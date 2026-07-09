@@ -56,6 +56,15 @@
           </button>
         </div>
       }
+      @if (graceDaysLeft(); as days) {
+        <div class="notice-banner">
+          Studio lapsed — {{ days }} day{{ days === 1 ? '' : 's' }} left before your library
+          is deleted. Download what you need or
+          <button type="button" class="linkish" (click)="reactivateStudio()">
+            reactivate for $5
+          </button>
+        </div>
+      }
       @if (pickingReference()) {
         <div class="pick-banner">
           Choosing a reference image — click any image, or

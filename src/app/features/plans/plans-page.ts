@@ -72,13 +72,13 @@ export class PlansPage {
   readonly studioPrice = STUDIO_PRICE;
 
   readonly topUpOptions: TopUpOption[] = [
-    { amount: 20, popular: true },
-    { amount: 35, popular: false },
-    { amount: 50, popular: false },
-    { amount: 100, popular: false },
+    { amount: 15, popular: true },
+    { amount: 25, popular: false },
+    { amount: 55, popular: false },
+    { amount: 105, popular: false },
   ];
 
-  readonly selectedAmount = signal(20);
+  readonly selectedAmount = signal(15);
 
   /** First top-up: $5 covers the first month of Studio, rest is generation balance. */
   readonly usableBalance = computed(() => this.selectedAmount() - STUDIO_PRICE);

@@ -19,7 +19,12 @@
 - Schema record: `supabase/migrations/0001_foundation_schema.sql` (applied via MCP).
 - Shared enums/catalog: Angular masters; `npm run sync-shared` regenerates
   `supabase/functions/_shared/`; vitest guards drift. Redeploy `api` after catalog changes.
-- Balances start at $0 — no top-ups until Stripe (phase 2). No trial credits.
+- Stripe (TEST MODE): hosted checkout via `POST /billing/*` on `api`; `stripe-webhook`
+  function is the only `topup` ledger writer (signature + dedupe + stripe_ref UNIQUE).
+  Secrets live in Supabase Edge Function secrets: STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET, STRIPE_STUDIO_PRICE_ID. Never put Stripe keys in the repo.
+- First purchase $15 = $10 credits + $5/mo Studio; top-up presets 10/20/50/100 (min $10).
+- Purge cron `purge_lapsed_libraries` daily 03:00 UTC (30-day grace after lapse).
 
 ## Project docs
 - Product spec: `vansen.md`
