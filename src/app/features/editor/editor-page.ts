@@ -172,8 +172,9 @@ export class EditorPage {
   async applyEdit(): Promise<void> {
     const source = this.item();
     if (!source || !this.canApply()) return;
-    // Mask export rides along once real dispatch lands (phase 3)
-    if (this.maskSupported()) this.maskCanvas()?.exportMaskPng();
+    const maskPngBase64 = this.maskSupported()
+      ? (this.maskCanvas()?.exportMaskPng() ?? undefined)
+      : undefined;
     try {
       const items = await this.store.create({
         familyId: this.family().id,
@@ -182,14 +183,24 @@ export class EditorPage {
         settings: { ...this.settings() },
         batch: 1,
         parentId: source.id,
+        maskPngBase64,
       });
       this.prompt.set('');
       this.maskCanvas()?.clear();
       this.notice.set('');
       if (items[0]) this.router.navigate(['/app/edit', items[0].id]);
     } catch (e) {
-      this.notice.set(e instanceof ApiError ? e.message : 'Edit failed');
+      this.notice.set(this.editError(e));
     }
+  }
+
+  private editError(e: unknown): string {
+    if (e instanceof ApiError) {
+      if (e.code === 'content_policy') return 'This edit violates our content policy. Two violations suspend your account.';
+      if (e.code === 'account_suspended') return 'Account suspended — contact support to appeal.';
+      return e.message;
+    }
+    return 'Edit failed';
   }
 
   async upscale(): Promise<void> {

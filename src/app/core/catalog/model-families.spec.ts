@@ -72,8 +72,7 @@ describe('model families', () => {
   it('user price applies 33% margin', () => {
     const nb = familyById('nano-banana')!;
     expect(userPriceUsd(nb, { version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039 / 0.67);
-    expect(upscaleUserPriceUsd()).toBeCloseTo(0.25 / 0.67);
-    expect(upscaleUserPriceUsd(true)).toBeCloseTo(1.5 / 0.67);
+    expect(upscaleUserPriceUsd()).toBeCloseTo(0.04 / 0.67);
   });
 
   it('every family has logo, blurb, and tooltips on every option', () => {

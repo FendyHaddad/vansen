@@ -105,7 +105,7 @@ export class BillingTab {
 
   familyName(id?: string | null): string {
     if (!id) return '—';
-    if (id === 'magnific') return 'Magnific';
+    if (id === 'upscaler' || id === 'magnific') return 'Upscale';
     return familyById(id)?.name ?? id;
   }
 }

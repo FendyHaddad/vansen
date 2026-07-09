@@ -53,6 +53,27 @@ export class ApiService {
     return this.request<T>('DELETE', path);
   }
 
+  /** Multipart POST (file uploads) — does not set Content-Type (browser adds boundary). */
+  async postForm<T>(path: string, form: FormData): Promise<T> {
+    const token = await this.tokenProvider();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(environment.apiBaseUrl + path, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      const parsed = await response.json().catch(() => null);
+      throw new ApiError(
+        parsed?.error?.code ?? 'unknown',
+        parsed?.error?.message ?? `Request failed (${response.status})`,
+        response.status,
+      );
+    }
+    return (await response.json()) as T;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await this.tokenProvider();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };

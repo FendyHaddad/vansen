@@ -39,11 +39,15 @@
             hlmDropdownMenuItem
             class="model-item"
             [class.model-item-active]="familyId() === f.id"
-            (triggered)="selectFamily(f.id)"
+            [disabled]="disabledFamily(f.id)"
+            (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
           >
             <span class="model-item-top">
               <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
               <span class="model-item-name">{{ f.name }}</span>
+              @if (disabledFamily(f.id)) {
+                <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
+              }
             </span>
             <span class="model-item-blurb">{{ f.blurb }}</span>
           </button>
@@ -86,12 +90,17 @@
       </div>
     } @else {
       <div class="ref-actions">
-        <app-hint text="Uploading your own reference arrives with real generation (phase 3). Pick from your library for now.">
-          <span class="ref-drop ref-blocked">
-            <ng-icon name="lucideImagePlus" size="16" />
-            Upload
-          </span>
-        </app-hint>
+        <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput || uploading()">
+          <ng-icon name="lucideImagePlus" size="16" />
+          {{ uploading() ? 'Uploading…' : 'Upload' }}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            class="ref-file-input"
+            [disabled]="!family().capabilities.imageInput || uploading()"
+            (change)="onFilePicked($event)"
+          />
+        </label>
         <button
           type="button"
           class="ref-drop"
@@ -101,6 +110,9 @@
           From library
         </button>
       </div>
+      @if (uploadError()) {
+        <p class="ref-error">{{ uploadError() }}</p>
+      }
     }
   </div>
 

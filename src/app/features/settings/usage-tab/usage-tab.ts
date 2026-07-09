@@ -45,7 +45,7 @@ export class UsageTab {
   readonly byFamily = computed<UsageRow[]>(() =>
     this.rowsBy((e) => {
       if (!e.familyId) return 'Other';
-      if (e.familyId === 'magnific') return 'Magnific';
+      if (e.familyId === 'upscaler' || e.familyId === 'magnific') return 'Upscale';
       return familyById(e.familyId)?.name ?? e.familyId;
     }),
   );

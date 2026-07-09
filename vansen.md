@@ -223,7 +223,26 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
   spartan already provides; copy them in, style via Tailwind + CSS variables.
 
-## Status (2026-07-07)
+## Status (2026-07-09)
+
+**Phase 3a — Image generation shipped, live** (spec: `docs/superpowers/specs/2026-07-09-mvp-phase3a-generation-design.md`):
+Real image generation for all four image families through provider adapters
+(`supabase/functions/_shared/providers/`): GPT Image generate + edits (OpenAI, inline),
+Seedream + FLUX + clarity upscaler (fal queue, polled via `GET /jobs`), Nano Banana
+(Google Gemini, inline — blocked until the Google AI key gets billing; free tier has
+zero image quota). Generations insert `pending`, jobs dispatch, outputs land in the
+private `media` bucket with 7-day signed URLs (direct bucket access rejected — verified).
+Failures refund exactly once via `fn_fail_job` (`ledger_refund_once` unique index,
+verified live); stale jobs sweep every 5 min. Safety: OpenAI omni-moderation gates every
+prompt and upload BEFORE charge and BEFORE any provider call (drill verified: zero jobs
+created on flagged prompt); 2 strikes = suspension (429 on generate + upload), no refund
+of balance; full evidence retained in `moderation_events` (prompt, quarantined upload,
+category scores, `resolution` field) so a human can overturn wrong flags — reinstate
+drill verified. Per-model kill switch in `models` table (503 + greyed UI, verified).
+`safety_identifier`/`user` hash sent to providers, never the raw user id. Upscale is now
+fal clarity-upscaler (`upscaler`, $0.06) — Magnific dropped. Video families stay
+disabled until phase 3b. Provider keys live only in Edge Function secrets:
+`GOOGLE_AI_API_KEY`, `OPENAI_API_KEY` (also powers moderation), `FAL_API_KEY`.
 
 **Phase 2 — Money shipped, test mode** (spec: `docs/superpowers/specs/2026-07-07-mvp-phase2-stripe-design.md`):
 Stripe hosted checkout live — first purchase $15 ($10 credits + $5/mo Studio mixed cart),

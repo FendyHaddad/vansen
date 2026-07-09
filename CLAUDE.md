@@ -25,6 +25,17 @@
   STRIPE_WEBHOOK_SECRET, STRIPE_STUDIO_PRICE_ID. Never put Stripe keys in the repo.
 - First purchase $15 = $10 credits + $5/mo Studio; top-up presets 10/20/50/100 (min $10).
 - Purge cron `purge_lapsed_libraries` daily 03:00 UTC (30-day grace after lapse).
+- Generation (Phase 3a, live): provider adapters in `supabase/functions/_shared/providers/`
+  (google=Nano Banana inline, openai=GPT Image inline, fal=FLUX/Seedream/upscaler via
+  queue + `GET /jobs` polling). Generations insert `pending`; `fn_fail_job` refunds once
+  (`ledger_refund_once` index); stale-job sweep cron every 5 min. Outputs in private
+  `media` bucket, 7-day signed URLs. Moderation gate (OpenAI omni-moderation) runs BEFORE
+  charge and BEFORE any provider call; 2 strikes = suspension, evidence kept in
+  `moderation_events` for appeals. Kill switch = `models.enabled`. Upscale = fal
+  clarity-upscaler, family id `upscaler`. Provider keys ONLY in Edge Function secrets:
+  GOOGLE_AI_API_KEY (needs paid tier — free tier has zero image quota), OPENAI_API_KEY
+  (also powers moderation), FAL_API_KEY. Redeploying `api` must bundle every `_shared/`
+  file including `providers/`.
 
 ## Project docs
 - Product spec: `vansen.md`

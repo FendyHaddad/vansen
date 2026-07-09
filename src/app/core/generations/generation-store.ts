@@ -66,6 +66,20 @@ export class GenerationStore {
     this.itemsSig.update((list) => list.filter((i) => i.id !== id));
   }
 
+  /** Generation ids still awaiting their provider result. */
+  pendingIds(): string[] {
+    return this.itemsSig()
+      .filter((i) => i.status === 'pending')
+      .map((i) => i.id);
+  }
+
+  /** Merge poll results (status flips, media urls) into the store. */
+  applyJobUpdates(updates: GenerationDto[]): void {
+    if (updates.length === 0) return;
+    const byId = new Map(updates.map((u) => [u.id, u]));
+    this.itemsSig.update((list) => list.map((i) => byId.get(i.id) ?? i));
+  }
+
   reset(): void {
     this.itemsSig.set([]);
     this.loadedSig.set(false);

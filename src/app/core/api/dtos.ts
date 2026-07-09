@@ -69,11 +69,26 @@ export interface CreateGenerationRequest {
   settings: GenerationSettings;
   batch: number;
   parentId?: string;
+  referenceUploadId?: string;
+  maskPngBase64?: string;
 }
 
 export interface CreateGenerationResponse {
   items: GenerationDto[];
   balanceUsd: number;
+}
+
+export interface JobsResponse {
+  items: GenerationDto[];
+}
+
+export interface ModelsResponse {
+  models: { id: string; enabled: boolean }[];
+}
+
+export interface UploadResponse {
+  uploadId: string;
+  url: string;
 }
 
 export interface CheckoutRequest {

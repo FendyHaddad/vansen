@@ -294,12 +294,11 @@ export const MODEL_FAMILIES: ModelFamily[] = [
   },
 ];
 
-/** Hidden utility model powering the Upscale action (Magnific via Runway API). */
+/** Hidden utility model powering the Upscale action (fal clarity-upscaler). */
 export const UPSCALER = {
-  id: 'magnific',
-  name: 'Magnific Precision v2',
-  providerCost: 0.25,
-  providerCostAbove4k: 1.5,
+  id: 'upscaler',
+  name: 'Precision Upscale',
+  providerCost: 0.04,
 } as const;
 
 export function familyById(id: string): ModelFamily | undefined {
@@ -323,6 +322,6 @@ export function userPriceUsd(family: ModelFamily, s: GenerationSettings): number
   return family.providerCost(s) / (1 - PAYG_MARGIN);
 }
 
-export function upscaleUserPriceUsd(above4k = false): number {
-  return (above4k ? UPSCALER.providerCostAbove4k : UPSCALER.providerCost) / (1 - PAYG_MARGIN);
+export function upscaleUserPriceUsd(): number {
+  return UPSCALER.providerCost / (1 - PAYG_MARGIN);
 }

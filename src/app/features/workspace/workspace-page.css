@@ -252,3 +252,43 @@
     overflow: visible;
   }
 }
+
+.shell-hidden {
+  display: none;
+}
+
+.suspended-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.suspended-card {
+  max-width: 460px;
+  border: 1px solid color-mix(in oklch, var(--loss) 40%, var(--border));
+  background: color-mix(in oklch, var(--loss) 5%, var(--card));
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+}
+
+.suspended-card h1 {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--loss);
+  margin-bottom: 12px;
+}
+
+.suspended-card p {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  margin-bottom: 18px;
+}
+
+.suspended-card a {
+  color: var(--foreground);
+  text-decoration: underline;
+}

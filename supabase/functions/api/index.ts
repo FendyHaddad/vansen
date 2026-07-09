@@ -13,6 +13,13 @@ import {
   type GenerationSettings,
 } from './_shared/model-families.ts';
 import { GenerationOp, LedgerType, MediaKind } from './_shared/enums.ts';
+import { adapterFor } from './_shared/providers/index.ts';
+import type { CheckResult } from './_shared/providers/types.ts';
+import { moderate } from './_shared/moderation.ts';
+import { safetyId } from './_shared/safety.ts';
+
+const SUSPEND_STRIKES = 2;
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 // NOTE: deployed via MCP with _shared/ nested inside the function bundle;
 // keep these specifiers matching the deploy layout.
 
@@ -29,14 +36,18 @@ const STUDIO_PRICE_ID = Deno.env.get('STRIPE_STUDIO_PRICE_ID')!;
 const APP_ORIGIN = 'http://localhost:4200';
 const TOPUP_PRESETS = [10, 20, 50, 100];
 
-const PLACEHOLDER_MEDIA = [
-  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=640&q=80',
-  'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=640&q=80',
-  'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=640&q=80',
-  'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=640&q=80',
-  'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=640&q=80',
-  'https://images.unsplash.com/photo-1483347756197-71ef80e95f73?w=640&q=80',
-];
+/** Detect image type from magic bytes; returns extension or null. */
+function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'webp' | null {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+  if (
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return 'webp';
+  }
+  return null;
+}
 
 const MAX_PROMPT_LEN = 2000;
 const AR_PATTERN = /^\d{1,2}:\d{1,2}$/;
@@ -112,7 +123,13 @@ app.use('*', async (c, next) => {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
-function toGenerationDto(row: Record<string, unknown>) {
+async function signMedia(path: string | null): Promise<string> {
+  if (!path) return '';
+  const { data } = await admin.storage.from('media').createSignedUrl(path, 604800); // 7 days
+  return data?.signedUrl ?? '';
+}
+
+async function toGenerationDto(row: Record<string, unknown>) {
   return {
     id: row.id,
     kind: row.kind,
@@ -123,10 +140,60 @@ function toGenerationDto(row: Record<string, unknown>) {
     settings: row.settings,
     priceUsd: Number(row.price_usd),
     status: row.status,
-    mediaUrl: row.media_url,
+    mediaUrl: await signMedia((row.media_path as string) ?? null),
     parentId: row.parent_id,
     createdAt: row.created_at,
   };
+}
+
+async function toGenerationDtos(rows: Record<string, unknown>[]) {
+  return Promise.all(rows.map(toGenerationDto));
+}
+
+async function isSuspended(userId: string): Promise<boolean> {
+  const { data } = await admin.from('profiles').select('strikes').eq('id', userId).single();
+  return (data?.strikes ?? 0) >= SUSPEND_STRIKES;
+}
+
+async function modelEnabled(familyId: string): Promise<boolean> {
+  const { data } = await admin.from('models').select('enabled').eq('id', familyId).maybeSingle();
+  return data?.enabled ?? false;
+}
+
+async function recordStrike(
+  userId: string,
+  source: 'prompt' | 'upload',
+  prompt: string | null,
+  categories: Record<string, number>,
+  quarantinePath?: string,
+): Promise<void> {
+  await admin.from('moderation_events').insert({
+    user_id: userId,
+    source,
+    prompt,
+    categories,
+    quarantine_path: quarantinePath ?? null,
+  });
+  await admin.rpc('fn_increment_strike', { p_user: userId });
+}
+
+/** Upload finished bytes to private storage, flip the generation done. */
+async function finishJob(
+  job: { id: string; user_id: string; generation_id: string },
+  result: CheckResult,
+): Promise<void> {
+  if (result.state === 'running') return;
+  if (result.state === 'failed') {
+    await admin.rpc('fn_fail_job', { p_job: job.id, p_error: result.error });
+    return;
+  }
+  const path = `${job.user_id}/${job.generation_id}.png`;
+  await admin.storage.from('media').upload(path, result.bytes, {
+    contentType: result.contentType,
+    upsert: true,
+  });
+  await admin.from('generations').update({ status: 'done', media_path: path }).eq('id', job.generation_id);
+  await admin.from('jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
 }
 
 function toLedgerDto(row: Record<string, unknown>) {
@@ -267,7 +334,50 @@ app.get('/generations', async (c) => {
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) return fail(c, 400, 'query_failed', error.message);
-  return c.json({ items: (data ?? []).map(toGenerationDto) });
+  return c.json({ items: await toGenerationDtos(data ?? []) });
+});
+
+app.get('/models', async (c) => {
+  const { data } = await admin.from('models').select('id,enabled');
+  return c.json({ models: data ?? [] });
+});
+
+app.get('/jobs', async (c) => {
+  const userId = c.get('userId');
+  const idsParam = c.req.query('ids') ?? '';
+  const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 20);
+  if (ids.length === 0) return c.json({ items: [] });
+
+  const { data: jobs } = await admin
+    .from('jobs')
+    .select('id,user_id,generation_id,provider_ref,error')
+    .eq('user_id', userId)
+    .in('generation_id', ids);
+
+  for (const job of jobs ?? []) {
+    if (job.error || !job.provider_ref) continue;
+    // Skip inline providers already resolved at submit; only poll real refs.
+    if (job.provider_ref === 'inline') continue;
+    const { data: gen } = await admin
+      .from('generations')
+      .select('status,family_id')
+      .eq('id', job.generation_id)
+      .single();
+    if (!gen || gen.status !== 'pending') continue;
+    try {
+      const result = await adapterFor(gen.family_id).check(job.provider_ref);
+      await finishJob(job, result);
+    } catch (e) {
+      await admin.rpc('fn_fail_job', { p_job: job.id, p_error: String(e).slice(0, 500) });
+    }
+  }
+
+  const { data: gens } = await admin
+    .from('generations')
+    .select('*')
+    .eq('user_id', userId)
+    .in('id', ids);
+  return c.json({ items: await toGenerationDtos(gens ?? []) });
 });
 
 app.post('/generations', async (c) => {
@@ -292,14 +402,10 @@ app.post('/generations', async (c) => {
   if ((op === GenerationOp.Edit || op === GenerationOp.Upscale) && !parentId) {
     return fail(c, 400, 'invalid_parent', `${op} requires parentId`);
   }
-  if (parentId) {
-    const { data: parent } = await admin
-      .from('generations')
-      .select('id')
-      .eq('id', parentId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (!parent) return fail(c, 404, 'not_found', 'Parent generation not found');
+
+  // Suspension shield (2 strikes = out).
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
   }
 
   let familyId: string;
@@ -324,12 +430,40 @@ app.post('/generations', async (c) => {
     unitPrice = round2(userPriceUsd(family, settings));
   }
 
+  // Kill switch.
+  if (!(await modelEnabled(familyId))) {
+    return fail(c, 503, 'model_disabled', 'This model is temporarily unavailable.');
+  }
+
+  // Moderation gate — BEFORE charge and BEFORE any provider call.
+  const mod = await moderate({ text: prompt });
+  if (mod.flagged) {
+    await recordStrike(userId, 'prompt', prompt, mod.categories);
+    return fail(c, 422, 'content_policy', 'This prompt violates our content policy.');
+  }
+
+  // Resolve reference (parent generation or uploaded image) to a signed URL.
+  let referenceUrl: string | undefined;
+  const referenceUploadId = typeof body.referenceUploadId === 'string' ? body.referenceUploadId : null;
+  if (parentId) {
+    const { data: parent } = await admin
+      .from('generations')
+      .select('media_path')
+      .eq('id', parentId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!parent) return fail(c, 404, 'not_found', 'Parent generation not found');
+    referenceUrl = await signMedia(parent.media_path);
+  } else if (referenceUploadId) {
+    const { data } = await admin.storage.from('uploads').createSignedUrl(referenceUploadId, 3600);
+    referenceUrl = data?.signedUrl ?? undefined;
+  }
+
   const total = round2(unitPrice * batch);
   const ledgerType = op === GenerationOp.Variation ? LedgerType.Generate : (op as LedgerType);
   const note = batch > 1 ? `${familyName} ×${batch}` : familyName;
-  const seed = Math.floor(Math.random() * PLACEHOLDER_MEDIA.length);
 
-  const items = Array.from({ length: batch }, (_, i) => ({
+  const items = Array.from({ length: batch }, () => ({
     kind,
     familyId,
     familyName,
@@ -337,7 +471,7 @@ app.post('/generations', async (c) => {
     prompt,
     settings,
     priceUsd: unitPrice,
-    mediaUrl: PLACEHOLDER_MEDIA[(seed + i) % PLACEHOLDER_MEDIA.length],
+    mediaUrl: '', // filled when the provider job completes
     parentId,
   }));
 
@@ -357,8 +491,42 @@ app.post('/generations', async (c) => {
     return fail(c, 400, 'charge_failed', 'Charge could not be completed');
   }
 
+  // Dispatch each generation to its provider.
+  const adapter = adapterFor(familyId);
+  const sid = await safetyId(userId);
+  const created = (data ?? []) as Record<string, unknown>[];
+  for (const gen of created) {
+    const genId = gen.id as string;
+    const { data: jobRow } = await admin
+      .from('jobs')
+      .insert({ generation_id: genId, user_id: userId, provider: adapter.provider })
+      .select('id')
+      .single();
+    try {
+      const submitted = await adapter.submit({
+        familyId,
+        op,
+        prompt,
+        settings: settings as Record<string, unknown>,
+        referenceUrl,
+        maskPngBase64: typeof body.maskPngBase64 === 'string' ? body.maskPngBase64 : undefined,
+        safetyId: sid,
+      });
+      await admin.from('jobs').update({ provider_ref: submitted.providerRef }).eq('id', jobRow!.id);
+      if (submitted.inline) {
+        await finishJob({ id: jobRow!.id, user_id: userId, generation_id: genId }, submitted.inline);
+      }
+    } catch (e) {
+      await admin.rpc('fn_fail_job', { p_job: jobRow!.id, p_error: String(e).slice(0, 500) });
+    }
+  }
+
+  const { data: finalRows } = await admin
+    .from('generations')
+    .select('*')
+    .in('id', created.map((g) => g.id));
   const balanceUsd = await balanceOf(userId);
-  return c.json({ items: (data ?? []).map(toGenerationDto), balanceUsd });
+  return c.json({ items: await toGenerationDtos(finalRows ?? []), balanceUsd });
 });
 
 app.post('/billing/checkout', async (c) => {
@@ -452,6 +620,40 @@ app.post('/billing/reconcile', async (c) => {
     console.error('reconcile_failed:', e);
     return fail(c, 400, 'billing_failed', 'Reconcile failed');
   }
+});
+
+app.post('/uploads', async (c) => {
+  const userId = c.get('userId');
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
+  }
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get('file');
+  if (!(file instanceof File)) return fail(c, 400, 'upload_failed', 'No file provided');
+  if (file.size > UPLOAD_MAX_BYTES) return fail(c, 400, 'upload_failed', 'File exceeds 10MB');
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const ext = sniffImage(bytes);
+  if (!ext) return fail(c, 400, 'upload_failed', 'Only PNG, JPEG, or WEBP images are allowed');
+
+  const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+  const { error: upErr } = await admin.storage.from('uploads').upload(path, bytes, {
+    contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+  });
+  if (upErr) return fail(c, 400, 'upload_failed', 'Storage rejected the file');
+
+  // Moderate the image before it can be used as a reference.
+  const { data: signed } = await admin.storage.from('uploads').createSignedUrl(path, 600);
+  const mod = await moderate({ imageUrl: signed?.signedUrl });
+  if (mod.flagged) {
+    const quarantine = `quarantine/${userId}/${crypto.randomUUID()}.${ext}`;
+    await admin.storage.from('uploads').copy(path, quarantine);
+    await admin.storage.from('uploads').remove([path]);
+    await recordStrike(userId, 'upload', null, mod.categories, quarantine);
+    return fail(c, 422, 'content_policy', 'This image violates our content policy.');
+  }
+
+  return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
 });
 
 app.delete('/generations/:id', async (c) => {

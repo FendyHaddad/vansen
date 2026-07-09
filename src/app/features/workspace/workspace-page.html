@@ -1,4 +1,18 @@
-<div class="shell">
+@if (suspended()) {
+  <div class="suspended-screen">
+    <div class="suspended-card">
+      <h1>Account suspended</h1>
+      <p>
+        Your account was suspended after two content-policy violations. If you believe
+        this was a mistake, our moderation is AI-assisted and can be wrong — email
+        <a href="mailto:support@vansen.vankode.com">support@vansen.vankode.com</a> and a
+        human will review your case.
+      </p>
+      <button type="button" class="linkish" (click)="signOut()">Sign out</button>
+    </div>
+  </div>
+}
+<div class="shell" [class.shell-hidden]="suspended()">
   <aside class="sidebar">
     <div class="side-head">
       <a routerLink="/app" class="ws-brand">Vansen</a>
@@ -84,6 +98,7 @@
         (upscale)="onUpscale($event)"
         (variation)="onVariation($event)"
         (edit)="onEdit($event)"
+        (retry)="onRetry($event)"
         (promptPicked)="usePrompt($event)"
       />
     </main>

@@ -17,6 +17,8 @@ import { GenerationStore } from '../../core/generations/generation-store';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
 import { BillingService } from '../../core/billing/billing-service';
+import { JobPoller } from '../../core/jobs/job-poller';
+import { ModelAvailability } from '../../core/models/model-availability';
 import { ApiError } from '../../core/api/api-service';
 import { GenerationOp } from '../../core/enums';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
@@ -54,6 +56,8 @@ export class WorkspacePage {
   private readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
   private readonly billing = inject(BillingService);
+  private readonly poller = inject(JobPoller);
+  private readonly availability = inject(ModelAvailability);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
@@ -87,8 +91,14 @@ export class WorkspacePage {
   /** Inline notice banner (errors, phase hints). */
   readonly notice = signal('');
 
+  /** Set when 2 strikes suspend the account — blocks the whole workspace. */
+  readonly suspended = signal(false);
+
   constructor() {
-    void this.refresh().then(() => this.handleCheckoutReturn());
+    void this.refresh().then(() => {
+      this.handleCheckoutReturn();
+      this.poller.watch();
+    });
   }
 
   /** Stripe redirects back with ?checkout=success|canceled; webhook may lag a second. */
@@ -120,18 +130,36 @@ export class WorkspacePage {
 
   private async refresh(): Promise<void> {
     try {
-      await Promise.all([this.profileStore.load(), this.store.load()]);
+      await Promise.all([this.profileStore.load(), this.store.load(), this.availability.load()]);
     } catch (e) {
       this.showError(e, 'Could not load your workspace');
     }
   }
 
   private showError(e: unknown, fallback: string): void {
-    if (e instanceof ApiError && e.code === 'insufficient_balance') {
-      this.notice.set('Balance too low — top up to continue.');
+    if (e instanceof ApiError) {
+      if (e.code === 'insufficient_balance') {
+        this.notice.set('Balance too low — top up to continue.');
+        return;
+      }
+      if (e.code === 'account_suspended') {
+        this.suspended.set(true);
+        return;
+      }
+      if (e.code === 'content_policy') {
+        this.notice.set(
+          'This request violates our content policy and was blocked. Two violations suspend your account. If this was a mistake, contact support to appeal.',
+        );
+        return;
+      }
+      if (e.code === 'model_disabled') {
+        this.notice.set('That model is temporarily unavailable. Try another.');
+        return;
+      }
+      this.notice.set(e.message);
       return;
     }
-    this.notice.set(e instanceof ApiError ? e.message : fallback);
+    this.notice.set(fallback);
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
@@ -142,7 +170,7 @@ export class WorkspacePage {
     ) {
       return;
     }
-    const op = req.referenceId ? GenerationOp.Edit : GenerationOp.Generate;
+    const op = req.referenceId || req.referenceUploadId ? GenerationOp.Edit : GenerationOp.Generate;
     try {
       await this.store.create({
         familyId: req.family.id,
@@ -151,9 +179,11 @@ export class WorkspacePage {
         settings: req.settings,
         batch: req.batch,
         parentId: req.referenceId ?? undefined,
+        referenceUploadId: req.referenceUploadId ?? undefined,
       });
       this.rail().setReference(null);
       this.notice.set('');
+      this.poller.watch();
     } catch (e) {
       this.showError(e, 'Generation failed');
     }
@@ -166,7 +196,7 @@ export class WorkspacePage {
   onReferencePicked(id: string): void {
     const item = this.store.byId(id);
     if (item && item.kind === 'image') {
-      this.rail().setReference({ id, url: item.mediaUrl });
+      this.rail().setReference({ id, uploadId: null, url: item.mediaUrl });
     }
     this.pickingReference.set(false);
   }
@@ -207,6 +237,7 @@ export class WorkspacePage {
         parentId: item.id,
       });
       this.notice.set('');
+      this.poller.watch();
     } catch (e) {
       this.showError(e, 'Upscale failed');
     }
@@ -224,6 +255,7 @@ export class WorkspacePage {
         batch: 1,
       });
       this.notice.set('');
+      this.poller.watch();
     } catch (e) {
       this.showError(e, 'Variation failed');
     }
@@ -231,6 +263,26 @@ export class WorkspacePage {
 
   onEdit(id: string): void {
     this.router.navigate(['/app/edit', id]);
+  }
+
+  /** Re-submit a failed generation with the same settings. */
+  async onRetry(id: string): Promise<void> {
+    const item = this.store.byId(id);
+    if (!item) return;
+    try {
+      await this.store.create({
+        familyId: item.familyId,
+        op: item.op === 'edit' || item.op === 'upscale' ? item.op : GenerationOp.Generate,
+        prompt: item.prompt,
+        settings: item.settings,
+        batch: 1,
+        parentId: item.parentId ?? undefined,
+      });
+      this.notice.set('');
+      this.poller.watch();
+    } catch (e) {
+      this.showError(e, 'Retry failed');
+    }
   }
 
   usePrompt(value: string): void {

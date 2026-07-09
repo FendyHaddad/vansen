@@ -247,3 +247,42 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.gen-failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px;
+  text-align: center;
+}
+
+.failed-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--loss);
+}
+
+.failed-sub {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+
+.failed-retry {
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.failed-retry:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+}

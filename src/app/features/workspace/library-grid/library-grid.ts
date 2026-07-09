@@ -35,6 +35,7 @@ export class LibraryGrid {
   readonly upscale = output<string>();
   readonly variation = output<string>();
   readonly edit = output<string>();
+  readonly retry = output<string>();
   readonly promptPicked = output<string>();
 
   readonly filter = signal<LibraryFilter>('all');

@@ -29,6 +29,9 @@ import {
 } from '../../../core/catalog/model-families';
 import { LedgerService } from '../../../core/ledger/ledger-service';
 import { PreferencesService } from '../../../core/preferences/preferences-service';
+import { ApiService } from '../../../core/api/api-service';
+import { UploadResponse } from '../../../core/api/dtos';
+import { ModelAvailability } from '../../../core/models/model-availability';
 import { OptionGroup } from '../option-group/option-group';
 import { Hint } from '../../../shared/hint/hint';
 
@@ -36,7 +39,10 @@ export interface GenerateRequest {
   family: ModelFamily;
   settings: GenerationSettings;
   prompt: string;
+  /** Library generation used as edit source. */
   referenceId: string | null;
+  /** Uploaded image (storage path) used as edit source. */
+  referenceUploadId: string | null;
   referenceUrl: string | null;
   /** Outputs requested in this run. */
   batch: number;
@@ -45,7 +51,8 @@ export interface GenerateRequest {
 }
 
 export interface ReferenceSelection {
-  id: string | null; // null = uploaded file
+  id: string | null; // library generation id
+  uploadId: string | null; // storage upload path
   url: string;
 }
 
@@ -79,9 +86,14 @@ const AXIS_TOOLTIPS = {
 export class SettingsRail {
   private readonly ledger = inject(LedgerService);
   private readonly prefsService = inject(PreferencesService);
+  private readonly api = inject(ApiService);
+  private readonly availability = inject(ModelAvailability);
 
   readonly generateRequested = output<GenerateRequest>();
   readonly pickReferenceRequested = output<void>();
+
+  readonly uploading = signal(false);
+  readonly uploadError = signal('');
 
   readonly mode = signal<ModelKind>('image');
   readonly familyId = signal(firstFamilyOf('image').id);
@@ -212,13 +224,31 @@ export class SettingsRail {
     this.reference.set(ref);
   }
 
-  onFilePicked(event: Event): void {
-    const file = (event.target as HTMLInputElement).files?.[0];
+  async onFilePicked(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => this.reference.set({ id: null, url: String(reader.result) });
-    reader.readAsDataURL(file);
-    (event.target as HTMLInputElement).value = '';
+    this.uploadError.set('');
+    this.uploading.set(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await this.api.postForm<UploadResponse>('/uploads', form);
+      this.reference.set({ id: null, uploadId: res.uploadId, url: res.url });
+    } catch (e) {
+      this.uploadError.set(
+        (e as { code?: string })?.code === 'content_policy'
+          ? 'That image violates our content policy.'
+          : 'Upload failed — try another image.',
+      );
+    } finally {
+      this.uploading.set(false);
+    }
+  }
+
+  disabledFamily(familyId: string): boolean {
+    return this.availability.disabled(familyId);
   }
 
   generate(): void {
@@ -228,6 +258,7 @@ export class SettingsRail {
       settings: { ...this.settings() },
       prompt: this.prompt().trim(),
       referenceId: this.reference()?.id ?? null,
+      referenceUploadId: this.reference()?.uploadId ?? null,
       referenceUrl: this.reference()?.url ?? null,
       batch: this.batch(),
       priceUsd: this.priceUsd(),

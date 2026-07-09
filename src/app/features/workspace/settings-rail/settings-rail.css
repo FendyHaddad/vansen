@@ -238,3 +238,22 @@
   color: var(--warn);
   text-align: center;
 }
+
+.ref-file-input {
+  display: none;
+}
+
+.ref-error {
+  font-size: 0.75rem;
+  color: var(--loss);
+  margin-top: 6px;
+}
+
+.model-item-soon {
+  margin-left: auto;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
