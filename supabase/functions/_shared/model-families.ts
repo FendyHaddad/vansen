@@ -301,6 +301,67 @@ export const UPSCALER = {
   providerCost: 0.04,
 } as const;
 
+/**
+ * Studio panel AI edit tools — fixed-function (one curated backend model each,
+ * user never picks) with fixed retail prices (NOT the PAYG margin formula).
+ */
+export interface EditTool {
+  id: string;
+  name: string;
+  /** What the user pays per use — fixed retail. */
+  userPriceUsd: number;
+  /** Our provider cost, for margin bookkeeping only. */
+  providerCost: number;
+  /** Tool needs a painted mask before it can run. */
+  needsMask: boolean;
+  /** Tool needs a user prompt (generative fill). */
+  needsPrompt: boolean;
+  blurb: string;
+}
+
+export const EDIT_TOOLS: EditTool[] = [
+  {
+    id: 'edit-remove',
+    name: 'Remove Object',
+    userPriceUsd: 0.1,
+    providerCost: 0.05,
+    needsMask: true,
+    needsPrompt: false,
+    blurb: 'Mask anything and AI repaints the scene behind it.',
+  },
+  {
+    id: 'edit-fill',
+    name: 'Generative Fill',
+    userPriceUsd: 0.1,
+    providerCost: 0.05,
+    needsMask: true,
+    needsPrompt: true,
+    blurb: 'Mask an area and describe what should appear there.',
+  },
+  {
+    id: 'edit-expand',
+    name: 'Expand',
+    userPriceUsd: 0.1,
+    providerCost: 0.05,
+    needsMask: false,
+    needsPrompt: false,
+    blurb: 'Grow the canvas — AI paints beyond the original edges.',
+  },
+  {
+    id: 'edit-bg',
+    name: 'Remove Background',
+    userPriceUsd: 0.05,
+    providerCost: 0.002,
+    needsMask: false,
+    needsPrompt: false,
+    blurb: 'Cut the subject out onto a transparent background.',
+  },
+];
+
+export function editToolById(id: string): EditTool | undefined {
+  return EDIT_TOOLS.find((t) => t.id === id);
+}
+
 export function familyById(id: string): ModelFamily | undefined {
   return MODEL_FAMILIES.find((f) => f.id === id);
 }

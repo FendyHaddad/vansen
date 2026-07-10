@@ -22,9 +22,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/workspace/workspace-page').then((m) => m.WorkspacePage),
   },
   {
+    // Absorbed into the workspace edit mode — the id opens the canvas directly.
     path: 'app/edit/:id',
     canActivate: [authGuard],
-    loadComponent: () => import('./features/editor/editor-page').then((m) => m.EditorPage),
+    loadComponent: () => import('./features/workspace/workspace-page').then((m) => m.WorkspacePage),
   },
   {
     path: 'app/settings',

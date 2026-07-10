@@ -7,6 +7,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import {
   UPSCALER,
+  editToolById,
   familyById,
   upscaleUserPriceUsd,
   userPriceUsd,
@@ -29,7 +30,7 @@ const admin = createClient(
 );
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
-  apiVersion: '2024-06-20',
+  apiVersion: '2024-06-20' as Stripe.LatestApiVersion,
   httpClient: Stripe.createFetchHttpClient(),
 });
 const STUDIO_PRICE_ID = Deno.env.get('STRIPE_STUDIO_PRICE_ID')!;
@@ -75,18 +76,18 @@ function sanitizeSettings(raw: unknown): GenerationSettings {
   return clean;
 }
 
-const PREF_CHECKS: Record<string, (v: unknown) => boolean> = {
-  defaultMode: (v) => v === 'image' || v === 'video',
-  defaultImageFamily: (v) => typeof v === 'string' && v.length <= 40,
-  defaultVideoFamily: (v) => typeof v === 'string' && v.length <= 40,
-  defaultAspect: (v) => typeof v === 'string' && v.length <= 10,
-  confirmOverUsd: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000,
-};
+const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
+  ['defaultMode', (v) => v === 'image' || v === 'video'],
+  ['defaultImageFamily', (v) => typeof v === 'string' && v.length <= 40],
+  ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
+  ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
+  ['confirmOverUsd', (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000],
+];
 
 /** Whitelist prefs: unknown keys dropped, invalid values reject the request. */
 function sanitizePrefs(raw: Record<string, unknown>): Record<string, unknown> | null {
   const clean: Record<string, unknown> = {};
-  for (const [key, check] of Object.entries(PREF_CHECKS)) {
+  for (const [key, check] of PREF_CHECKS) {
     if (key in raw) {
       if (!check(raw[key])) return null;
       clean[key] = raw[key];
@@ -419,15 +420,31 @@ app.post('/generations', async (c) => {
     kind = MediaKind.Image;
     unitPrice = round2(upscaleUserPriceUsd());
   } else {
-    const family = familyById(String(body.familyId ?? ''));
-    if (!family) return fail(c, 400, 'invalid_family', 'Unknown model family');
-    if (family.kind === MediaKind.Video && op !== GenerationOp.Generate && op !== GenerationOp.Variation) {
-      return fail(c, 400, 'invalid_op', 'Video supports generate/variation only');
+    const editTool = editToolById(String(body.familyId ?? ''));
+    if (editTool) {
+      // Studio panel AI tool — fixed retail price, edit op only, Studio members only.
+      if (op !== GenerationOp.Edit) return fail(c, 400, 'invalid_op', 'Edit tools use op=edit');
+      if (!(await hasActiveStudio(userId))) {
+        return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
+      }
+      if (editTool.needsMask && typeof body.maskPngBase64 !== 'string') {
+        return fail(c, 400, 'invalid_payload', `${editTool.name} requires a mask`);
+      }
+      familyId = editTool.id;
+      familyName = editTool.name;
+      kind = MediaKind.Image;
+      unitPrice = editTool.userPriceUsd; // fixed retail — no rounding drift
+    } else {
+      const family = familyById(String(body.familyId ?? ''));
+      if (!family) return fail(c, 400, 'invalid_family', 'Unknown model family');
+      if (family.kind === MediaKind.Video && op !== GenerationOp.Generate && op !== GenerationOp.Variation) {
+        return fail(c, 400, 'invalid_op', 'Video supports generate/variation only');
+      }
+      familyId = family.id;
+      familyName = family.name;
+      kind = family.kind;
+      unitPrice = round2(userPriceUsd(family, settings));
     }
-    familyId = family.id;
-    familyName = family.name;
-    kind = family.kind;
-    unitPrice = round2(userPriceUsd(family, settings));
   }
 
   // Kill switch.
@@ -507,7 +524,7 @@ app.post('/generations', async (c) => {
         familyId,
         op,
         prompt,
-        settings: settings as Record<string, unknown>,
+        settings: { ...settings },
         referenceUrl,
         maskPngBase64: typeof body.maskPngBase64 === 'string' ? body.maskPngBase64 : undefined,
         safetyId: sid,
@@ -654,6 +671,79 @@ app.post('/uploads', async (c) => {
   }
 
   return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
+});
+
+/** Persist a locally-edited canvas as a new $0 generation version. */
+app.post('/edits/save', async (c) => {
+  const userId = c.get('userId');
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
+  }
+  if (!(await hasActiveStudio(userId))) {
+    return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
+  }
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get('file');
+  const parentId = String(form?.get('parentId') ?? '');
+  if (!(file instanceof File)) return fail(c, 400, 'upload_failed', 'No file provided');
+  if (file.size > UPLOAD_MAX_BYTES) return fail(c, 400, 'upload_failed', 'File exceeds 10MB');
+  if (!parentId) return fail(c, 400, 'invalid_parent', 'parentId required');
+
+  const { data: parent } = await admin
+    .from('generations')
+    .select('id,prompt,settings')
+    .eq('id', parentId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!parent) return fail(c, 404, 'not_found', 'Parent generation not found');
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (sniffImage(bytes) !== 'png') return fail(c, 400, 'upload_failed', 'PNG required');
+
+  // Moderation BEFORE anything persists outside quarantine reach.
+  const scratch = `scratch/${userId}/${crypto.randomUUID()}.png`;
+  await admin.storage.from('uploads').upload(scratch, bytes, { contentType: 'image/png' });
+  const { data: signed } = await admin.storage.from('uploads').createSignedUrl(scratch, 600);
+  const mod = await moderate({ imageUrl: signed?.signedUrl });
+  if (mod.flagged) {
+    const quarantine = `quarantine/${userId}/${crypto.randomUUID()}.png`;
+    await admin.storage.from('uploads').copy(scratch, quarantine);
+    await admin.storage.from('uploads').remove([scratch]);
+    await recordStrike(userId, 'upload', null, mod.categories, quarantine);
+    return fail(c, 422, 'content_policy', 'This image violates our content policy.');
+  }
+  await admin.storage.from('uploads').remove([scratch]);
+
+  const { data: gen, error } = await admin
+    .from('generations')
+    .insert({
+      user_id: userId,
+      kind: MediaKind.Image,
+      family_id: 'studio',
+      family_name: 'Studio Edit',
+      op: GenerationOp.Edit,
+      prompt: parent.prompt,
+      settings: parent.settings,
+      price_usd: 0,
+      status: 'done',
+      media_url: '',
+      parent_id: parentId,
+    })
+    .select('*')
+    .single();
+  if (error || !gen) return fail(c, 400, 'save_failed', 'Could not save the edit');
+
+  const path = `${userId}/${gen.id}.png`;
+  const { error: upErr } = await admin.storage.from('media').upload(path, bytes, {
+    contentType: 'image/png',
+    upsert: true,
+  });
+  if (upErr) {
+    await admin.from('generations').delete().eq('id', gen.id);
+    return fail(c, 400, 'save_failed', 'Storage rejected the file');
+  }
+  await admin.from('generations').update({ media_path: path }).eq('id', gen.id);
+  return c.json({ item: await toGenerationDto({ ...gen, media_path: path }) });
 });
 
 app.delete('/generations/:id', async (c) => {

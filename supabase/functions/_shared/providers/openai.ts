@@ -48,7 +48,7 @@ export const openaiAdapter: ProviderAdapter = {
       form.append('image', await urlToBlob(ctx.referenceUrl), 'source.png');
       if (ctx.maskPngBase64) {
         const maskBytes = base64ToBytes(ctx.maskPngBase64.replace(/^data:image\/\w+;base64,/, ''));
-        form.append('mask', new Blob([maskBytes], { type: 'image/png' }), 'mask.png');
+        form.append('mask', new Blob([maskBytes as BlobPart], { type: 'image/png' }), 'mask.png');
       }
       const res = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',

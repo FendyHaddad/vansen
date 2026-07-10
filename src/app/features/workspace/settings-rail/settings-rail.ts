@@ -12,6 +12,7 @@ import {
   lucideChevronDown,
   lucideImage,
   lucideImagePlus,
+  lucideLock,
   lucideVideo,
   lucideWandSparkles,
   lucideX,
@@ -75,6 +76,7 @@ const AXIS_TOOLTIPS = {
   providers: [
     provideIcons({
       lucideImage,
+      lucideLock,
       lucideVideo,
       lucideWandSparkles,
       lucideImagePlus,
@@ -95,6 +97,9 @@ export class SettingsRail {
   readonly uploading = signal(false);
   readonly uploadError = signal('');
 
+  /** Video generation ships with the Pro tier (Phase 4b) — locked teaser until then. */
+  readonly videoLocked = true;
+
   readonly mode = signal<ModelKind>('image');
   readonly familyId = signal(firstFamilyOf('image').id);
   readonly settings = signal<GenerationSettings>(defaultSettings(firstFamilyOf('image')));
@@ -106,7 +111,7 @@ export class SettingsRail {
   constructor() {
     // Apply user preferences as starting state
     const prefs = this.prefsService.prefs();
-    this.mode.set(prefs.defaultMode);
+    this.mode.set(this.videoLocked ? 'image' : prefs.defaultMode);
     const preferredId =
       prefs.defaultMode === 'video' ? prefs.defaultVideoFamily : prefs.defaultImageFamily;
     const preferred = MODEL_FAMILIES.find(
@@ -193,6 +198,7 @@ export class SettingsRail {
   }
 
   setMode(kind: ModelKind): void {
+    if (kind === 'video' && this.videoLocked) return;
     this.mode.set(kind);
     this.selectFamily(firstFamilyOf(kind).id);
   }

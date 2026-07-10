@@ -9,6 +9,11 @@ const BY_FAMILY: Record<string, ProviderAdapter> = {
   flux: falAdapter,
   seedream: falAdapter,
   upscaler: falAdapter,
+  // Studio panel AI edit tools — all fal (FLUX fill + BiRefNet)
+  'edit-remove': falAdapter,
+  'edit-fill': falAdapter,
+  'edit-expand': falAdapter,
+  'edit-bg': falAdapter,
 };
 
 export function adapterFor(familyId: string): ProviderAdapter {

@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -21,10 +22,14 @@ import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
 import { ApiError } from '../../core/api/api-service';
 import { GenerationOp } from '../../core/enums';
+import { EditSession } from '../../core/editing/edit-session';
+import { editToolById } from '../../core/catalog/model-families';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { SettingsRail, GenerateRequest } from './settings-rail/settings-rail';
 import { LibraryGrid } from './library-grid/library-grid';
 import { DetailOverlay } from './detail-overlay/detail-overlay';
+import { CanvasViewport } from '../studio/canvas-viewport/canvas-viewport';
+import { StudioPanel } from '../studio/studio-panel/studio-panel';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
@@ -46,6 +51,8 @@ const SAMPLE_PROMPTS = [
     SettingsRail,
     LibraryGrid,
     DetailOverlay,
+    CanvasViewport,
+    StudioPanel,
   ],
   providers: [provideIcons({ lucideSearch, lucideX })],
 })
@@ -62,6 +69,12 @@ export class WorkspacePage {
   private readonly route = inject(ActivatedRoute);
 
   readonly rail = viewChild.required(SettingsRail);
+  readonly viewport = viewChild(CanvasViewport);
+  readonly panel = viewChild.required(StudioPanel);
+  readonly editSession = inject(EditSession);
+
+  /** 'library' shows the grid; 'edit' swaps in the canvas viewport. */
+  readonly mode = signal<'library' | 'edit'>('library');
 
   readonly userEmail = this.auth.userEmail;
   readonly displayName = this.profileStore.displayName;
@@ -95,11 +108,38 @@ export class WorkspacePage {
   readonly suspended = signal(false);
 
   constructor() {
+    // Deep link from the absorbed /app/edit/:id route.
+    const editParam = this.route.snapshot.paramMap.get('id');
     void this.refresh().then(() => {
       this.handleCheckoutReturn();
       this.poller.watch();
+      if (editParam) void this.enterEdit(editParam);
+    });
+
+    // When an AI edit on the open session's chain completes, jump to the result.
+    effect(() => {
+      const items = this.store.items();
+      const sessionItem = this.editSession.item();
+      if (this.mode() !== 'edit' || !sessionItem) return;
+      const ready = items.find(
+        (i) =>
+          i.status === 'done' &&
+          i.familyId.startsWith('edit-') &&
+          i.parentId != null &&
+          (i.parentId === sessionItem.id || i.parentId === sessionItem.parentId) &&
+          i.id !== this.editSession.item()?.id &&
+          this.aiOpened !== i.id,
+      );
+      if (ready) {
+        this.aiOpened = ready.id;
+        this.notice.set('AI edit ready — opening the result.');
+        void this.enterEdit(ready.id);
+      }
     });
   }
+
+  /** Last AI-edit result auto-opened, so the effect fires once per result. */
+  private aiOpened: string | null = null;
 
   /** Stripe redirects back with ?checkout=success|canceled; webhook may lag a second. */
   private handleCheckoutReturn(): void {
@@ -262,7 +302,123 @@ export class WorkspacePage {
   }
 
   onEdit(id: string): void {
-    this.router.navigate(['/app/edit', id]);
+    this.openedId.set(null);
+    void this.enterEdit(id);
+  }
+
+  async enterEdit(id: string): Promise<void> {
+    const item = this.store.byId(id);
+    if (!item || item.kind !== 'image' || item.status !== 'done') return;
+    try {
+      await this.editSession.open(item);
+      this.mode.set('edit');
+    } catch {
+      this.notice.set('Could not open this image for editing.');
+    }
+  }
+
+  exitEdit(): void {
+    if (this.editSession.dirty() && !confirm('Discard unsaved edits?')) return;
+    this.editSession.close();
+    this.mode.set('library');
+  }
+
+  async onSaveEdit(): Promise<void> {
+    const item = this.editSession.item();
+    if (!item) return;
+    try {
+      const blob = await this.editSession.exportPngBlob();
+      const saved = await this.store.saveEdit(blob, item.id);
+      this.editSession.adoptItem(saved);
+      this.notice.set('Saved as a new version.');
+    } catch (e) {
+      this.showError(e, 'Save failed');
+    }
+  }
+
+  async onAiTool(req: { toolId: string; prompt: string }): Promise<void> {
+    const item = this.editSession.item();
+    if (!item) return;
+    const tool = editToolById(req.toolId);
+    if (!tool) return;
+
+    try {
+      // Expand: pad the canvas 25% per side; FLUX fill repaints the border mask.
+      if (req.toolId === 'edit-expand') {
+        await this.runExpand(item.id);
+        return;
+      }
+
+      const mask = this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
+      if (tool.needsMask && !mask) {
+        this.notice.set('Paint a mask first — the tool needs to know where to work.');
+        return;
+      }
+
+      // Persist the current canvas so the AI works on what the user sees.
+      const saved = this.editSession.dirty()
+        ? await this.store.saveEdit(await this.editSession.exportPngBlob(), item.id)
+        : item;
+      if (saved.id !== item.id) this.editSession.adoptItem(saved);
+
+      const prompt =
+        req.toolId === 'edit-fill'
+          ? req.prompt
+          : req.toolId === 'edit-remove'
+            ? 'remove the masked object and seamlessly continue the background'
+            : 'remove background';
+      await this.store.create({
+        familyId: req.toolId,
+        op: GenerationOp.Edit,
+        prompt,
+        settings: saved.settings,
+        batch: 1,
+        parentId: saved.id,
+        maskPngBase64: mask,
+      });
+      this.viewport()?.maskCanvas()?.clear();
+      this.notice.set('');
+      this.poller.watch();
+    } catch (e) {
+      this.showError(e, 'Edit failed');
+    }
+  }
+
+  private async runExpand(parentId: string): Promise<void> {
+    const buf = this.editSession.current();
+    if (!buf) return;
+    const padX = Math.round(buf.width * 0.25);
+    const padY = Math.round(buf.height * 0.25);
+    const w = buf.width + padX * 2;
+    const h = buf.height + padY * 2;
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d')!;
+    ctx.putImageData(
+      new ImageData(new Uint8ClampedArray(buf.data), buf.width, buf.height),
+      padX,
+      padY,
+    );
+    const padded = await canvas.convertToBlob({ type: 'image/png' });
+    const maskCanvas = new OffscreenCanvas(w, h);
+    const mctx = maskCanvas.getContext('2d')!;
+    mctx.fillStyle = '#fff';
+    mctx.fillRect(0, 0, w, h);
+    mctx.fillStyle = '#000';
+    mctx.fillRect(padX, padY, buf.width, buf.height);
+    const expandMask = await blobToDataUrl(await maskCanvas.convertToBlob({ type: 'image/png' }));
+
+    const saved = await this.store.saveEdit(padded, parentId);
+    await this.store.create({
+      familyId: 'edit-expand',
+      op: GenerationOp.Edit,
+      prompt: 'continue the image naturally beyond its original edges',
+      settings: saved.settings,
+      batch: 1,
+      parentId: saved.id,
+      maskPngBase64: expandMask,
+    });
+    this.notice.set('');
+    this.poller.watch();
   }
 
   /** Re-submit a failed generation with the same settings. */
@@ -310,6 +466,16 @@ export class WorkspacePage {
     this.ledger.reset();
     this.store.reset();
     this.profileStore.reset();
+    this.editSession.close();
     this.router.navigate(['/']);
   }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }

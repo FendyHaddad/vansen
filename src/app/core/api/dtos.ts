@@ -91,6 +91,10 @@ export interface UploadResponse {
   url: string;
 }
 
+export interface SaveEditResponse {
+  item: GenerationDto;
+}
+
 export interface CheckoutRequest {
   creditsUsd?: number;
   studioOnly?: boolean;

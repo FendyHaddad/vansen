@@ -13,9 +13,11 @@
       type="button"
       class="mode-btn"
       [class.mode-active]="mode() === 'video'"
+      [class.mode-locked]="videoLocked"
+      [attr.title]="videoLocked ? 'Video — coming with Pro' : null"
       (click)="setMode('video')"
     >
-      <ng-icon name="lucideVideo" size="15" />
+      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="15" />
       Video
     </button>
   </div>

@@ -36,6 +36,15 @@
   GOOGLE_AI_API_KEY (needs paid tier — free tier has zero image quota), OPENAI_API_KEY
   (also powers moderation), FAL_API_KEY. Redeploying `api` must bundle every `_shared/`
   file including `providers/`.
+- Studio editing (Phase 3b, live): workspace edit mode (grid ↔ canvas swap, old
+  `/app/edit/:id` absorbed). Local tools = Canvas2D engine `src/app/core/editing/`
+  (worker + fallback; heal = lazy OpenCV.js — angular.json needs
+  externalDependencies crypto/fs/path). `POST /edits/save` = moderated $0 "Studio Edit"
+  version, Studio-gated (403 `studio_required`). AI edit tools `edit-remove|edit-fill|
+  edit-expand|edit-bg` in `EDIT_TOOLS` (model-families.ts): FIXED retail prices
+  ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,
+  fal FLUX-fill (mask as data URI) + BiRefNet, kill-switch rows in `models`.
+  Expand = client pads canvas 25%/side + border mask. Video = Phase 4b, locked teaser.
 
 ## Project docs
 - Product spec: `vansen.md`

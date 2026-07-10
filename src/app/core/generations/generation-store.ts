@@ -5,6 +5,7 @@ import {
   CreateGenerationResponse,
   GenerationDto,
   GenerationsResponse,
+  SaveEditResponse,
 } from '../api/dtos';
 import { GenerationOp } from '../enums';
 import { LedgerService } from '../ledger/ledger-service';
@@ -59,6 +60,16 @@ export class GenerationStore {
     this.itemsSig.update((list) => [...response.items, ...list]);
     this.ledger.setBalance(response.balanceUsd);
     return response.items;
+  }
+
+  /** Persist a locally-edited canvas as a $0 version row. */
+  async saveEdit(blob: Blob, parentId: string): Promise<GenerationDto> {
+    const form = new FormData();
+    form.append('file', blob, 'edit.png');
+    form.append('parentId', parentId);
+    const res = await this.api.postForm<SaveEditResponse>('/edits/save', form);
+    this.itemsSig.update((list) => [res.item, ...list]);
+    return res.item;
   }
 
   async remove(id: string): Promise<void> {

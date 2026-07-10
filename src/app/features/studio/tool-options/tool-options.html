@@ -1,0 +1,108 @@
+@switch (tool()) {
+  @case ('adjust') {
+    <div class="opts">
+      <label>
+        Brightness
+        <input
+          type="range"
+          min="-100"
+          max="100"
+          [value]="brightness()"
+          (input)="brightness.set(+$any($event.target).value)"
+        />
+      </label>
+      <label>
+        Contrast
+        <input
+          type="range"
+          min="-100"
+          max="100"
+          [value]="contrast()"
+          (input)="contrast.set(+$any($event.target).value)"
+        />
+      </label>
+      <label>
+        Saturation
+        <input
+          type="range"
+          min="-100"
+          max="100"
+          [value]="saturation()"
+          (input)="saturation.set(+$any($event.target).value)"
+        />
+      </label>
+      <button type="button" class="apply-btn" (click)="applyAdjust()">Apply</button>
+    </div>
+  }
+  @case ('sharpen') {
+    <div class="opts">
+      <label>
+        Amount
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="amount()"
+          (input)="amount.set(+$any($event.target).value)"
+        />
+      </label>
+      <button type="button" class="apply-btn" (click)="applySharpen()">Apply sharpen</button>
+    </div>
+  }
+  @case ('smooth') {
+    <div class="opts">
+      <label>
+        Amount
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="amount()"
+          (input)="amount.set(+$any($event.target).value)"
+        />
+      </label>
+      <button type="button" class="apply-btn" (click)="applySmooth()">Apply smooth</button>
+    </div>
+  }
+  @case ('crop') {
+    <div class="opts">
+      <p class="opt-hint">Drag on the image to choose the crop area.</p>
+      <button type="button" class="apply-btn" (click)="applyRotate()">Rotate 90°</button>
+    </div>
+  }
+  @case ('liquify') {
+    <div class="opts">
+      <label>
+        Brush
+        <input
+          type="range"
+          min="10"
+          max="200"
+          [value]="brushSize()"
+          (input)="brushSize.set(+$any($event.target).value)"
+        />
+      </label>
+      <p class="opt-hint">Drag on the image to push pixels.</p>
+    </div>
+  }
+  @case ('heal') {
+    <div class="opts">
+      <label>
+        Brush
+        <input
+          type="range"
+          min="10"
+          max="120"
+          [value]="brushSize()"
+          (input)="brushSize.set(+$any($event.target).value)"
+        />
+      </label>
+      <p class="opt-hint">Paint over a blemish, then release to heal.</p>
+    </div>
+  }
+  @case ('mask') {
+    <div class="opts">
+      <p class="opt-hint">Paint where AI tools should work. Unmasked areas stay untouched.</p>
+    </div>
+  }
+}

@@ -1,0 +1,137 @@
+<aside class="studio-rail" [class.rail-locked]="locked()">
+  <div class="tier-switch">
+    <button
+      type="button"
+      class="tier-btn"
+      [class.tier-active]="tier() === 'studio'"
+      (click)="tier.set('studio')"
+    >
+      Studio
+    </button>
+    <button
+      type="button"
+      class="tier-btn tier-disabled"
+      title="Pro — coming soon: video editing and more free tools"
+    >
+      <ng-icon name="lucideLock" size="12" />
+      Pro
+    </button>
+  </div>
+
+  @if (locked()) {
+    <div class="lock-card">
+      <div class="lock-badge">
+        <ng-icon name="lucideLock" size="17" />
+      </div>
+      <h3 class="lock-title">Studio Editing</h3>
+      <p class="lock-sub">Unlock the full editing suite for every image you generate.</p>
+      <ul class="lock-perks">
+        <li>
+          <ng-icon name="lucideCheck" size="13" />
+          <span>Crop, adjust, liquify, heal — free</span>
+        </li>
+        <li>
+          <ng-icon name="lucideCheck" size="13" />
+          <span>AI remove, fill &amp; expand from $0.05</span>
+        </li>
+        <li>
+          <ng-icon name="lucideCheck" size="13" />
+          <span>Balance never expires</span>
+        </li>
+        <li>
+          <ng-icon name="lucideCheck" size="13" />
+          <span>Every edit saved as a new version</span>
+        </li>
+      </ul>
+      <button hlmBtn size="sm" class="lock-cta" type="button" (click)="subscribeRequested.emit()">
+        Subscribe to Studio · $5/mo
+      </button>
+      <p class="lock-note">Cancel anytime — your library stays.</p>
+    </div>
+  } @else if (!editing()) {
+    <p class="teaser-hint">Open an image to start editing.</p>
+  } @else {
+    <section class="tool-section">
+      <h3 class="section-title">Tools</h3>
+      <div class="tool-grid">
+        @for (tool of localTools; track tool.id) {
+          <button
+            type="button"
+            class="tool-btn"
+            [class.tool-active]="activeTool() === tool.id"
+            (click)="selectTool(tool.id)"
+          >
+            <ng-icon [name]="tool.icon" size="15" />
+            <span>{{ tool.label }}</span>
+          </button>
+        }
+      </div>
+      <app-tool-options [tool]="activeTool()" [(brushSize)]="brushSize" />
+    </section>
+
+    <section class="tool-section ai-section">
+      <h3 class="section-title">AI Tools <span class="ai-note">· uses balance</span></h3>
+      @for (tool of aiTools; track tool.id) {
+        <div class="ai-tool">
+          <button
+            type="button"
+            class="ai-run"
+            [disabled]="!affordable(tool.userPriceUsd)"
+            [title]="tool.blurb"
+            (click)="runAiTool(tool.id)"
+          >
+            <ng-icon name="lucideSparkles" size="14" />
+            <span>{{ tool.name }}</span>
+            <span class="price-chip">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
+          </button>
+          @if (tool.needsPrompt) {
+            <input
+              class="fill-prompt"
+              type="text"
+              placeholder="What should appear here?"
+              [value]="fillPrompt()"
+              (input)="fillPrompt.set($any($event.target).value)"
+            />
+          }
+        </div>
+      }
+      @if (balanceUsd() < 0.05) {
+        <p class="ai-note">Balance too low — top up to use AI tools.</p>
+      }
+    </section>
+
+    <div class="rail-actions">
+      <button
+        hlmBtn
+        variant="ghost"
+        size="sm"
+        type="button"
+        aria-label="Undo"
+        [disabled]="!session.canUndo()"
+        (click)="session.undo()"
+      >
+        <ng-icon name="lucideUndo2" size="14" />
+      </button>
+      <button
+        hlmBtn
+        variant="ghost"
+        size="sm"
+        type="button"
+        aria-label="Redo"
+        [disabled]="!session.canRedo()"
+        (click)="session.redo()"
+      >
+        <ng-icon name="lucideRedo2" size="14" />
+      </button>
+      <button
+        hlmBtn
+        size="sm"
+        type="button"
+        [disabled]="!session.dirty()"
+        (click)="saveRequested.emit()"
+      >
+        Save as new version
+      </button>
+    </div>
+  }
+</aside>

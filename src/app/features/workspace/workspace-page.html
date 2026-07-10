@@ -40,7 +40,13 @@
       <div class="crumbs">
         <span class="crumb-root">Workspace</span>
         <span class="crumb-sep">›</span>
-        <span class="crumb-current">Library</span>
+        @if (mode() === 'edit') {
+          <button type="button" class="linkish crumb-back" (click)="exitEdit()">Library</button>
+          <span class="crumb-sep">›</span>
+          <span class="crumb-current">Edit</span>
+        } @else {
+          <span class="crumb-current">Library</span>
+        }
       </div>
       <div class="topbar-right">
         <div class="search-box">
@@ -87,22 +93,33 @@
           </button>
         </div>
       }
-      <app-library-grid
-        [items]="generations()"
-        [pickMode]="pickingReference()"
-        [samplePrompts]="samplePrompts"
-        [search]="searchTerm()"
-        (picked)="onReferencePicked($event)"
-        (opened)="onOpened($event)"
-        (download)="onDownload($event)"
-        (upscale)="onUpscale($event)"
-        (variation)="onVariation($event)"
-        (edit)="onEdit($event)"
-        (retry)="onRetry($event)"
-        (promptPicked)="usePrompt($event)"
-      />
+      @if (mode() === 'edit') {
+        <app-canvas-viewport [tool]="panel().activeTool()" [brushSize]="panel().brushSize()" />
+      } @else {
+        <app-library-grid
+          [items]="generations()"
+          [pickMode]="pickingReference()"
+          [samplePrompts]="samplePrompts"
+          [search]="searchTerm()"
+          (picked)="onReferencePicked($event)"
+          (opened)="onOpened($event)"
+          (download)="onDownload($event)"
+          (upscale)="onUpscale($event)"
+          (variation)="onVariation($event)"
+          (edit)="onEdit($event)"
+          (retry)="onRetry($event)"
+          (promptPicked)="usePrompt($event)"
+        />
+      }
     </main>
   </div>
+
+  <app-studio-panel
+    [editing]="mode() === 'edit'"
+    (saveRequested)="onSaveEdit()"
+    (aiToolRequested)="onAiTool($event)"
+    (subscribeRequested)="reactivateStudio()"
+  />
 
   @if (openedItem(); as opened) {
     <app-detail-overlay

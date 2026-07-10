@@ -225,6 +225,24 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 
 ## Status (2026-07-09)
 
+**Phase 3b — Studio editing panel shipped** (spec: `docs/superpowers/specs/2026-07-09-studio-editing-panel-design.md`):
+Photoshop-lite editing inside the workspace: clicking Edit swaps the library grid for a
+canvas viewport (old `/app/edit/:id` route absorbed); left AI rail stays, new right
+Studio panel is Studio-subscriber-gated (locked + $5/mo upsell otherwise). Free local
+tools run in-browser (Canvas2D engine in `src/app/core/editing/`, Web Worker + main-thread
+fallback): crop/rotate, brightness/contrast/saturation, sharpen, smooth, liquify warp,
+content-aware spot heal (OpenCV.js Telea inpaint, ~3MB lazy chunk on first use), mask.
+Paid AI tools sit in a separate "AI Tools · uses balance" section with fixed retail
+price chips (NOT the PAYG margin formula): Remove Object $0.10, Generative Fill $0.10,
+Expand $0.10 (client pads canvas 25%/side + border mask), Remove Background $0.05
+(margins: 2× on fill ops, 25× on bg). All ride the Phase 3a pipeline — `op:'edit'` +
+`familyId: edit-remove|edit-fill|edit-expand|edit-bg`, fal FLUX-fill/BiRefNet, jobs,
+single refund, moderation, kill-switch rows per tool (verified live: save → $0 version,
+maskless remove → 400, edit-bg charged $0.05 → done). Local edits persist via
+`POST /edits/save` — moderated, then stored as a $0 "Studio Edit" version chained by
+`parent_id`. Video mode is a locked "coming with Pro" teaser; the panel's Studio|Pro
+switch shows Pro locked. Video generation moved to Phase 4b.
+
 **Phase 3a — Image generation shipped, live** (spec: `docs/superpowers/specs/2026-07-09-mvp-phase3a-generation-design.md`):
 Real image generation for all four image families through provider adapters
 (`supabase/functions/_shared/providers/`): GPT Image generate + edits (OpenAI, inline),
@@ -241,7 +259,7 @@ category scores, `resolution` field) so a human can overturn wrong flags — rei
 drill verified. Per-model kill switch in `models` table (503 + greyed UI, verified).
 `safety_identifier`/`user` hash sent to providers, never the raw user id. Upscale is now
 fal clarity-upscaler (`upscaler`, $0.06) — Magnific dropped. Video families stay
-disabled until phase 3b. Provider keys live only in Edge Function secrets:
+disabled until phase 4b. Provider keys live only in Edge Function secrets:
 `GOOGLE_AI_API_KEY`, `OPENAI_API_KEY` (also powers moderation), `FAL_API_KEY`.
 
 **Phase 2 — Money shipped, test mode** (spec: `docs/superpowers/specs/2026-07-07-mvp-phase2-stripe-design.md`):

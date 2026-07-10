@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EDIT_TOOLS,
   MODEL_FAMILIES,
   defaultSettings,
+  editToolById,
   familyById,
   upscaleUserPriceUsd,
   userPriceUsd,
@@ -73,6 +75,29 @@ describe('model families', () => {
     const nb = familyById('nano-banana')!;
     expect(userPriceUsd(nb, { version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039 / 0.67);
     expect(upscaleUserPriceUsd()).toBeCloseTo(0.04 / 0.67);
+  });
+
+  it('EDIT_TOOLS carries the four fixed-price studio AI tools', () => {
+    expect(EDIT_TOOLS.map((t) => t.id)).toEqual([
+      'edit-remove',
+      'edit-fill',
+      'edit-expand',
+      'edit-bg',
+    ]);
+  });
+
+  it('edit tools use fixed retail prices, not the margin formula', () => {
+    expect(editToolById('edit-remove')?.userPriceUsd).toBe(0.1);
+    expect(editToolById('edit-fill')?.userPriceUsd).toBe(0.1);
+    expect(editToolById('edit-expand')?.userPriceUsd).toBe(0.1);
+    expect(editToolById('edit-bg')?.userPriceUsd).toBe(0.05);
+  });
+
+  it('edit tools mark mask and prompt requirements', () => {
+    expect(editToolById('edit-remove')).toMatchObject({ needsMask: true, needsPrompt: false });
+    expect(editToolById('edit-fill')).toMatchObject({ needsMask: true, needsPrompt: true });
+    expect(editToolById('edit-expand')).toMatchObject({ needsMask: false, needsPrompt: false });
+    expect(editToolById('edit-bg')).toMatchObject({ needsMask: false, needsPrompt: false });
   });
 
   it('every family has logo, blurb, and tooltips on every option', () => {

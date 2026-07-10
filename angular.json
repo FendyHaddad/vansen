@@ -24,7 +24,9 @@
                 "input": "public"
               }
             ],
-            "styles": ["src/styles.css"]
+            "styles": ["src/styles.css"],
+            "externalDependencies": ["crypto", "fs", "path"],
+            "allowedCommonJsDependencies": ["@techstark/opencv-js"]
           },
           "configurations": {
             "production": {

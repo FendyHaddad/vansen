@@ -1,0 +1,27 @@
+.opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.opts label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.opt-hint {
+  opacity: 0.6;
+  margin: 0;
+}
+
+.apply-btn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary, #825aff);
+  color: #fff;
+  font-size: 0.78rem;
+  cursor: pointer;
+}

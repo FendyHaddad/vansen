@@ -10,9 +10,13 @@ function key(): string {
   return k;
 }
 
+const FILL_TOOLS = ['edit-remove', 'edit-fill', 'edit-expand'];
+
 /** familyId (+ op/reference) → fal model slug. */
 function slugFor(ctx: SubmitCtx): string {
   if (ctx.familyId === 'upscaler' || ctx.op === 'upscale') return 'fal-ai/clarity-upscaler';
+  if (ctx.familyId === 'edit-bg') return 'fal-ai/birefnet/v2';
+  if (FILL_TOOLS.includes(ctx.familyId)) return 'fal-ai/flux-pro/v1/fill';
   if (ctx.familyId === 'flux') return 'fal-ai/flux-pro/v1.1';
   if (ctx.familyId === 'seedream') {
     return ctx.referenceUrl
@@ -26,6 +30,19 @@ function payloadFor(ctx: SubmitCtx): Record<string, unknown> {
   const aspect = String(ctx.settings.aspectRatio ?? '1:1');
   if (ctx.familyId === 'upscaler' || ctx.op === 'upscale') {
     return { image_url: ctx.referenceUrl };
+  }
+  if (ctx.familyId === 'edit-bg') {
+    return { image_url: ctx.referenceUrl };
+  }
+  if (FILL_TOOLS.includes(ctx.familyId)) {
+    // FLUX fill repaints where the mask is white. The mask arrives as a data
+    // URI (fal accepts data: URLs). Expand sends a pre-padded image + border
+    // mask the client built; remove/expand use fixed client-side prompts.
+    return {
+      image_url: ctx.referenceUrl,
+      mask_url: ctx.maskPngBase64,
+      prompt: ctx.prompt,
+    };
   }
   const body: Record<string, unknown> = { prompt: ctx.prompt, aspect_ratio: aspect };
   if (ctx.referenceUrl) {

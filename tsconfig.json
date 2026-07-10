@@ -33,6 +33,7 @@
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true
   },
+  "exclude": ["supabase", "dist", "node_modules"],
   "files": [],
   "references": [
     {

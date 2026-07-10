@@ -1,0 +1,24 @@
+<div
+  class="viewport"
+  (pointerdown)="onPointerDown($event)"
+  (pointermove)="onPointerMove($event)"
+  (pointerup)="onPointerUp()"
+  (pointerleave)="onPointerUp()"
+>
+  @if (session.previewUrl(); as url) {
+    <app-mask-canvas [imageUrl]="url" [enabled]="tool() === 'mask'" />
+  }
+  @if (cropRect()) {
+    <div
+      class="crop-box"
+      [style.left.%]="cropPct().left"
+      [style.top.%]="cropPct().top"
+      [style.width.%]="cropPct().width"
+      [style.height.%]="cropPct().height"
+    ></div>
+    <button type="button" class="crop-apply" (click)="applyCrop()">Apply crop</button>
+  }
+  @if (session.busy()) {
+    <div class="busy-veil">Working…</div>
+  }
+</div>
