@@ -16,7 +16,6 @@
   <aside class="sidebar">
     <div class="side-head">
       <a routerLink="/app" class="ws-brand">Vansen</a>
-      <span class="side-sub">Workspace</span>
     </div>
 
     <div class="side-scroll">
@@ -27,11 +26,7 @@
     </div>
 
     <div class="side-foot">
-      <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
-      <div class="side-user">
-        <span class="side-user-name">{{ displayName() || 'Creator' }}</span>
-        <span class="side-user-email">{{ userEmail() }}</span>
-      </div>
+      <app-profile-menu variant="bar" (topUp)="topUp()" (signOut)="signOut()" />
     </div>
   </aside>
 
@@ -58,12 +53,11 @@
             (input)="searchTerm.set($any($event.target).value)"
           />
         </div>
-        <span class="balance-chip" [class.balance-low]="balanceUsd() < 1">
-          ${{ balanceUsd() | number: '1.2-2' }}
-        </span>
-        <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-          Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
-        </span>
+        @if (profileLoaded()) {
+          <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
+            Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
+          </span>
+        }
       </div>
     </header>
 
@@ -78,10 +72,10 @@
       }
       @if (graceDaysLeft(); as days) {
         <div class="notice-banner">
-          Studio lapsed — {{ days }} day{{ days === 1 ? '' : 's' }} left before your library
-          is deleted. Download what you need or
+          Studio lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
+          left before your library is deleted. Download what you need or
           <button type="button" class="linkish" (click)="reactivateStudio()">
-            reactivate for $5
+            reactivate for <span class="num">$5</span>
           </button>
         </div>
       }
@@ -94,13 +88,21 @@
         </div>
       }
       @if (mode() === 'edit') {
-        <app-canvas-viewport [tool]="panel().activeTool()" [brushSize]="panel().brushSize()" />
+        <app-canvas-viewport
+          [tool]="panel().activeTool()"
+          [brushSize]="panel().brushSize()"
+          [cropAspect]="panel().cropAspect()"
+          [liquifyMode]="panel().liquifyMode()"
+          [liquifyStrength]="panel().liquifyStrength()"
+        />
       } @else {
         <app-library-grid
           [items]="generations()"
           [pickMode]="pickingReference()"
           [samplePrompts]="samplePrompts"
           [search]="searchTerm()"
+          [canUpload]="studioActive()"
+          (uploaded)="onUpload($event)"
           (picked)="onReferencePicked($event)"
           (opened)="onOpened($event)"
           (download)="onDownload($event)"

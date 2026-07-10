@@ -37,6 +37,7 @@ export class BillingTab {
   readonly balanceUsd = this.ledger.balanceUsd;
   readonly entries = this.ledger.entries;
   readonly studioActive = this.profileStore.studioActive;
+  readonly profileLoaded = this.profileStore.loaded;
   readonly subscription = this.profileStore.subscription;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
 
@@ -45,8 +46,9 @@ export class BillingTab {
   readonly error = signal('');
   readonly reconcileResult = signal<string | null>(null);
 
-  /** No active Studio → first purchase carries the $5 Studio line. */
-  readonly needsStudio = computed(() => !this.studioActive());
+  /** No active Studio → first purchase carries the $5 Studio line. Waits for
+   * the profile load so an in-flight /profile never flashes "Inactive". */
+  readonly needsStudio = computed(() => this.profileLoaded() && !this.studioActive());
   readonly canceledPending = computed(
     () => this.subscription()?.status === SubscriptionStatus.Canceled && this.studioActive(),
   );

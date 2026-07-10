@@ -82,7 +82,7 @@ export class MaskCanvas implements AfterViewInit, OnDestroy {
   }
 
   onPointerDown(event: PointerEvent): void {
-    if (!this.enabled()) return;
+    if (!this.enabled() || event.button !== 0) return;
     this.drawing = true;
     this.last = this.pointFrom(event);
     this.paint(this.last, this.last);
@@ -102,8 +102,12 @@ export class MaskCanvas implements AfterViewInit, OnDestroy {
   }
 
   private pointFrom(event: PointerEvent): { x: number; y: number } {
-    const rect = this.canvas().nativeElement.getBoundingClientRect();
-    return { x: event.clientX - rect.x, y: event.clientY - rect.y };
+    const canvasEl = this.canvas().nativeElement;
+    const rect = canvasEl.getBoundingClientRect();
+    // Screen → backing-store px: the canvas may be CSS-scaled (viewport zoom).
+    const sx = rect.width ? canvasEl.width / rect.width : 1;
+    const sy = rect.height ? canvasEl.height / rect.height : 1;
+    return { x: (event.clientX - rect.x) * sx, y: (event.clientY - rect.y) * sy };
   }
 
   private paint(from: { x: number; y: number }, to: { x: number; y: number }): void {

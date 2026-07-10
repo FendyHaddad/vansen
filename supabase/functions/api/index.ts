@@ -124,10 +124,21 @@ app.use('*', async (c, next) => {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
+/** Warm-isolate memo so list reloads don't re-sign every media path, and the
+ * URL stays stable across requests (lets browser HTTP caching work too). */
+const signedUrlMemo = new Map<string, { url: string; expiresAt: number }>();
+const SIGN_TTL_S = 604800; // 7 days
+const RESIGN_FLOOR_MS = 86_400_000; // re-sign when under 1 day of validity left
+
 async function signMedia(path: string | null): Promise<string> {
   if (!path) return '';
-  const { data } = await admin.storage.from('media').createSignedUrl(path, 604800); // 7 days
-  return data?.signedUrl ?? '';
+  const hit = signedUrlMemo.get(path);
+  if (hit && hit.expiresAt - Date.now() > RESIGN_FLOOR_MS) return hit.url;
+  const { data } = await admin.storage.from('media').createSignedUrl(path, SIGN_TTL_S);
+  if (!data?.signedUrl) return '';
+  if (signedUrlMemo.size > 5000) signedUrlMemo.clear();
+  signedUrlMemo.set(path, { url: data.signedUrl, expiresAt: Date.now() + SIGN_TTL_S * 1000 });
+  return data.signedUrl;
 }
 
 async function toGenerationDto(row: Record<string, unknown>) {
@@ -736,6 +747,70 @@ app.post('/edits/save', async (c) => {
   const path = `${userId}/${gen.id}.png`;
   const { error: upErr } = await admin.storage.from('media').upload(path, bytes, {
     contentType: 'image/png',
+    upsert: true,
+  });
+  if (upErr) {
+    await admin.from('generations').delete().eq('id', gen.id);
+    return fail(c, 400, 'save_failed', 'Storage rejected the file');
+  }
+  await admin.from('generations').update({ media_path: path }).eq('id', gen.id);
+  return c.json({ item: await toGenerationDto({ ...gen, media_path: path }) });
+});
+
+/** Import a user's own image as a root $0 library item they can edit. Studio-gated. */
+app.post('/library/import', async (c) => {
+  const userId = c.get('userId');
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
+  }
+  if (!(await hasActiveStudio(userId))) {
+    return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
+  }
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get('file');
+  if (!(file instanceof File)) return fail(c, 400, 'upload_failed', 'No file provided');
+  if (file.size > UPLOAD_MAX_BYTES) return fail(c, 400, 'upload_failed', 'File exceeds 10MB');
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const ext = sniffImage(bytes);
+  if (!ext) return fail(c, 400, 'upload_failed', 'Only PNG, JPEG, or WEBP images are allowed');
+  const contentType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+
+  // Moderate BEFORE the image enters the library.
+  const scratch = `scratch/${userId}/${crypto.randomUUID()}.${ext}`;
+  await admin.storage.from('uploads').upload(scratch, bytes, { contentType });
+  const { data: signed } = await admin.storage.from('uploads').createSignedUrl(scratch, 600);
+  const mod = await moderate({ imageUrl: signed?.signedUrl });
+  if (mod.flagged) {
+    const quarantine = `quarantine/${userId}/${crypto.randomUUID()}.${ext}`;
+    await admin.storage.from('uploads').copy(scratch, quarantine);
+    await admin.storage.from('uploads').remove([scratch]);
+    await recordStrike(userId, 'upload', null, mod.categories, quarantine);
+    return fail(c, 422, 'content_policy', 'This image violates our content policy.');
+  }
+  await admin.storage.from('uploads').remove([scratch]);
+
+  const { data: gen, error } = await admin
+    .from('generations')
+    .insert({
+      user_id: userId,
+      kind: MediaKind.Image,
+      family_id: 'studio',
+      family_name: 'Imported',
+      op: GenerationOp.Generate,
+      prompt: 'Imported image',
+      settings: {},
+      price_usd: 0,
+      status: 'done',
+      media_url: '',
+    })
+    .select('*')
+    .single();
+  if (error || !gen) return fail(c, 400, 'save_failed', 'Could not import the image');
+
+  const path = `${userId}/${gen.id}.${ext}`;
+  const { error: upErr } = await admin.storage.from('media').upload(path, bytes, {
+    contentType,
     upsert: true,
   });
   if (upErr) {

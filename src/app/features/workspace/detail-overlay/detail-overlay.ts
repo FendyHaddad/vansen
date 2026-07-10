@@ -10,6 +10,7 @@ import {
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
 import { upscaleUserPriceUsd } from '../../../core/catalog/model-families';
+import { CachedSrc } from '../../../core/media/cached-src';
 
 /**
  * Lightweight hand-rolled modal (fixed overlay + Esc/backdrop close) — spartan's
@@ -20,7 +21,7 @@ import { upscaleUserPriceUsd } from '../../../core/catalog/model-families';
   templateUrl: './detail-overlay.html',
   styleUrl: './detail-overlay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, NgIcon],
+  imports: [DatePipe, DecimalPipe, NgIcon, CachedSrc],
   providers: [
     provideIcons({ lucideDownload, lucideSparkles, lucidePencil, lucideTrash2, lucideX }),
   ],

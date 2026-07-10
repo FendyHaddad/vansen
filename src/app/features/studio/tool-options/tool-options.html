@@ -2,78 +2,201 @@
   @case ('adjust') {
     <div class="opts">
       <label>
-        Brightness
+        <span class="opt-row">
+          Brightness
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="-100"
+              max="100"
+              [value]="brightness()"
+              (input)="brightness.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
         <input
           type="range"
           min="-100"
           max="100"
           [value]="brightness()"
-          (input)="brightness.set(+$any($event.target).value)"
+          (input)="brightness.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
-        Contrast
+        <span class="opt-row">
+          Contrast
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="-100"
+              max="100"
+              [value]="contrast()"
+              (input)="contrast.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
         <input
           type="range"
           min="-100"
           max="100"
           [value]="contrast()"
-          (input)="contrast.set(+$any($event.target).value)"
+          (input)="contrast.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
-        Saturation
+        <span class="opt-row">
+          Saturation
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="-100"
+              max="100"
+              [value]="saturation()"
+              (input)="saturation.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
         <input
           type="range"
           min="-100"
           max="100"
           [value]="saturation()"
-          (input)="saturation.set(+$any($event.target).value)"
+          (input)="saturation.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
+      <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
       <button type="button" class="apply-btn" (click)="applyAdjust()">Apply</button>
     </div>
   }
   @case ('sharpen') {
     <div class="opts">
       <label>
-        Amount
+        <span class="opt-row">
+          Amount
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="0"
+              max="100"
+              [value]="amount()"
+              (input)="amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
         <input
           type="range"
           min="0"
           max="100"
           [value]="amount()"
-          (input)="amount.set(+$any($event.target).value)"
+          (input)="amount.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
+      <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
       <button type="button" class="apply-btn" (click)="applySharpen()">Apply sharpen</button>
     </div>
   }
   @case ('smooth') {
     <div class="opts">
       <label>
-        Amount
+        <span class="opt-row">
+          Amount
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="0"
+              max="100"
+              [value]="amount()"
+              (input)="amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
         <input
           type="range"
           min="0"
           max="100"
           [value]="amount()"
-          (input)="amount.set(+$any($event.target).value)"
+          (input)="amount.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
+      <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
       <button type="button" class="apply-btn" (click)="applySmooth()">Apply smooth</button>
     </div>
   }
   @case ('crop') {
     <div class="opts">
-      <p class="opt-hint">Drag on the image to choose the crop area.</p>
+      <div class="preset-grid">
+        @for (p of cropPresets; track p.label) {
+          <button
+            type="button"
+            class="preset-btn"
+            [class.preset-active]="cropAspect() === p.value"
+            (click)="selectPreset(p.value)"
+          >
+            {{ p.label }}
+          </button>
+        }
+        <button type="button" class="preset-btn" (click)="selectOriginal()">Original</button>
+      </div>
+      <p class="opt-hint">Drag the box or its handles to fine-tune the crop.</p>
       <button type="button" class="apply-btn" (click)="applyRotate()">Rotate 90°</button>
     </div>
   }
   @case ('liquify') {
     <div class="opts">
+      <div class="preset-grid">
+        @for (m of liquifyModes; track m.id) {
+          <button
+            type="button"
+            class="preset-btn"
+            [class.preset-active]="liquifyMode() === m.id"
+            [title]="m.blurb"
+            (click)="liquifyMode.set(m.id)"
+          >
+            {{ m.label }}
+          </button>
+        }
+      </div>
       <label>
-        Brush
+        <span class="opt-row">
+          Strength
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="1"
+              max="100"
+              [value]="liquifyStrength()"
+              (input)="liquifyStrength.set(toNum($any($event.target).value, 1, 100))"
+            />%
+          </span>
+        </span>
+        <input
+          type="range"
+          min="1"
+          max="100"
+          [value]="liquifyStrength()"
+          (input)="liquifyStrength.set(+$any($event.target).value)"
+        />
+      </label>
+      <label>
+        <span class="opt-row">
+          Brush
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="10"
+              max="200"
+              [value]="brushSize()"
+              (input)="brushSize.set(toNum($any($event.target).value, 10, 200))"
+            />px
+          </span>
+        </span>
         <input
           type="range"
           min="10"
@@ -82,13 +205,28 @@
           (input)="brushSize.set(+$any($event.target).value)"
         />
       </label>
-      <p class="opt-hint">Drag on the image to push pixels.</p>
+      <p class="opt-hint">
+        Push drags pixels, Slim shrinks toward the brush, Bulge expands. Use gentle strokes —
+        low strength builds up gradually.
+      </p>
     </div>
   }
   @case ('heal') {
     <div class="opts">
       <label>
-        Brush
+        <span class="opt-row">
+          Brush
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="10"
+              max="120"
+              [value]="brushSize()"
+              (input)="brushSize.set(toNum($any($event.target).value, 10, 120))"
+            />px
+          </span>
+        </span>
         <input
           type="range"
           min="10"
@@ -97,12 +235,14 @@
           (input)="brushSize.set(+$any($event.target).value)"
         />
       </label>
-      <p class="opt-hint">Paint over a blemish, then release to heal.</p>
-    </div>
-  }
-  @case ('mask') {
-    <div class="opts">
-      <p class="opt-hint">Paint where AI tools should work. Unmasked areas stay untouched.</p>
+      @if (healPct() !== null) {
+        <p class="opt-hint">
+          Preparing heal engine — one-time download,
+          <span class="num">{{ healPct() }}%</span>
+        </p>
+      } @else {
+        <p class="opt-hint">Paint over a blemish, then release to heal.</p>
+      }
     </div>
   }
 }

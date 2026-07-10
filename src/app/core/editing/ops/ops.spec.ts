@@ -3,6 +3,7 @@ import { PixelBuffer, clonePixels } from '../pixel-buffer';
 import { adjust } from './adjust';
 import { sharpen, smooth } from './convolve';
 import { crop, rotate90 } from './crop';
+import { heal } from './heal';
 import { liquify } from './liquify';
 
 function solid(w: number, h: number, rgba: [number, number, number, number]): PixelBuffer {
@@ -95,6 +96,29 @@ describe('liquify', () => {
     src.data.set([255, 255, 255, 255], (4 * 8 + 2) * 4); // white at (2,4)
     const out = liquify(src, { cx: 3, cy: 4, radius: 3, dx: 2, dy: 0 });
     expect(Array.from(out.data)).not.toEqual(Array.from(src.data));
+  });
+});
+
+describe('heal', () => {
+  it('repairs a masked blemish from surrounding texture', () => {
+    const src = solid(16, 16, [120, 120, 120, 255]);
+    const mask = new Uint8Array(16 * 16);
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        src.data.set([255, 255, 255, 255], ((7 + dy) * 16 + 7 + dx) * 4);
+        mask[(7 + dy) * 16 + 7 + dx] = 255;
+      }
+    }
+    const out = heal(src, mask);
+    expect(Math.abs(out.data[(7 * 16 + 7) * 4] - 120)).toBeLessThan(20);
+    // Unmasked pixels untouched.
+    expect(out.data[0]).toBe(120);
+  });
+
+  it('empty mask is identity', () => {
+    const src = solid(4, 4, [10, 20, 30, 255]);
+    const out = heal(src, new Uint8Array(16));
+    expect(Array.from(out.data)).toEqual(Array.from(src.data));
   });
 });
 

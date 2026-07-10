@@ -67,6 +67,7 @@
 
 .breakdown-value {
   font-weight: 600;
+  font-family: var(--font-app-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -122,5 +123,6 @@
   margin-top: auto;
   font-size: 1.125rem;
   font-weight: 650;
+  font-family: var(--font-app-mono);
   font-variant-numeric: tabular-nums;
 }

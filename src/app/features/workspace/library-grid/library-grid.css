@@ -15,8 +15,40 @@
   letter-spacing: -0.01em;
 }
 
+.library-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .library-head .muted {
   font-size: 0.8125rem;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.upload-btn:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.upload-input {
+  display: none;
 }
 
 .filter-row {

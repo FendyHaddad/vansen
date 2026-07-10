@@ -1,12 +1,31 @@
-<button
-  type="button"
-  class="avatar-btn"
-  [hlmDropdownMenuTrigger]="menu"
-  align="end"
-  aria-label="Profile menu"
->
-  {{ initial() }}
-</button>
+@if (variant() === 'bar') {
+  <button
+    type="button"
+    class="bar-btn"
+    [hlmDropdownMenuTrigger]="menu"
+    align="end"
+    side="top"
+    aria-label="Profile menu"
+  >
+    <span class="bar-user">
+      <span class="bar-name">{{ displayName() || 'Creator' }}</span>
+      <span class="bar-email">{{ email() }}</span>
+    </span>
+    <span class="bar-balance" [class.bar-balance-low]="balanceUsd() < 1">
+      ${{ balanceUsd() | number: '1.2-2' }}
+    </span>
+  </button>
+} @else {
+  <button
+    type="button"
+    class="avatar-btn"
+    [hlmDropdownMenuTrigger]="menu"
+    align="end"
+    aria-label="Profile menu"
+  >
+    {{ initial() }}
+  </button>
+}
 
 <ng-template #menu>
   <div hlmDropdownMenu class="profile-dropdown">
@@ -17,7 +36,7 @@
     <hlm-dropdown-menu-separator />
     <button hlmDropdownMenuItem (triggered)="topUp.emit()">
       <ng-icon name="lucidePlus" size="15" />
-      Top up $20
+      Top up <span class="num">$20</span>
     </button>
     <a hlmDropdownMenuItem routerLink="/app/settings">
       <ng-icon name="lucideSettings" size="15" />

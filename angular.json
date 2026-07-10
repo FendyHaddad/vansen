@@ -22,11 +22,15 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "ort-wasm-simd-threaded{,.jsep}.{wasm,mjs}",
+                "input": "node_modules/onnxruntime-web/dist",
+                "output": "assets/ort"
               }
             ],
             "styles": ["src/styles.css"],
-            "externalDependencies": ["crypto", "fs", "path"],
-            "allowedCommonJsDependencies": ["@techstark/opencv-js"]
+            "externalDependencies": ["crypto", "fs", "path"]
           },
           "configurations": {
             "production": {

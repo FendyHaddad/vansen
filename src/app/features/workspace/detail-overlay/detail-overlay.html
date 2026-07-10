@@ -6,7 +6,7 @@
 
     <div class="panel-grid">
       <div class="preview">
-        <img [src]="item().mediaUrl" [alt]="item().prompt" />
+        <img [cachedSrc]="item().mediaUrl" [cacheKey]="item().id" [alt]="item().prompt" />
       </div>
 
       <div class="meta">
@@ -35,7 +35,7 @@
             <span class="prov-label">Edited from</span>
             @if (parent(); as p) {
               <button type="button" class="prov-link" (click)="openParent.emit(p.id)">
-                <img [src]="p.mediaUrl" alt="Parent" />
+                <img [cachedSrc]="p.mediaUrl" [cacheKey]="p.id" alt="Parent" />
                 <span>{{ p.familyName }}</span>
               </button>
             } @else {
@@ -52,11 +52,11 @@
           @if (item().kind === 'image') {
             <button type="button" class="action" (click)="upscale.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
-              Upscale · ${{ upscalePrice | number: '1.2-2' }}
+              Upscale · <span class="num">${{ upscalePrice | number: '1.2-2' }}</span>
             </button>
             <button type="button" class="action" (click)="variation.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
-              Variation · ${{ item().priceUsd | number: '1.2-2' }}
+              Variation · <span class="num">${{ item().priceUsd | number: '1.2-2' }}</span>
             </button>
             <button type="button" class="action" (click)="edit.emit(item().id)">
               <ng-icon name="lucidePencil" size="15" />

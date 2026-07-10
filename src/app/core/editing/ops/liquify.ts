@@ -1,5 +1,7 @@
 import { PixelBuffer, clonePixels } from '../pixel-buffer';
 
+export type LiquifyMode = 'push' | 'pinch' | 'bulge';
+
 export interface LiquifyStep {
   /** Brush center in pixels. */
   cx: number;
@@ -8,29 +10,55 @@ export interface LiquifyStep {
   /** Drag vector for this step, pixels. */
   dx: number;
   dy: number;
+  /** push = forward warp, pinch = slim toward center, bulge = expand. Default push. */
+  mode?: LiquifyMode;
+  /** 0..1 displacement scale; default 1 (full). */
+  strength?: number;
 }
 
 /**
- * One push-brush step: pixels within radius sample backward along the drag
- * vector, faded by a smooth falloff — the classic warp Photoshop's forward
- * warp tool applies per pointer move. Bilinear sampling keeps edges smooth.
+ * One liquify brush step, Photoshop-style. Push samples backward along the
+ * drag vector (forward warp); pinch samples away from the center (content
+ * shrinks — the "slim" tool); bulge samples toward the center (content
+ * magnifies). All fade with a smooth falloff and use bilinear sampling.
  */
 export function liquify(buf: PixelBuffer, s: LiquifyStep): PixelBuffer {
-  if (s.dx === 0 && s.dy === 0) return clonePixels(buf);
+  const mode = s.mode ?? 'push';
+  const strength = s.strength ?? 1;
+  if (mode === 'push' && s.dx === 0 && s.dy === 0) return clonePixels(buf);
+  if (strength <= 0) return clonePixels(buf);
   const { width: w, height: h, data: src } = buf;
   const out = clonePixels(buf);
   const r2 = s.radius * s.radius;
+  // Pinch/bulge scale per step — small so holding/dragging builds up gently.
+  const radial = 0.12 * strength;
   const x0 = Math.max(0, Math.floor(s.cx - s.radius));
   const x1 = Math.min(w - 1, Math.ceil(s.cx + s.radius));
   const y0 = Math.max(0, Math.floor(s.cy - s.radius));
   const y1 = Math.min(h - 1, Math.ceil(s.cy + s.radius));
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const dist2 = (x - s.cx) ** 2 + (y - s.cy) ** 2;
+      const rx = x - s.cx;
+      const ry = y - s.cy;
+      const dist2 = rx * rx + ry * ry;
       if (dist2 >= r2) continue;
       const falloff = (1 - dist2 / r2) ** 2;
-      const sx = Math.min(w - 1, Math.max(0, x - s.dx * falloff));
-      const sy = Math.min(h - 1, Math.max(0, y - s.dy * falloff));
+      let sx: number;
+      let sy: number;
+      if (mode === 'push') {
+        sx = x - s.dx * falloff * strength;
+        sy = y - s.dy * falloff * strength;
+      } else if (mode === 'pinch') {
+        // Sample outward → pixels collapse toward the center (slims).
+        sx = x + rx * radial * falloff;
+        sy = y + ry * radial * falloff;
+      } else {
+        // Sample inward → center content spreads outward (bulges).
+        sx = x - rx * radial * falloff;
+        sy = y - ry * radial * falloff;
+      }
+      sx = Math.min(w - 1, Math.max(0, sx));
+      sy = Math.min(h - 1, Math.max(0, sy));
       const ix = Math.floor(sx);
       const iy = Math.floor(sy);
       const fx = sx - ix;

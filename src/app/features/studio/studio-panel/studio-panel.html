@@ -48,9 +48,11 @@
       </button>
       <p class="lock-note">Cancel anytime — your library stays.</p>
     </div>
-  } @else if (!editing()) {
-    <p class="teaser-hint">Open an image to start editing.</p>
   } @else {
+    @if (!editing()) {
+      <p class="teaser-hint">Open or upload an image to edit — these tools act on the open image.</p>
+    }
+
     <section class="tool-section">
       <h3 class="section-title">Tools</h3>
       <div class="tool-grid">
@@ -59,6 +61,7 @@
             type="button"
             class="tool-btn"
             [class.tool-active]="activeTool() === tool.id"
+            [disabled]="!editing()"
             (click)="selectTool(tool.id)"
           >
             <ng-icon [name]="tool.icon" size="15" />
@@ -66,7 +69,15 @@
           </button>
         }
       </div>
-      <app-tool-options [tool]="activeTool()" [(brushSize)]="brushSize" />
+      @if (editing()) {
+        <app-tool-options
+          [tool]="activeTool()"
+          [(brushSize)]="brushSize"
+          [(cropAspect)]="cropAspect"
+          [(liquifyMode)]="liquifyMode"
+          [(liquifyStrength)]="liquifyStrength"
+        />
+      }
     </section>
 
     <section class="tool-section ai-section">
@@ -76,7 +87,7 @@
           <button
             type="button"
             class="ai-run"
-            [disabled]="!affordable(tool.userPriceUsd)"
+            [disabled]="!editing() || !affordable(tool.userPriceUsd)"
             [title]="tool.blurb"
             (click)="runAiTool(tool.id)"
           >
@@ -84,7 +95,7 @@
             <span>{{ tool.name }}</span>
             <span class="price-chip">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
           </button>
-          @if (tool.needsPrompt) {
+          @if (tool.needsPrompt && editing()) {
             <input
               class="fill-prompt"
               type="text"
@@ -95,43 +106,111 @@
           }
         </div>
       }
-      @if (balanceUsd() < 0.05) {
+      @if (editing() && balanceUsd() < 0.05) {
         <p class="ai-note">Balance too low — top up to use AI tools.</p>
       }
     </section>
 
-    <div class="rail-actions">
-      <button
-        hlmBtn
-        variant="ghost"
-        size="sm"
-        type="button"
-        aria-label="Undo"
-        [disabled]="!session.canUndo()"
-        (click)="session.undo()"
-      >
-        <ng-icon name="lucideUndo2" size="14" />
-      </button>
-      <button
-        hlmBtn
-        variant="ghost"
-        size="sm"
-        type="button"
-        aria-label="Redo"
-        [disabled]="!session.canRedo()"
-        (click)="session.redo()"
-      >
-        <ng-icon name="lucideRedo2" size="14" />
-      </button>
-      <button
-        hlmBtn
-        size="sm"
-        type="button"
-        [disabled]="!session.dirty()"
-        (click)="saveRequested.emit()"
-      >
-        Save as new version
-      </button>
-    </div>
+    @if (editing()) {
+      <div class="rail-actions">
+        <div class="rail-row zoom-row">
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            type="button"
+            class="rail-btn zoom-btn"
+            aria-label="Zoom out"
+            [disabled]="session.zoom() <= 0.25"
+            (click)="session.zoomOut()"
+          >
+            <ng-icon name="lucideZoomOut" size="14" />
+          </button>
+          <button
+            type="button"
+            class="zoom-pct"
+            title="Reset to 100%"
+            (click)="session.resetZoom()"
+          >
+            <span class="num">{{ zoomPct() }}%</span>
+          </button>
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            type="button"
+            class="rail-btn zoom-btn"
+            aria-label="Zoom in"
+            [disabled]="session.zoom() >= 4"
+            (click)="session.zoomIn()"
+          >
+            <ng-icon name="lucideZoomIn" size="14" />
+          </button>
+        </div>
+        <div class="rail-row">
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            type="button"
+            class="rail-btn"
+            [disabled]="!session.canUndo()"
+            (click)="session.undo()"
+          >
+            <ng-icon name="lucideUndo2" size="14" />
+            Undo
+          </button>
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            type="button"
+            class="rail-btn"
+            [disabled]="!session.canRedo()"
+            (click)="session.redo()"
+          >
+            <ng-icon name="lucideRedo2" size="14" />
+            Redo
+          </button>
+        </div>
+        <div class="rail-row">
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            type="button"
+            class="rail-btn"
+            [disabled]="!session.dirty()"
+            (click)="saveRequested.emit()"
+          >
+            <ng-icon name="lucideSave" size="14" />
+            Save
+          </button>
+          <div class="export-wrap">
+            <button
+              hlmBtn
+              variant="outline"
+              size="sm"
+              type="button"
+              class="rail-btn"
+              (click)="exportOpen.set(!exportOpen())"
+            >
+              <ng-icon name="lucideDownload" size="14" />
+              Export
+            </button>
+            @if (exportOpen()) {
+              <div class="export-menu">
+                @for (f of exportFormats; track f.type) {
+                  <button type="button" class="export-opt" (click)="exportAs(f)">
+                    <span class="export-name">{{ f.label }}</span>
+                    <span class="export-hint">{{ f.hint }}</span>
+                  </button>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    }
   }
 </aside>

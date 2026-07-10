@@ -35,6 +35,7 @@ import { UploadResponse } from '../../../core/api/dtos';
 import { ModelAvailability } from '../../../core/models/model-availability';
 import { OptionGroup } from '../option-group/option-group';
 import { Hint } from '../../../shared/hint/hint';
+import { CachedSrc } from '../../../core/media/cached-src';
 
 export interface GenerateRequest {
   family: ModelFamily;
@@ -72,7 +73,7 @@ const AXIS_TOOLTIPS = {
   templateUrl: './settings-rail.html',
   styleUrl: './settings-rail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint, ...HlmDropdownMenuImports],
+  imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint, CachedSrc, ...HlmDropdownMenuImports],
   providers: [
     provideIcons({
       lucideImage,

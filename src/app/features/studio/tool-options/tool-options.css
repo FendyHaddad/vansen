@@ -16,12 +16,71 @@
   margin: 0;
 }
 
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.num-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.85;
+}
+
+.num {
+  width: 48px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  border: 1px solid var(--border, #26262a);
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Proceed buttons — blue with white text. */
 .apply-btn {
   padding: 6px 10px;
   border-radius: 8px;
   border: none;
-  background: var(--primary, #825aff);
+  background: #2563eb;
   color: #fff;
   font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.apply-btn:hover {
+  background: #1d4ed8;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.preset-btn {
+  padding: 5px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border, #26262a);
+  background: transparent;
+  color: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preset-btn:hover {
+  border-color: var(--muted-foreground, #8a8a92);
+}
+
+.preset-active {
+  border-color: #2563eb;
+  background: color-mix(in srgb, #2563eb 18%, transparent);
 }

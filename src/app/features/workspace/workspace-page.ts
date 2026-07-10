@@ -7,7 +7,6 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideSearch, lucideX } from '@ng-icons/lucide';
@@ -21,6 +20,8 @@ import { BillingService } from '../../core/billing/billing-service';
 import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
 import { ApiError } from '../../core/api/api-service';
+import { clearAllCaches } from '../../core/api/local-cache';
+import { MediaCache } from '../../core/media/media-cache';
 import { GenerationOp } from '../../core/enums';
 import { EditSession } from '../../core/editing/edit-session';
 import { editToolById } from '../../core/catalog/model-families';
@@ -43,7 +44,6 @@ const SAMPLE_PROMPTS = [
   styleUrl: './workspace-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    DecimalPipe,
     RouterLink,
     NgIcon,
     HlmBadge,
@@ -65,6 +65,7 @@ export class WorkspacePage {
   private readonly billing = inject(BillingService);
   private readonly poller = inject(JobPoller);
   private readonly availability = inject(ModelAvailability);
+  private readonly mediaCache = inject(MediaCache);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
@@ -80,6 +81,7 @@ export class WorkspacePage {
   readonly displayName = this.profileStore.displayName;
   readonly balanceUsd = this.ledger.balanceUsd;
   readonly studioActive = this.profileStore.studioActive;
+  readonly profileLoaded = this.profileStore.loaded;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
   readonly generations = this.store.items;
   readonly samplePrompts = SAMPLE_PROMPTS;
@@ -233,6 +235,17 @@ export class WorkspacePage {
     this.pickingReference.set(true);
   }
 
+  /** Import the user's own image as a library item and open it for editing. */
+  async onUpload(file: File): Promise<void> {
+    try {
+      const item = await this.store.importImage(file);
+      this.notice.set('');
+      await this.enterEdit(item.id);
+    } catch (e) {
+      this.showError(e, 'Upload failed');
+    }
+  }
+
   onReferencePicked(id: string): void {
     const item = this.store.byId(id);
     if (item && item.kind === 'image') {
@@ -254,15 +267,25 @@ export class WorkspacePage {
     this.openedId.set(null);
   }
 
-  onDownload(id: string): void {
+  async onDownload(id: string): Promise<void> {
     const item = this.store.byId(id);
     if (!item) return;
+    // Serve from the media cache — an already-viewed image downloads free.
+    let blob: Blob;
+    try {
+      blob = await this.mediaCache.blob(item.id, item.mediaUrl);
+    } catch {
+      this.notice.set('Download failed — the media link may have expired. Reload and retry.');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = item.mediaUrl;
+    a.href = url;
     a.download = `vansen-${item.id}.jpg`;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   async onUpscale(id: string): Promise<void> {
@@ -467,6 +490,9 @@ export class WorkspacePage {
     this.store.reset();
     this.profileStore.reset();
     this.editSession.close();
+    // Wipe cached snapshots and media so nothing lingers on shared machines.
+    clearAllCaches();
+    void this.mediaCache.clear();
     this.router.navigate(['/']);
   }
 }

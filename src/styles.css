@@ -19,6 +19,8 @@
   --font-app-sans:
     'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-app-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', monospace;
+  /* Alias — several stylesheets reference --font-mono; keep both names live. */
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', monospace;
 
   --radius: 0.625rem;
   --background: oklch(1 0 0);
@@ -104,4 +106,11 @@
 .model-menu,
 .profile-dropdown {
   font-family: var(--font-app-sans);
+}
+
+/* Numeric fragments inside mixed alpha+numeric strings — numbers always
+   render in JetBrains Mono, even mid-sentence. */
+.num {
+  font-family: var(--font-app-mono);
+  font-variant-numeric: tabular-nums;
 }

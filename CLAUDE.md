@@ -38,7 +38,10 @@
   file including `providers/`.
 - Studio editing (Phase 3b, live): workspace edit mode (grid ↔ canvas swap, old
   `/app/edit/:id` absorbed). Local tools = Canvas2D engine `src/app/core/editing/`
-  (worker + fallback; heal = lazy OpenCV.js — angular.json needs
+  (worker + fallback; heal = MI-GAN inpainting, MIT, via lazy onnxruntime-web —
+  28 MB ONNX model from HuggingFace on first use, cached in Cache Storage
+  `vansen-models`, ort wasm copied to `assets/ort` by angular.json; PatchMatch
+  in `ops/heal.ts` stays as offline fallback — angular.json needs
   externalDependencies crypto/fs/path). `POST /edits/save` = moderated $0 "Studio Edit"
   version, Studio-gated (403 `studio_required`). AI edit tools `edit-remove|edit-fill|
   edit-expand|edit-bg` in `EDIT_TOOLS` (model-families.ts): FIXED retail prices

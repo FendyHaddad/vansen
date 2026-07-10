@@ -5,11 +5,13 @@ import {
   lucideDownload,
   lucidePencil,
   lucideSparkles,
+  lucideUpload,
   lucideVideo,
   lucideWandSparkles,
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
 import { upscaleUserPriceUsd } from '../../../core/catalog/model-families';
+import { CachedSrc } from '../../../core/media/cached-src';
 
 export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
 
@@ -18,9 +20,16 @@ export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
   templateUrl: './library-grid.html',
   styleUrl: './library-grid.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon],
+  imports: [DecimalPipe, NgIcon, CachedSrc],
   providers: [
-    provideIcons({ lucideDownload, lucidePencil, lucideSparkles, lucideVideo, lucideWandSparkles }),
+    provideIcons({
+      lucideDownload,
+      lucidePencil,
+      lucideSparkles,
+      lucideUpload,
+      lucideVideo,
+      lucideWandSparkles,
+    }),
   ],
 })
 export class LibraryGrid {
@@ -28,8 +37,10 @@ export class LibraryGrid {
   readonly pickMode = input(false);
   readonly samplePrompts = input<string[]>([]);
   readonly search = input('');
+  readonly canUpload = input(false);
 
   readonly opened = output<string>();
+  readonly uploaded = output<File>();
   readonly picked = output<string>();
   readonly download = output<string>();
   readonly upscale = output<string>();
@@ -67,5 +78,12 @@ export class LibraryGrid {
   onCardClick(item: GenerationItem): void {
     if (this.pickMode()) this.picked.emit(item.id);
     else this.opened.emit(item.id);
+  }
+
+  onUploadPick(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) this.uploaded.emit(file);
   }
 }

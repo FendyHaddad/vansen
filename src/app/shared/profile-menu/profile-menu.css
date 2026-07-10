@@ -18,6 +18,70 @@
   border-color: color-mix(in oklch, var(--primary) 50%, var(--border));
 }
 
+/* Bar variant — full-width footer trigger with name/email + balance. */
+.bar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.bar-btn:hover {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+  border-color: var(--border);
+}
+
+.bar-user {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bar-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-email {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-balance {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-app-mono);
+  font-weight: 650;
+  font-size: 0.875rem;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 50%, transparent);
+  white-space: nowrap;
+}
+
+.bar-balance-low {
+  border-color: color-mix(in oklch, var(--loss) 60%, transparent);
+  color: var(--loss);
+}
+
 .profile-dropdown {
   min-width: 220px;
 }

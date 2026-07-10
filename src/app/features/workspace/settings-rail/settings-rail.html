@@ -6,7 +6,7 @@
       [class.mode-active]="mode() === 'image'"
       (click)="setMode('image')"
     >
-      <ng-icon name="lucideImage" size="15" />
+      <ng-icon name="lucideImage" size="15"/>
       Image
     </button>
     <button
@@ -17,7 +17,7 @@
       [attr.title]="videoLocked ? 'Video — coming with Pro' : null"
       (click)="setMode('video')"
     >
-      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="15" />
+      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="15"/>
       Video
     </button>
   </div>
@@ -30,9 +30,9 @@
       </app-hint>
     </span>
     <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
-      <img [src]="family().logo" [alt]="family().provider" class="family-logo" />
+      <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
       <span class="model-trigger-name">{{ family().name }}</span>
-      <ng-icon name="lucideChevronDown" size="14" class="model-chevron" />
+      <ng-icon name="lucideChevronDown" size="14" class="model-chevron"/>
     </button>
     <ng-template #modelMenu>
       <div hlmDropdownMenu class="model-menu">
@@ -45,7 +45,7 @@
             (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
           >
             <span class="model-item-top">
-              <img [src]="f.logo" [alt]="f.provider" class="family-logo" />
+              <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
               <span class="model-item-name">{{ f.name }}</span>
               @if (disabledFamily(f.id)) {
                 <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
@@ -80,20 +80,20 @@
     </span>
     @if (reference(); as ref) {
       <div class="ref-preview">
-        <img [src]="ref.url" alt="Reference" />
+        <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
         <button
           type="button"
           class="ref-clear"
           (click)="setReference(null)"
           aria-label="Remove reference"
         >
-          <ng-icon name="lucideX" size="14" />
+          <ng-icon name="lucideX" size="14"/>
         </button>
       </div>
     } @else {
       <div class="ref-actions">
         <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput || uploading()">
-          <ng-icon name="lucideImagePlus" size="16" />
+          <ng-icon name="lucideImagePlus" size="16"/>
           {{ uploading() ? 'Uploading…' : 'Upload' }}
           <input
             type="file"
@@ -180,17 +180,19 @@
     </p>
   }
 
-  <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
-    <ng-icon name="lucideWandSparkles" size="16" />
-    Generate
-    @if (batch() > 1) {
-      ×{{ batch() }}
+  <div class="gen-btn">
+    @if (insufficient()) {
+      <p class="insufficient mb-4">
+        Balance too low for this configuration — top up from the profile menu.
+      </p>
     }
-    · ${{ priceUsd() | number: '1.2-2' }}
-  </button>
-  @if (insufficient()) {
-    <p class="insufficient">
-      Balance too low for this configuration — top up from the profile menu.
-    </p>
-  }
+    <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
+      <ng-icon name="lucideWandSparkles" size="16"/>
+      Generate
+      @if (batch() > 1) {
+        <span class="num">×{{ batch() }}</span>
+      }
+      · <span class="num">${{ priceUsd() | number: '1.2-2' }}</span>
+    </button>
+  </div>
 </div>

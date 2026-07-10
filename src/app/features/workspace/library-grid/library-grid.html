@@ -1,6 +1,20 @@
 <div class="library-head">
   <h1>{{ pickMode() ? 'Pick a reference' : 'Library' }}</h1>
-  <span class="muted">{{ visible().length }} of {{ items().length }}</span>
+  <div class="library-head-right">
+    <span class="muted">{{ visible().length }} of {{ items().length }}</span>
+    @if (canUpload() && !pickMode()) {
+      <label class="upload-btn">
+        <ng-icon name="lucideUpload" size="14" />
+        Upload to edit
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          class="upload-input"
+          (change)="onUploadPick($event)"
+        />
+      </label>
+    }
+  </div>
 </div>
 
 <div class="filter-row">
@@ -45,7 +59,9 @@
           } @else if (item.status === 'failed') {
             <div class="gen-failed">
               <span class="failed-title">Generation failed</span>
-              <span class="failed-sub">Refunded ${{ item.priceUsd | number: '1.2-2' }}</span>
+              <span class="failed-sub">
+                Refunded <span class="num">${{ item.priceUsd | number: '1.2-2' }}</span>
+              </span>
               <button
                 type="button"
                 class="failed-retry"
@@ -55,11 +71,11 @@
               </button>
             </div>
           } @else {
-            <img [src]="item.mediaUrl" [alt]="item.prompt" />
+            <img [cachedSrc]="item.mediaUrl" [cacheKey]="item.id" [alt]="item.prompt" />
             @if (item.kind === 'video') {
               <span class="video-tag">
                 <ng-icon name="lucideVideo" size="12" />
-                {{ item.settings.durationS ?? 5 }}s
+                <span class="num">{{ item.settings.durationS ?? 5 }}s</span>
               </span>
             }
             @if (item.op === 'edit' || item.op === 'upscale') {
@@ -81,7 +97,7 @@
                     class="qa"
                     (click)="upscale.emit(item.id); $event.stopPropagation()"
                   >
-                    Upscale ${{ upscalePrice | number: '1.2-2' }}
+                    Upscale <span class="num">${{ upscalePrice | number: '1.2-2' }}</span>
                   </button>
                   <button
                     type="button"

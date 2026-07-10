@@ -4,6 +4,7 @@ import { ProfileDto, ProfileResponse, SubscriptionDto } from '../api/dtos';
 import { SubscriptionStatus } from '../enums';
 import { LedgerService } from '../ledger/ledger-service';
 import { PreferencesService } from '../preferences/preferences-service';
+import { currentUid, readCache, writeCache } from '../api/local-cache';
 
 @Injectable({ providedIn: 'root' })
 export class ProfileStore {
@@ -39,7 +40,19 @@ export class ProfileStore {
   });
 
   async load(): Promise<void> {
+    // Boot from the last snapshot (profile, settings, balance) instantly,
+    // then always revalidate — balance can change server-side any time.
+    const cacheKey = `profile.${await currentUid()}`;
+    if (!this.loadedSig()) {
+      const cached = readCache<ProfileResponse>(cacheKey);
+      if (cached) this.apply(cached);
+    }
     const response = await this.api.get<ProfileResponse>('/profile');
+    this.apply(response);
+    writeCache(cacheKey, response);
+  }
+
+  private apply(response: ProfileResponse): void {
     this.profileSig.set(response.profile);
     this.subscriptionSig.set(response.subscription);
     this.ledger.setBalance(response.balanceUsd);

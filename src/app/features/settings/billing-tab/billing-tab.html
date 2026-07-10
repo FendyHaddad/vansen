@@ -13,18 +13,18 @@
       <span class="eyebrow">Generation balance</span>
       <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
       <p class="muted small">
-        {{
-          needsStudio()
-            ? 'First purchase includes your first month of Studio (+$5).'
-            : 'Never expires while Studio is active.'
-        }}
+        @if (needsStudio()) {
+          First purchase includes your first month of Studio (+<span class="num">$5</span>).
+        } @else {
+          Never expires while Studio is active.
+        }
       </p>
       <div class="topup-row">
         @for (credits of presets; track credits) {
           <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="topUp(credits)">
-            +${{ credits }}
+            <span class="num">+${{ credits }}</span>
             @if (needsStudio()) {
-              <span class="due-hint">due ${{ dueFor(credits) }}</span>
+              <span class="due-hint">due <span class="num">${{ dueFor(credits) }}</span></span>
             }
           </button>
         }
@@ -40,12 +40,15 @@
     <div class="panel studio-panel">
       <div class="studio-head">
         <span class="eyebrow">Studio</span>
-        <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-          {{ studioActive() ? (canceledPending() ? 'Ending' : 'Active') : 'Inactive' }}
-        </span>
+        @if (profileLoaded()) {
+          <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
+            {{ studioActive() ? (canceledPending() ? 'Ending' : 'Active') : 'Inactive' }}
+          </span>
+        }
       </div>
       <p class="small">
-        $5/month — keeps your library online, prompts saved, and your balance alive.
+        <span class="num">$5</span>/month — keeps your library online, prompts saved, and
+        your balance alive.
       </p>
 
       @if (subscription(); as sub) {
@@ -59,8 +62,8 @@
         }
         @if (graceDaysLeft(); as days) {
           <p class="warn-text small">
-            Studio lapsed — {{ days }} day{{ days === 1 ? '' : 's' }} left to download your
-            library or reactivate before deletion.
+            Studio lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
+            left to download your library or reactivate before deletion.
           </p>
         }
         <div class="studio-actions">
@@ -70,7 +73,7 @@
             </button>
           } @else {
             <button hlmBtn size="sm" [disabled]="busy()" (click)="reactivate()">
-              Reactivate · $5
+              Reactivate · <span class="num">$5</span>
             </button>
             <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
               Billing history
@@ -88,7 +91,7 @@
   <div class="panel ledger-panel">
     <div class="panel-head">
       <h3 class="panel-title">Transactions</h3>
-      <span class="muted small">{{ entries().length }} entries</span>
+      <span class="muted small"><span class="num">{{ entries().length }}</span> entries</span>
     </div>
     <div class="ledger-table">
       <div class="ledger-row ledger-header">

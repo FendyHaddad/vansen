@@ -4,8 +4,8 @@
     {
       "name": "vansen-dev",
       "runtimeExecutable": "/Users/user/.nvm/versions/node/v22.23.1/bin/node",
-      "runtimeArgs": ["node_modules/@angular/cli/bin/ng.js", "serve", "--port", "4200"],
-      "port": 4200
+      "runtimeArgs": ["node_modules/@angular/cli/bin/ng.js", "serve", "--port", "4300"],
+      "port": 4300
     }
   ]
 }

@@ -3,6 +3,7 @@ import { PixelBuffer } from './pixel-buffer';
 import { AdjustParams, adjust } from './ops/adjust';
 import { sharpen, smooth } from './ops/convolve';
 import { CropRect, crop, rotate90 } from './ops/crop';
+import { heal } from './ops/heal';
 import { LiquifyStep, liquify } from './ops/liquify';
 
 export type WorkerOp =
@@ -11,7 +12,8 @@ export type WorkerOp =
   | { kind: 'smooth'; buffer: PixelBuffer; params: number }
   | { kind: 'crop'; buffer: PixelBuffer; params: CropRect }
   | { kind: 'rotate90'; buffer: PixelBuffer; params: null }
-  | { kind: 'liquify'; buffer: PixelBuffer; params: LiquifyStep };
+  | { kind: 'liquify'; buffer: PixelBuffer; params: LiquifyStep }
+  | { kind: 'heal'; buffer: PixelBuffer; params: { mask: Uint8Array } };
 
 /** Shared dispatch — the worker calls it; tests and no-Worker envs call it directly. */
 export function runOpSync(op: WorkerOp): PixelBuffer {
@@ -28,6 +30,8 @@ export function runOpSync(op: WorkerOp): PixelBuffer {
       return rotate90(op.buffer);
     case 'liquify':
       return liquify(op.buffer, op.params);
+    case 'heal':
+      return heal(op.buffer, op.params.mask);
   }
 }
 
