@@ -42,7 +42,15 @@
   28 MB ONNX model from HuggingFace on first use, cached in Cache Storage
   `vansen-models`, ort wasm copied to `assets/ort` by angular.json; PatchMatch
   in `ops/heal.ts` stays as offline fallback — angular.json needs
-  externalDependencies crypto/fs/path). `POST /edits/save` = moderated $0 "Studio Edit"
+  externalDependencies crypto/fs/path). More local tools: Studio = rotate/flip/straighten
+  (`ops/transform.ts`) + filters (`ops/filters.ts`); Pro-preview (unlocked while testing,
+  lock pass pending user approval) = enhance/levels/clone/retouch/perspective (pure ops)
+  plus ONNX engines in `core/editing/engines/` (shared `model-loader.ts`, same
+  `vansen-models` cache): Cut Out = ISNet fp16 88MB (imgly, MIT), Bokeh = Depth Anything
+  V2 small quantized 27MB (Apache — B/L variants are NC, never use), Upscale 2× = Swin2SR
+  lightweight tiled 8MB (Apache), Smart Select = SlimSAM-77 quantized enc+dec 14MB
+  (Apache; click→mask→MI-GAN remove or alpha cut-out). RMBG (bria) and the AGPL ISNet
+  mirror are license-banned. `POST /edits/save` = moderated $0 "Studio Edit"
   version, Studio-gated (403 `studio_required`). AI edit tools `edit-remove|edit-fill|
   edit-expand|edit-bg` in `EDIT_TOOLS` (model-families.ts): FIXED retail prices
   ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,

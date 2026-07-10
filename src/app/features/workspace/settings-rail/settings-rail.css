@@ -66,15 +66,15 @@
   opacity: 0.4;
 }
 
+/* Match the right-panel tool buttons; tooltip pushed to the far end. */
 .field-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  text-transform: capitalize;
+  color: var(--foreground);
 }
 
 .og-info {

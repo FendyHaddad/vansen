@@ -8,7 +8,11 @@
     aria-label="Profile menu"
   >
     <span class="bar-user">
-      <span class="bar-name">{{ displayName() || 'Creator' }}</span>
+      <span class="bar-name">
+        {{ displayName() || 'Creator' }}
+        <span class="tier-dot" aria-hidden="true"></span>
+        <span class="tier-label">{{ tierLabel() }}</span>
+      </span>
       <span class="bar-email">{{ email() }}</span>
     </span>
     <span class="bar-balance" [class.bar-balance-low]="balanceUsd() < 1">

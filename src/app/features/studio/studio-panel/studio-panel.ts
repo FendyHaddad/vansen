@@ -10,25 +10,32 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
+  lucideAperture,
   lucideBrush,
+  lucideChartNoAxesColumn,
   lucideCheck,
   lucideCrop,
   lucideDownload,
+  lucideEclipse,
+  lucideImageOff,
   lucideLock,
-  lucideRedo2,
+  lucideMaximize2,
+  lucideMousePointerClick,
+  lucideMove3d,
+  lucidePalette,
   lucideSave,
   lucideScan,
   lucideSlidersHorizontal,
   lucideSparkles,
-  lucideUndo2,
+  lucideStamp,
+  lucideSun,
   lucideWand,
-  lucideZoomIn,
-  lucideZoomOut,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { EDIT_TOOLS } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
+import { RetouchMode } from '../../../core/editing/ops/retouch';
 import { LedgerService } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { StudioTool } from '../studio-tool';
@@ -43,10 +50,25 @@ interface LocalToolDef {
 const LOCAL_TOOLS: LocalToolDef[] = [
   { id: 'crop', label: 'Crop', icon: 'lucideCrop' },
   { id: 'adjust', label: 'Adjust', icon: 'lucideSlidersHorizontal' },
+  { id: 'filters', label: 'Filters', icon: 'lucidePalette' },
   { id: 'sharpen', label: 'Sharpen', icon: 'lucideWand' },
   { id: 'smooth', label: 'Smooth', icon: 'lucideWand' },
-  { id: 'liquify', label: 'Liquify', icon: 'lucideScan' },
   { id: 'heal', label: 'Spot Heal', icon: 'lucideBrush' },
+];
+
+/** Pro-tier locals — unlocked for everyone while they're being test-driven;
+ * the lock pass happens once they graduate. */
+const PRO_TOOLS: LocalToolDef[] = [
+  { id: 'select', label: 'Ai Select', icon: 'lucideMousePointerClick' },
+  { id: 'upscale', label: 'Ai Upscale', icon: 'lucideMaximize2' },
+  { id: 'bgremove', label: 'Cut Out', icon: 'lucideImageOff' },
+  { id: 'bokeh', label: 'Bokeh', icon: 'lucideAperture' },
+  { id: 'enhance', label: 'Enhance', icon: 'lucideSun' },
+  { id: 'levels', label: 'Levels', icon: 'lucideChartNoAxesColumn' },
+  { id: 'clone', label: 'Clone', icon: 'lucideStamp' },
+  { id: 'retouch', label: 'Retouch', icon: 'lucideEclipse' },
+  { id: 'perspective', label: 'Perspective', icon: 'lucideMove3d' },
+  { id: 'liquify', label: 'Liquify', icon: 'lucideScan' },
 ];
 
 interface ExportFormat {
@@ -72,20 +94,26 @@ const EXPORT_FORMATS: ExportFormat[] = [
   imports: [DecimalPipe, NgIcon, HlmButton, ToolOptions],
   providers: [
     provideIcons({
+      lucideAperture,
       lucideBrush,
+      lucideChartNoAxesColumn,
       lucideCheck,
       lucideCrop,
       lucideDownload,
+      lucideEclipse,
+      lucideImageOff,
       lucideLock,
-      lucideRedo2,
+      lucideMaximize2,
+      lucideMousePointerClick,
+      lucideMove3d,
+      lucidePalette,
       lucideSave,
       lucideScan,
       lucideSlidersHorizontal,
       lucideSparkles,
-      lucideUndo2,
+      lucideStamp,
+      lucideSun,
       lucideWand,
-      lucideZoomIn,
-      lucideZoomOut,
     }),
   ],
 })
@@ -99,9 +127,14 @@ export class StudioPanel {
 
   readonly saveRequested = output<void>();
   readonly subscribeRequested = output<void>();
-  readonly aiToolRequested = output<{ toolId: string; prompt: string }>();
+  readonly aiToolRequested = output<{
+    toolId: string;
+    prompt: string;
+    maskPngBase64?: string;
+  }>();
 
   readonly localTools = LOCAL_TOOLS;
+  readonly proTools = PRO_TOOLS;
   readonly aiTools = EDIT_TOOLS;
   readonly studioActive = this.profileStore.studioActive;
   readonly balanceUsd = this.ledger.balanceUsd;
@@ -116,6 +149,12 @@ export class StudioPanel {
   /** Liquify brush behavior — the viewport reads both. */
   readonly liquifyMode = signal<LiquifyMode>('push');
   readonly liquifyStrength = signal(50);
+  /** Dodge/burn brush behavior — the viewport reads all three. */
+  readonly retouchMode = signal<RetouchMode>('lighten');
+  readonly retouchStrength = signal(50);
+  readonly retouchFeather = signal(50);
+  /** Clone-stamp dab opacity — the viewport reads it. */
+  readonly cloneStrength = signal(100);
   /** Prompt for Generative Fill. */
   readonly fillPrompt = signal('');
   /** Export format picker visibility. */
@@ -126,8 +165,10 @@ export class StudioPanel {
    * not flash the "subscribe" overlay at subscribed users. */
   readonly locked = computed(() => this.profileStore.loaded() && !this.studioActive());
 
-  /** Viewport magnification as a whole percent, e.g. 125. */
-  readonly zoomPct = computed(() => Math.round(this.session.zoom() * 100));
+  /** Pro tools are unlocked for everyone while testing. When Studio goes live
+   * this flips true for non-Pro subscribers so the tiles disable + show a lock;
+   * flip to a profile-driven check at that point. */
+  readonly proLocked = signal(false);
 
   selectTool(id: StudioTool): void {
     this.activeTool.set(this.activeTool() === id ? null : id);
@@ -156,5 +197,12 @@ export class StudioPanel {
     if (!tool || !this.affordable(tool.userPriceUsd)) return;
     if (tool.needsPrompt && !this.fillPrompt().trim()) return;
     this.aiToolRequested.emit({ toolId, prompt: this.fillPrompt().trim() });
+  }
+
+  /** AI edit scoped to an Ai Select mask — priced like the mask-painted flow. */
+  onAiSelection(req: { toolId: string; prompt: string; maskPngBase64: string }): void {
+    const tool = this.aiTools.find((t) => t.id === req.toolId);
+    if (!tool || !this.affordable(tool.userPriceUsd)) return;
+    this.aiToolRequested.emit(req);
   }
 }

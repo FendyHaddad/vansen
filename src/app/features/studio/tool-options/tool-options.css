@@ -84,3 +84,39 @@
   border-color: #2563eb;
   background: color-mix(in srgb, #2563eb 18%, transparent);
 }
+
+/* Luminance histogram behind the Levels sliders. */
+.hist-canvas {
+  width: 100%;
+  height: 56px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--background, #0d0d10) 88%, black);
+}
+
+/* Read-only value chip (gamma) — same box as .num without the input chrome. */
+.num-ro {
+  display: inline-block;
+  border-color: transparent;
+}
+
+.opt-error {
+  color: #f87171;
+  opacity: 1;
+}
+
+/* Prompt box for AI Fill on a selection. */
+.fill-prompt {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border, #26262a);
+  background: transparent;
+  color: inherit;
+  font-size: 0.74rem;
+}
+
+.fill-prompt:focus {
+  outline: none;
+  border-color: #2563eb;
+}

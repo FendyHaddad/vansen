@@ -29,6 +29,10 @@ export class ProfileMenu {
   readonly initial = computed(() => (this.email().charAt(0) || '?').toUpperCase());
   readonly balanceUsd = this.ledger.balanceUsd;
 
+  /** Studio/Pro tier badge next to the display name. Pro isn't a real
+   * subscribable tier yet — flip this once it is. */
+  readonly tierLabel = computed(() => (this.profileStore.studioActive() ? 'Studio' : 'Inactive'));
+
   readonly topUp = output<void>();
   readonly signOut = output<void>();
 }

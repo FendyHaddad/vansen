@@ -2,6 +2,8 @@
   class="viewport"
   [class.cropping]="tool() === 'crop'"
   [class.brushing]="brushToolActive()"
+  [class.picking]="pickToolActive()"
+  [class.clone-picking]="clonePicking()"
   [class.pannable]="pannable()"
   [class.panning]="panning()"
   (pointerdown)="onPointerDown($event)"
@@ -61,14 +63,29 @@
       <button type="button" class="crop-apply" (click)="applyCrop()">Apply crop</button>
     </div>
   }
-  @if (brushToolActive() && cursorPos(); as cp) {
+  @if (cloneMarkerCss(); as cm) {
+    <div class="clone-source" [style.left.px]="cm.x" [style.top.px]="cm.y"></div>
+  }
+  @if (focusMarkerCss(); as fp) {
+    <div class="focus-point" [style.left.px]="fp.x" [style.top.px]="fp.y"></div>
+  }
+  @if (brushToolActive() && !clonePicking() && cursorPos(); as cp) {
     <div
       class="brush-cursor"
       [style.left.px]="cp.x"
       [style.top.px]="cp.y"
       [style.width.px]="brushCursorPx()"
       [style.height.px]="brushCursorPx()"
-    ></div>
+    >
+      @if (clonePreviewOn()) {
+        <canvas
+          #cloneCanvas
+          class="brush-preview"
+          [width]="brushPx()"
+          [height]="brushPx()"
+        ></canvas>
+      }
+    </div>
   }
   @if (session.busy()) {
     <div class="busy-veil">Working…</div>

@@ -28,7 +28,7 @@
       <ul class="lock-perks">
         <li>
           <ng-icon name="lucideCheck" size="13" />
-          <span>Crop, adjust, liquify, heal — free</span>
+          <span>Crop, adjust, filters, heal — free</span>
         </li>
         <li>
           <ng-icon name="lucideCheck" size="13" />
@@ -68,14 +68,35 @@
             <span>{{ tool.label }}</span>
           </button>
         }
+        <!-- Pro tools sit in the same grid — no divider. When Studio goes live
+             the lock pass disables these for non-Pro subscribers with a lock
+             icon; unlocked for everyone while testing. -->
+        @for (tool of proTools; track tool.id) {
+          <button
+            type="button"
+            class="tool-btn"
+            [class.tool-active]="activeTool() === tool.id"
+            [disabled]="!editing() || proLocked()"
+            [title]="proLocked() ? 'Pro tool — upgrade to unlock' : ''"
+            (click)="selectTool(tool.id)"
+          >
+            <ng-icon [name]="proLocked() ? 'lucideLock' : tool.icon" size="15" />
+            <span>{{ tool.label }}</span>
+          </button>
+        }
       </div>
-      @if (editing()) {
+      @if (editing() && activeTool()) {
         <app-tool-options
           [tool]="activeTool()"
           [(brushSize)]="brushSize"
           [(cropAspect)]="cropAspect"
           [(liquifyMode)]="liquifyMode"
           [(liquifyStrength)]="liquifyStrength"
+          [(retouchMode)]="retouchMode"
+          [(retouchStrength)]="retouchStrength"
+          [(retouchFeather)]="retouchFeather"
+          [(cloneStrength)]="cloneStrength"
+          (aiSelection)="onAiSelection($event)"
         />
       }
     </section>
@@ -113,66 +134,6 @@
 
     @if (editing()) {
       <div class="rail-actions">
-        <div class="rail-row zoom-row">
-          <button
-            hlmBtn
-            variant="outline"
-            size="sm"
-            type="button"
-            class="rail-btn zoom-btn"
-            aria-label="Zoom out"
-            [disabled]="session.zoom() <= 0.25"
-            (click)="session.zoomOut()"
-          >
-            <ng-icon name="lucideZoomOut" size="14" />
-          </button>
-          <button
-            type="button"
-            class="zoom-pct"
-            title="Reset to 100%"
-            (click)="session.resetZoom()"
-          >
-            <span class="num">{{ zoomPct() }}%</span>
-          </button>
-          <button
-            hlmBtn
-            variant="outline"
-            size="sm"
-            type="button"
-            class="rail-btn zoom-btn"
-            aria-label="Zoom in"
-            [disabled]="session.zoom() >= 4"
-            (click)="session.zoomIn()"
-          >
-            <ng-icon name="lucideZoomIn" size="14" />
-          </button>
-        </div>
-        <div class="rail-row">
-          <button
-            hlmBtn
-            variant="outline"
-            size="sm"
-            type="button"
-            class="rail-btn"
-            [disabled]="!session.canUndo()"
-            (click)="session.undo()"
-          >
-            <ng-icon name="lucideUndo2" size="14" />
-            Undo
-          </button>
-          <button
-            hlmBtn
-            variant="outline"
-            size="sm"
-            type="button"
-            class="rail-btn"
-            [disabled]="!session.canRedo()"
-            (click)="session.redo()"
-          >
-            <ng-icon name="lucideRedo2" size="14" />
-            Redo
-          </button>
-        </div>
         <div class="rail-row">
           <button
             hlmBtn

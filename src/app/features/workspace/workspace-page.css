@@ -144,6 +144,72 @@ app-studio-panel {
   outline: none;
 }
 
+/* Edit-mode toolbar — second bar under the topbar: zoom + undo/redo. */
+.edit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  flex-shrink: 0;
+}
+
+.et-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.et-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.et-btn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.et-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.et-pct {
+  min-width: 52px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.et-pct:hover {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.et-sep {
+  width: 1px;
+  height: 18px;
+  background: color-mix(in oklch, var(--border) 80%, transparent);
+}
+
 .content {
   flex: 1;
   overflow-y: auto;

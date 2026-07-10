@@ -53,13 +53,62 @@
             (input)="searchTerm.set($any($event.target).value)"
           />
         </div>
-        @if (profileLoaded()) {
-          <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-            Studio · {{ studioActive() ? 'Active' : 'Lapsed' }}
-          </span>
-        }
       </div>
     </header>
+
+    @if (mode() === 'edit') {
+      <div class="edit-toolbar">
+        <div class="et-group">
+          <button
+            type="button"
+            class="et-btn"
+            aria-label="Zoom out"
+            [disabled]="editSession.zoom() <= 0.25"
+            (click)="editSession.zoomOut()"
+          >
+            <ng-icon name="lucideZoomOut" size="14" />
+          </button>
+          <button
+            type="button"
+            class="et-pct"
+            title="Reset to 100%"
+            (click)="editSession.resetZoom()"
+          >
+            <span class="num">{{ zoomPct() }}%</span>
+          </button>
+          <button
+            type="button"
+            class="et-btn"
+            aria-label="Zoom in"
+            [disabled]="editSession.zoom() >= 4"
+            (click)="editSession.zoomIn()"
+          >
+            <ng-icon name="lucideZoomIn" size="14" />
+          </button>
+        </div>
+        <span class="et-sep"></span>
+        <div class="et-group">
+          <button
+            type="button"
+            class="et-btn et-labeled"
+            [disabled]="!editSession.canUndo()"
+            (click)="editSession.undo()"
+          >
+            <ng-icon name="lucideUndo2" size="14" />
+            Undo
+          </button>
+          <button
+            type="button"
+            class="et-btn et-labeled"
+            [disabled]="!editSession.canRedo()"
+            (click)="editSession.redo()"
+          >
+            <ng-icon name="lucideRedo2" size="14" />
+            Redo
+          </button>
+        </div>
+      </div>
+    }
 
     <main class="content">
       @if (notice()) {
@@ -94,6 +143,10 @@
           [cropAspect]="panel().cropAspect()"
           [liquifyMode]="panel().liquifyMode()"
           [liquifyStrength]="panel().liquifyStrength()"
+          [retouchMode]="panel().retouchMode()"
+          [retouchStrength]="panel().retouchStrength()"
+          [retouchFeather]="panel().retouchFeather()"
+          [cloneStrength]="panel().cloneStrength()"
         />
       } @else {
         <app-library-grid

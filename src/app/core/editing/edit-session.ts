@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { GenerationDto } from '../api/dtos';
 import { MediaCache } from '../media/media-cache';
 import { EditEngine } from './edit-engine';
+import { resizeBilinear } from './engines/raster';
 import { PixelBuffer } from './pixel-buffer';
 import { WorkerOp, runOpSync } from './edit-worker';
 
@@ -21,6 +22,8 @@ export class EditSession {
   private renderSeq = 0;
   /** Serializes worker ops — concurrent posts would cross-resolve replies. */
   private opQueue: Promise<unknown> = Promise.resolve();
+  /** Memoized downscaled copy of the committed pixels for cheap previews. */
+  private smallBase: { src: Uint8ClampedArray; maxDim: number; buf: PixelBuffer } | null = null;
 
   private readonly itemSig = signal<GenerationDto | null>(null);
   private readonly dirtySig = signal(false);
@@ -34,10 +37,15 @@ export class EditSession {
    * canvas viewport share it without extra wiring. */
   private readonly zoomSig = signal(1);
 
+  /** Last canvas click in image px for point-driven tools (bokeh focus,
+   * smart select) — the viewport writes it, tool options react to it. */
+  private readonly pointPickSig = signal<{ x: number; y: number } | null>(null);
+
   readonly item = this.itemSig.asReadonly();
   readonly dirty = this.dirtySig.asReadonly();
   readonly busy = this.busySig.asReadonly();
   readonly zoom = this.zoomSig.asReadonly();
+  readonly pointPick = this.pointPickSig.asReadonly();
   readonly previewUrl = this.previewSig.asReadonly();
   readonly previewBuffer = this.previewBufSig.asReadonly();
   readonly canUndo = computed(() => {
@@ -111,19 +119,70 @@ export class EditSession {
    * Compute an op's result as an uncommitted preview buffer — live feedback
    * while the user drags a slider. The viewport paints it straight to a
    * canvas (no PNG round-trip). Stale results are dropped.
+   *
+   * `maxDim` runs the op on a downscaled copy (the overlay canvas CSS-scales
+   * back up) — geometry sliders stay smooth on huge images; Apply is full-res.
    */
-  async previewOp(kind: WorkerOp['kind'], params: unknown): Promise<void> {
+  async previewOp(kind: WorkerOp['kind'], params: unknown, maxDim?: number): Promise<void> {
     if (!this.engine) return;
     const token = ++this.previewToken;
-    const op = { kind, buffer: this.engine.current, params } as WorkerOp;
+    const op = { kind, buffer: this.previewBase(maxDim), params } as WorkerOp;
     const next = await this.run(op);
     if (token === this.previewToken) this.previewBufSig.set(next);
+  }
+
+  /** Committed pixels, downscaled to `maxDim` and memoized per commit. */
+  private previewBase(maxDim?: number): PixelBuffer {
+    const cur = this.engine!.current;
+    const long = Math.max(cur.width, cur.height);
+    if (!maxDim || long <= maxDim) return cur;
+    if (this.smallBase?.src === cur.data && this.smallBase.maxDim === maxDim) {
+      return this.smallBase.buf;
+    }
+    const k = maxDim / long;
+    const buf = resizeBilinear(
+      cur,
+      Math.max(1, Math.round(cur.width * k)),
+      Math.max(1, Math.round(cur.height * k)),
+    );
+    this.smallBase = { src: cur.data, maxDim, buf };
+    return buf;
   }
 
   /** Discard any uncommitted preview and show the committed pixels again. */
   resetPreview(): void {
     this.previewToken++;
     this.previewBufSig.set(null);
+  }
+
+  /** Point-tool click routing (bokeh focus, smart select). */
+  setPointPick(p: { x: number; y: number } | null): void {
+    this.pointPickSig.set(p);
+  }
+
+  /** Show an externally computed buffer as the uncommitted preview
+   * (engine tools render outside the worker-op pipeline). */
+  showPreviewBuffer(buf: PixelBuffer): void {
+    this.previewToken++; // cancel any in-flight worker preview
+    this.previewBufSig.set(buf);
+  }
+
+  /**
+   * Run an engine (ONNX) op on the current pixels and commit the result as
+   * one undoable step. Serialized on the same queue as worker ops.
+   */
+  async applyEngine(run: (buf: PixelBuffer) => Promise<PixelBuffer>): Promise<void> {
+    if (!this.engine) return;
+    this.busySig.set(true);
+    try {
+      const engine = this.engine;
+      const next = await this.enqueue(() => run(engine.current));
+      if (this.engine !== engine) return; // session closed mid-run
+      engine.push(next);
+      this.afterChange();
+    } finally {
+      this.busySig.set(false);
+    }
   }
 
   /**
@@ -286,5 +345,15 @@ function bufferToBlob(buf: PixelBuffer, type = 'image/png', quality?: number): P
   const canvas = new OffscreenCanvas(buf.width, buf.height);
   const ctx = canvas.getContext('2d')!;
   ctx.putImageData(new ImageData(new Uint8ClampedArray(buf.data), buf.width, buf.height), 0, 0);
+  if (type === 'image/jpeg') {
+    // JPEG has no alpha and would flatten transparency (Cut Out) to black —
+    // composite over white instead.
+    const flat = new OffscreenCanvas(buf.width, buf.height);
+    const fctx = flat.getContext('2d')!;
+    fctx.fillStyle = '#fff';
+    fctx.fillRect(0, 0, buf.width, buf.height);
+    fctx.drawImage(canvas, 0, 0);
+    return flat.convertToBlob({ type, quality });
+  }
   return canvas.convertToBlob({ type, quality });
 }

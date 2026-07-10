@@ -9,8 +9,14 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideSearch, lucideX } from '@ng-icons/lucide';
-import { HlmBadge } from '@spartan-ng/helm/badge';
+import {
+  lucideRedo2,
+  lucideSearch,
+  lucideUndo2,
+  lucideX,
+  lucideZoomIn,
+  lucideZoomOut,
+} from '@ng-icons/lucide';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { GenerationStore } from '../../core/generations/generation-store';
@@ -46,7 +52,6 @@ const SAMPLE_PROMPTS = [
   imports: [
     RouterLink,
     NgIcon,
-    HlmBadge,
     ProfileMenu,
     SettingsRail,
     LibraryGrid,
@@ -54,7 +59,16 @@ const SAMPLE_PROMPTS = [
     CanvasViewport,
     StudioPanel,
   ],
-  providers: [provideIcons({ lucideSearch, lucideX })],
+  providers: [
+    provideIcons({
+      lucideRedo2,
+      lucideSearch,
+      lucideUndo2,
+      lucideX,
+      lucideZoomIn,
+      lucideZoomOut,
+    }),
+  ],
 })
 export class WorkspacePage {
   private readonly auth = inject(AuthService);
@@ -77,11 +91,13 @@ export class WorkspacePage {
   /** 'library' shows the grid; 'edit' swaps in the canvas viewport. */
   readonly mode = signal<'library' | 'edit'>('library');
 
+  /** Viewport magnification as a whole percent, e.g. 125 — edit toolbar. */
+  readonly zoomPct = computed(() => Math.round(this.editSession.zoom() * 100));
+
   readonly userEmail = this.auth.userEmail;
   readonly displayName = this.profileStore.displayName;
   readonly balanceUsd = this.ledger.balanceUsd;
   readonly studioActive = this.profileStore.studioActive;
-  readonly profileLoaded = this.profileStore.loaded;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
   readonly generations = this.store.items;
   readonly samplePrompts = SAMPLE_PROMPTS;
@@ -359,7 +375,11 @@ export class WorkspacePage {
     }
   }
 
-  async onAiTool(req: { toolId: string; prompt: string }): Promise<void> {
+  async onAiTool(req: {
+    toolId: string;
+    prompt: string;
+    maskPngBase64?: string;
+  }): Promise<void> {
     const item = this.editSession.item();
     if (!item) return;
     const tool = editToolById(req.toolId);
@@ -372,7 +392,9 @@ export class WorkspacePage {
         return;
       }
 
-      const mask = this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
+      // Ai Select passes its own mask; otherwise the hand-painted mask layer.
+      const mask =
+        req.maskPngBase64 ?? this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
       if (tool.needsMask && !mask) {
         this.notice.set('Paint a mask first — the tool needs to know where to work.');
         return;

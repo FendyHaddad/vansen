@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import { getOrtSession } from './engines/model-loader';
 import { PixelBuffer, clonePixels } from './pixel-buffer';
 import { healEngineReady, healModelProgress } from './heal-status';
 
@@ -17,68 +18,11 @@ import { healEngineReady, healModelProgress } from './heal-status';
 
 const MODEL_URL =
   'https://huggingface.co/andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx';
-const MODEL_CACHE = 'vansen-models';
 
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
-
-function getSession(): Promise<ort.InferenceSession> {
-  // Failed init forgets itself so the next stroke can retry (e.g. back online).
-  sessionPromise ??= createSession().catch((e: unknown) => {
-    sessionPromise = null;
-    throw e;
-  });
-  return sessionPromise;
-}
-
-async function createSession(): Promise<ort.InferenceSession> {
-  ort.env.wasm.wasmPaths = '/assets/ort/';
-  const model = await loadModel();
-  const providers: Array<'webgpu' | 'wasm'> =
-    'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
-  const session = await ort.InferenceSession.create(model, {
-    executionProviders: providers,
-  });
+async function getSession(): Promise<ort.InferenceSession> {
+  const session = await getOrtSession(MODEL_URL, healModelProgress);
   healEngineReady.set(true);
   return session;
-}
-
-/** Model bytes from Cache Storage, else network (with download progress). */
-async function loadModel(): Promise<Uint8Array> {
-  const cache = typeof caches === 'undefined' ? null : await caches.open(MODEL_CACHE);
-  const hit = await cache?.match(MODEL_URL);
-  if (hit) return new Uint8Array(await hit.arrayBuffer());
-
-  const res = await fetch(MODEL_URL);
-  if (!res.ok || !res.body) throw new Error(`model fetch failed: ${res.status}`);
-  const total = Number(res.headers.get('Content-Length')) || 0;
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let got = 0;
-  healModelProgress.set(0);
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      got += value.length;
-      if (total) healModelProgress.set(got / total);
-    }
-  } finally {
-    healModelProgress.set(null);
-  }
-
-  const bytes = new Uint8Array(got);
-  let off = 0;
-  for (const c of chunks) {
-    bytes.set(c, off);
-    off += c.length;
-  }
-  try {
-    await cache?.put(MODEL_URL, new Response(bytes.slice()));
-  } catch {
-    // Quota/private-mode — still works this session, just re-downloads next time.
-  }
-  return bytes;
 }
 
 /**

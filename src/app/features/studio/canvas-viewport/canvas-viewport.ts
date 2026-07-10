@@ -13,8 +13,9 @@ import {
 import { EditSession } from '../../../core/editing/edit-session';
 import { CropRect } from '../../../core/editing/ops/crop';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
+import { RetouchMode } from '../../../core/editing/ops/retouch';
 import { MaskCanvas } from '../mask-canvas/mask-canvas';
-import { StudioTool } from '../studio-tool';
+import { DRAG_TOOLS, StudioTool } from '../studio-tool';
 
 /** Crop drag intent: draw a new box, move it, or resize from an edge/corner. */
 type CropHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -43,8 +44,16 @@ export class CanvasViewport {
   readonly liquifyMode = input<LiquifyMode>('push');
   /** 0..100 from the panel slider. */
   readonly liquifyStrength = input(50);
+  readonly retouchMode = input<RetouchMode>('lighten');
+  /** 0..100 from the panel slider. */
+  readonly retouchStrength = input(50);
+  /** 0..100 edge softness for the retouch brush. */
+  readonly retouchFeather = input(50);
+  /** 0..100 clone dab opacity. */
+  readonly cloneStrength = input(100);
 
   private readonly previewCanvas = viewChild<ElementRef<HTMLCanvasElement>>('previewCanvas');
+  private readonly cloneCanvas = viewChild<ElementRef<HTMLCanvasElement>>('cloneCanvas');
 
   /** Crop rectangle in image pixels, null = none. */
   readonly cropRect = signal<CropRect | null>(null);
@@ -61,7 +70,7 @@ export class CanvasViewport {
   readonly pannable = computed(() => {
     if (this.session.zoom() <= 1) return false;
     const t = this.tool();
-    return t !== 'crop' && t !== 'heal' && t !== 'liquify' && t !== 'mask';
+    return t === null || !DRAG_TOOLS.has(t);
   });
   readonly panning = computed(() => this.panDrag() !== null);
 
@@ -122,7 +131,69 @@ export class CanvasViewport {
 
   readonly brushToolActive = computed(() => {
     const t = this.tool();
-    return t === 'heal' || t === 'liquify';
+    return t === 'heal' || t === 'liquify' || t === 'clone' || t === 'retouch';
+  });
+
+  /** Crosshair cursor for the click-to-pick tools. */
+  readonly pickToolActive = computed(() => {
+    const t = this.tool();
+    return t === 'bokeh' || t === 'select';
+  });
+
+  /** Clone-stamp sample point in image px; null until the user marks one. */
+  readonly cloneSource = signal<{ x: number; y: number } | null>(null);
+  /** Alt/⌥ held — clone switches to source-pick mode (crosshair cursor). */
+  readonly altHeld = signal(false);
+  /** True while a clone paint drag is running (hides the in-brush preview). */
+  readonly cloneDragging = signal(false);
+  /** Crosshair while the next clone click will (re)mark the source. */
+  readonly clonePicking = computed(
+    () => this.tool() === 'clone' && (this.altHeld() || !this.cloneSource()),
+  );
+  /** Committed pixels as an <img> for painting the in-brush clone preview. */
+  private readonly cloneImg = signal<HTMLImageElement | null>(null);
+  /** Photoshop-style: the brush circle previews the pixels it would stamp. */
+  readonly clonePreviewOn = computed(
+    () =>
+      this.tool() === 'clone' &&
+      !!this.cloneSource() &&
+      !this.clonePicking() &&
+      !this.cloneDragging() &&
+      !!this.cloneImg(),
+  );
+  /** Integer canvas edge for the in-brush preview. */
+  readonly brushPx = computed(() => Math.max(2, Math.round(this.brushCursorPx())));
+
+  /** Bokeh focus reticle in viewport CSS px — where the last click landed. */
+  readonly focusMarkerCss = computed(() => {
+    this.viewTick();
+    if (this.tool() !== 'bokeh') return null;
+    const p = this.session.pointPick();
+    const buf = this.session.current();
+    if (!p || !buf) return null;
+    const img = this.imgRect();
+    const vp = this.vpRect();
+    if (!img || !vp || img.width === 0 || buf.width === 0) return null;
+    return {
+      x: img.left - vp.left + (p.x / buf.width) * img.width,
+      y: img.top - vp.top + (p.y / buf.height) * img.height,
+    };
+  });
+
+  /** Clone source marker in viewport CSS px. */
+  readonly cloneMarkerCss = computed(() => {
+    this.viewTick();
+    if (this.tool() !== 'clone') return null;
+    const src = this.cloneSource();
+    const buf = this.session.current();
+    if (!src || !buf) return null;
+    const img = this.imgRect();
+    const vp = this.vpRect();
+    if (!img || !vp || img.width === 0 || buf.width === 0) return null;
+    return {
+      x: img.left - vp.left + (src.x / buf.width) * img.width,
+      y: img.top - vp.top + (src.y / buf.height) * img.height,
+    };
   });
 
   /** Brush ring diameter in screen px, matching what the tool will touch. */
@@ -142,6 +213,14 @@ export class CanvasViewport {
   private liquifyStroked = false;
   /** Steps queued but not yet rendered — backpressure for fast drags. */
   private liquifyPending = 0;
+  /** Fixed source − stroke-start offset while a clone drag is active. */
+  private cloneOffset: { x: number; y: number } | null = null;
+  private cloneLast: { x: number; y: number } | null = null;
+  private cloneStroked = false;
+  private clonePending = 0;
+  private retouchLast: { x: number; y: number } | null = null;
+  private retouchStroked = false;
+  private retouchPending = 0;
 
   constructor() {
     // Entering crop shows a ready-made centered box; preset changes re-fit it.
@@ -189,10 +268,58 @@ export class CanvasViewport {
       this.session.previewUrl();
       this.panSig.set({ x: 0, y: 0 });
     });
+    // Any tool switch or image swap forgets the clone source mark.
+    effect(() => {
+      this.tool();
+      this.session.item();
+      this.cloneSource.set(null);
+    });
+    // Decoded committed pixels for the in-brush clone preview — only kept
+    // while the clone tool is open.
+    effect(() => {
+      const url = this.session.previewUrl();
+      if (this.tool() !== 'clone' || !url || typeof Image === 'undefined') {
+        this.cloneImg.set(null);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        // A newer commit may have replaced the URL while this one decoded.
+        if (this.session.previewUrl() === url) this.cloneImg.set(img);
+      };
+      img.src = url;
+    });
+    // Paint the source neighborhood into the brush circle — what the next
+    // stroke will stamp (non-aligned clone starts at the source).
+    effect(() => {
+      const canvas = this.cloneCanvas()?.nativeElement;
+      const img = this.cloneImg();
+      const src = this.cloneSource();
+      const edge = this.brushPx();
+      if (!canvas || !img || !src || !this.clonePreviewOn()) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const r = this.brushSize(); // radius in image px
+      ctx.clearRect(0, 0, edge, edge);
+      ctx.drawImage(img, src.x - r, src.y - r, r * 2, r * 2, 0, 0, edge, edge);
+    });
     if (typeof window !== 'undefined') {
       const bump = () => this.viewTick.update((n) => n + 1);
       window.addEventListener('resize', bump);
-      inject(DestroyRef).onDestroy(() => window.removeEventListener('resize', bump));
+      // Alt/⌥ toggles clone source-pick mode; window blur can eat the keyup.
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Alt') this.altHeld.set(e.type === 'keydown');
+      };
+      const onBlur = () => this.altHeld.set(false);
+      window.addEventListener('keydown', onKey);
+      window.addEventListener('keyup', onKey);
+      window.addEventListener('blur', onBlur);
+      inject(DestroyRef).onDestroy(() => {
+        window.removeEventListener('resize', bump);
+        window.removeEventListener('keydown', onKey);
+        window.removeEventListener('keyup', onKey);
+        window.removeEventListener('blur', onBlur);
+      });
     }
   }
 
@@ -296,7 +423,7 @@ export class CanvasViewport {
       this.cropDrag = { mode: 'new', startPt: p, startRect: { x: p.x, y: p.y, width: 0, height: 0 } };
       this.cropRect.set({ x: p.x, y: p.y, width: 0, height: 0 });
     }
-    if (t === 'heal' || t === 'liquify') {
+    if (t === 'heal' || t === 'liquify' || t === 'clone' || t === 'retouch') {
       const cp = this.cursorPos();
       this.strokeTrail.set(cp ? [cp] : []);
     }
@@ -308,6 +435,61 @@ export class CanvasViewport {
         this.postLiquifyStep({ cx: p.x, cy: p.y, dx: 0, dy: 0 });
       }
     }
+    if (t === 'clone' && e.button === 0) {
+      // First click (or alt-click any time) marks the sample spot; painting
+      // starts once a source exists.
+      const src = this.cloneSource();
+      if (e.altKey || !src) {
+        this.cloneSource.set(p);
+        this.strokeTrail.set([]);
+        return;
+      }
+      this.cloneOffset = { x: src.x - p.x, y: src.y - p.y };
+      this.cloneLast = p;
+      this.cloneDragging.set(true);
+      this.postCloneStamp(p);
+    }
+    if (t === 'retouch' && e.button === 0) {
+      this.retouchLast = p;
+      this.postRetouchDab(p);
+    }
+    // Point-pick tools: bokeh focus, smart select. Tool options react.
+    if ((t === 'bokeh' || t === 'select') && e.button === 0) {
+      this.session.setPointPick(p);
+    }
+  }
+
+  private postCloneStamp(q: { x: number; y: number }): void {
+    const off = this.cloneOffset;
+    if (!off) return;
+    this.cloneStroked = true;
+    this.clonePending++;
+    void this.session
+      .strokeOp('clone', {
+        sx: q.x + off.x,
+        sy: q.y + off.y,
+        tx: q.x,
+        ty: q.y,
+        radius: this.brushSize(),
+        strength: this.cloneStrength() / 100,
+      })
+      .finally(() => this.clonePending--);
+  }
+
+  private postRetouchDab(q: { x: number; y: number }): void {
+    this.retouchStroked = true;
+    this.retouchPending++;
+    void this.session
+      .strokeOp('retouch', {
+        cx: q.x,
+        cy: q.y,
+        radius: this.brushSize(),
+        mode: this.retouchMode(),
+        // Half-scaled per dab so a slow pass builds up instead of slamming.
+        strength: (this.retouchStrength() / 100) * 0.5,
+        feather: this.retouchFeather() / 100,
+      })
+      .finally(() => this.retouchPending--);
   }
 
   /** Preview-only liquify step: instant feedback, one undo entry per stroke. */
@@ -343,10 +525,24 @@ export class CanvasViewport {
       this.cropRect.set(this.resolveCrop(this.cropDrag, p));
       return;
     }
-    const dragging = (t === 'heal' && this.healStroke.length > 0) || (t === 'liquify' && !!this.liquifyLast);
+    const dragging =
+      (t === 'heal' && this.healStroke.length > 0) ||
+      (t === 'liquify' && !!this.liquifyLast) ||
+      (t === 'clone' && !!this.cloneLast) ||
+      (t === 'retouch' && !!this.retouchLast);
     if (dragging) {
       const cp = this.cursorPos();
       if (cp) this.strokeTrail.update((trail) => [...trail, cp]);
+    }
+    if (t === 'clone' && this.cloneLast) {
+      if (this.clonePending > 2) return;
+      this.stampAlong(this.cloneLast, p, this.brushSize() * 0.35, (q) => this.postCloneStamp(q));
+      this.cloneLast = p;
+    }
+    if (t === 'retouch' && this.retouchLast) {
+      if (this.retouchPending > 2) return;
+      this.stampAlong(this.retouchLast, p, this.brushSize() * 0.4, (q) => this.postRetouchDab(q));
+      this.retouchLast = p;
     }
     if (t === 'heal' && this.healStroke.length) this.healStroke.push(p);
     if (t === 'liquify' && this.liquifyLast) {
@@ -377,9 +573,27 @@ export class CanvasViewport {
     }
   }
 
+  /** Evenly spaced dabs from a (exclusive) to b (inclusive), capped per event. */
+  private stampAlong(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    spacing: number,
+    dab: (q: { x: number; y: number }) => void,
+  ): void {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len === 0) return;
+    const n = Math.min(6, Math.max(1, Math.round(len / Math.max(2, spacing))));
+    for (let i = 1; i <= n; i++) {
+      dab({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
+    }
+  }
+
   private updateCursor(e: PointerEvent): void {
     const vp = this.vpRect();
     if (vp) this.cursorPos.set({ x: e.clientX - vp.left, y: e.clientY - vp.top });
+    // Pointer events carry the live modifier state — catches Alt presses the
+    // window key listeners miss (focus elsewhere, missed keyup).
+    this.altHeld.set(e.altKey);
   }
 
   /** Apply a drag delta to the start rectangle per gesture mode, clamped to the image. */
@@ -507,6 +721,20 @@ export class CanvasViewport {
       this.strokeTrail.set([]);
       await this.session.commitStroke();
     }
+    if (t === 'clone' && this.cloneStroked) {
+      this.cloneStroked = false;
+      this.cloneOffset = null;
+      this.cloneLast = null;
+      this.cloneDragging.set(false);
+      this.strokeTrail.set([]);
+      await this.session.commitStroke();
+    }
+    if (t === 'retouch' && this.retouchStroked) {
+      this.retouchStroked = false;
+      this.retouchLast = null;
+      this.strokeTrail.set([]);
+      await this.session.commitStroke();
+    }
     if (t === 'heal' && this.healStroke.length) {
       const buf = this.session.current();
       if (buf) {
@@ -526,6 +754,10 @@ export class CanvasViewport {
     this.healStroke = [];
     this.cropDrag = null;
     this.liquifyLast = null;
+    this.cloneOffset = null;
+    this.cloneLast = null;
+    this.cloneDragging.set(false);
+    this.retouchLast = null;
     this.strokeTrail.set([]);
   }
 

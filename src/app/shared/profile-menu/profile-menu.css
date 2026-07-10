@@ -49,11 +49,29 @@
 }
 
 .bar-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.8125rem;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tier-dot {
+  flex-shrink: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.tier-label {
+  font-weight: 500;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bar-email {
