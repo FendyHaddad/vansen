@@ -16,7 +16,12 @@ import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmCardImports } from '@spartan-ng/helm/card';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
-import { familyById, userPriceUsd } from '../../core/catalog/model-families';
+import {
+  EDIT_TOOLS,
+  familyById,
+  upscaleUserPriceUsd,
+  userPriceUsd,
+} from '../../core/catalog/model-families';
 
 interface TopUpOption {
   amount: number;
@@ -95,7 +100,7 @@ export class PlansPage {
     { icon: 'lucideFolderLock', text: 'Private library — every output in full resolution' },
     { icon: 'lucideHistory', text: 'Prompt and settings saved with every asset, remix any time' },
     { icon: 'lucideDownload', text: 'Unlimited downloads, no watermarks' },
-    { icon: 'lucideShieldCheck', text: 'Generation history across every model in one place' },
+    { icon: 'lucideShieldCheck', text: 'Full editing suite — 19 on-canvas tools, free and unlimited' },
   ];
 
   readonly examplePrices: ExamplePrice[] = [
@@ -141,6 +146,34 @@ export class PlansPage {
     },
   ];
 
+  /** Generative edit tools with live retail prices from the shared catalog. */
+  readonly editTools = EDIT_TOOLS;
+
+  readonly upscalePrice = upscaleUserPriceUsd();
+
+  /** On-canvas tools included with Studio — mirrors the workspace right panel. */
+  readonly freeToolChips = [
+    'Crop',
+    'Adjust',
+    '17 Filters',
+    'Sharpen',
+    'Smooth',
+    'Spot Heal',
+    'Magic Erase',
+    'Smart Select',
+    'AI Upscale',
+    'Cut Out',
+    'Bokeh',
+    'Enhance',
+    'Levels',
+    'Clone',
+    'Retouch',
+    'Perspective',
+    'Liquify',
+    'Dehaze',
+    'Portrait Smooth',
+  ];
+
   readonly faqs: PlanFaq[] = [
     {
       question: 'What does a generation cost?',
@@ -161,6 +194,11 @@ export class PlansPage {
       question: 'What happens if I let Studio lapse?',
       answer:
         'You keep access until the end of the paid month, then a 30-day grace period to download everything. After that your library is permanently deleted. Any remaining generation balance stays yours and works again the moment you reactivate.',
+    },
+    {
+      question: 'What does editing cost?',
+      answer:
+        'The on-canvas suite — crop, filters, heal, cut out, bokeh, upscale and more — is included with Studio and runs on your own device, so it is free and unlimited. Generative edits (remove, fill, expand, background) are flat-priced from $0.05 per run, and saving an edited version costs nothing.',
     },
     {
       question: 'Why not a subscription?',

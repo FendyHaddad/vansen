@@ -119,6 +119,43 @@
     </div>
   </section>
 
+  <section class="mx-auto max-w-4xl px-6 py-12">
+    <h2 class="text-center text-2xl font-semibold tracking-tight">What editing costs</h2>
+    <p class="muted mx-auto mt-3 max-w-xl text-center">
+      Every image opens in a full editor. The on-canvas suite is included with Studio and
+      runs on your device — free and unlimited.
+    </p>
+
+    <div class="free-tools mt-8">
+      <p class="free-tools-label">Included with Studio</p>
+      <div class="free-tools-chips">
+        @for (chip of freeToolChips; track chip) {
+          <span class="free-tool-chip">{{ chip }}</span>
+        }
+      </div>
+    </div>
+
+    <div class="price-grid mt-6">
+      @for (tool of editTools; track tool.id) {
+        <div class="price-cell" [title]="tool.blurb">
+          <span class="price-kind price-kind-edit">AI edit</span>
+          <span class="price-name">{{ tool.name }}</span>
+          <span class="price-value">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
+        </div>
+      }
+      <div class="price-cell" title="A hidden utility model sharpens and enlarges your image.">
+        <span class="price-kind price-kind-edit">AI edit</span>
+        <span class="price-name">Precision Upscale</span>
+        <span class="price-value">${{ upscalePrice | number: '1.2-2' }}</span>
+      </div>
+      <div class="price-cell" title="Saving an edited version costs nothing.">
+        <span class="price-kind">Always</span>
+        <span class="price-name">Save a version</span>
+        <span class="price-value price-value-free">Free</span>
+      </div>
+    </div>
+  </section>
+
   <section class="mx-auto max-w-3xl px-6 py-12">
     <h2 class="text-center text-2xl font-semibold tracking-tight">Questions, answered</h2>
     <div class="mt-8 space-y-4">

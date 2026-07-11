@@ -1,29 +1,59 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  afterNextRender,
+  inject,
+} from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideArrowRight,
+  lucideBrush,
+  lucideCpu,
+  lucideEraser,
+  lucideFolderLock,
   lucideImage,
-  lucideShield,
+  lucideInfinity,
+  lucideLayers,
   lucideSparkles,
   lucideVideo,
+  lucideWandSparkles,
   lucideZap,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
-import { HlmCardImports } from '@spartan-ng/helm/card';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
-
-interface ServiceCard {
-  icon: string;
-  title: string;
-  body: string;
-}
+import {
+  EDIT_TOOLS,
+  MODEL_FAMILIES,
+  ModelFamily,
+  defaultSettings,
+  userPriceUsd,
+} from '../../core/catalog/model-families';
 
 interface ProviderLogo {
   name: string;
   logoUrl: string;
+}
+
+interface FamilyCard {
+  family: ModelFamily;
+  fromPrice: number;
+}
+
+interface WorkflowStep {
+  step: string;
+  title: string;
+  body: string;
+}
+
+interface StudioPillar {
+  icon: string;
+  title: string;
+  body: string;
 }
 
 @Component({
@@ -31,19 +61,31 @@ interface ProviderLogo {
   templateUrl: './landing-page.html',
   styleUrl: './landing-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter, ...HlmCardImports],
+  imports: [DecimalPipe, RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter],
   providers: [
     provideIcons({
-      lucideSparkles,
-      lucideImage,
-      lucideVideo,
-      lucideZap,
-      lucideShield,
       lucideArrowRight,
+      lucideBrush,
+      lucideCpu,
+      lucideEraser,
+      lucideFolderLock,
+      lucideImage,
+      lucideInfinity,
+      lucideLayers,
+      lucideSparkles,
+      lucideVideo,
+      lucideWandSparkles,
+      lucideZap,
     }),
   ],
 })
 export class LandingPage {
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  constructor() {
+    afterNextRender(() => this.setupReveals());
+  }
+
   readonly providers: ProviderLogo[] = [
     { name: 'Google', logoUrl: '/logos/google.svg' },
     { name: 'OpenAI', logoUrl: '/logos/openai.svg' },
@@ -53,29 +95,105 @@ export class LandingPage {
     { name: 'Kuaishou', logoUrl: '/logos/kuaishou.svg' },
   ];
 
-  readonly showcaseImage =
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=900&q=80';
+  readonly heroPrompts = [
+    'a lighthouse at dawn, thick fog, telephoto compression',
+    'product shot of a ceramic espresso cup, studio softbox',
+    'isometric cutaway of a tiny ramen shop, warm neon',
+    'portrait in golden hour, 85mm, shallow depth of field',
+  ];
 
-  readonly services: ServiceCard[] = [
+  readonly imageFamilies: FamilyCard[] = MODEL_FAMILIES.filter((f) => f.kind === 'image').map(
+    (family) => ({ family, fromPrice: userPriceUsd(family, defaultSettings(family)) }),
+  );
+
+  readonly videoFamilies: ModelFamily[] = MODEL_FAMILIES.filter((f) => f.kind === 'video');
+
+  readonly editTools = EDIT_TOOLS;
+
+  /** On-canvas tools included with Studio — mirrors the workspace right panel. */
+  readonly studioToolChips = [
+    'Crop',
+    'Adjust',
+    '17 Filters',
+    'Sharpen',
+    'Smooth',
+    'Spot Heal',
+    'Magic Erase',
+    'Smart Select',
+    'AI Upscale',
+    'Cut Out',
+    'Bokeh',
+    'Enhance',
+    'Levels',
+    'Clone',
+    'Retouch',
+    'Perspective',
+    'Liquify',
+    'Dehaze',
+    'Portrait Smooth',
+  ];
+
+  readonly studioPillars: StudioPillar[] = [
     {
-      icon: 'lucideImage',
-      title: 'Image generation',
-      body: 'Nano Banana (Fast to Pro), GPT Image, FLUX and Seedream — the top image models behind one prompt box.',
+      icon: 'lucideCpu',
+      title: 'AI that runs on your device',
+      body: 'Cut Out, Bokeh, AI Upscale and Smart Select run entirely in your browser on open-source models. No upload, no queue, no charge — your pixels never leave the tab.',
     },
     {
-      icon: 'lucideVideo',
-      title: 'Video generation',
-      body: 'Text-to-video with Veo, Sora, Kling, Runway Gen-4.5 and Seedance.',
+      icon: 'lucideEraser',
+      title: 'Generative edits, priced per use',
+      body: 'Mask anything and let a frontier model repaint it — remove objects, fill with a prompt, expand the canvas, drop the background. Flat prices from $0.05, shown before you run.',
     },
     {
-      icon: 'lucideZap',
-      title: 'One credit balance',
-      body: 'Pay once in credits, spend across every model. No per-provider accounts, invoices, or API keys.',
-    },
-    {
-      icon: 'lucideShield',
-      title: 'Private library',
-      body: 'Every generation saved full-resolution to your private workspace. Only you ever see your outputs.',
+      icon: 'lucideLayers',
+      title: 'Every edit is a version',
+      body: 'Saves stack as new versions next to the original, with the prompt and settings kept. Export any version as PNG, JPG or WebP — no watermarks, ever.',
     },
   ];
+
+  readonly workflow: WorkflowStep[] = [
+    {
+      step: '01',
+      title: 'Top up once',
+      body: 'Start at $15 — $10 of balance plus your first month of Studio. No subscription for generating, ever.',
+    },
+    {
+      step: '02',
+      title: 'Pick the model',
+      body: 'Nano Banana, GPT Image, FLUX, Seedream — switch per prompt, with the exact price shown before you run.',
+    },
+    {
+      step: '03',
+      title: 'Generate & refine',
+      body: 'Batch up to four takes, remix with reference images, then polish in the built-in editor without leaving the tab.',
+    },
+    {
+      step: '04',
+      title: 'Keep everything',
+      body: 'Full-resolution originals in a private library only you can see. Download freely, delete permanently.',
+    },
+  ];
+
+  private setupReveals(): void {
+    const nodes = this.host.nativeElement.querySelectorAll<HTMLElement>('[data-reveal]');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced || !('IntersectionObserver' in window)) {
+      nodes.forEach((n) => n.classList.add('is-in'));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-in');
+            io.unobserve(entry.target);
+          }
+        }
+      },
+      // Huge top margin: anything at or above the viewport counts as seen, so a
+      // fast scroll can never skip past an element and leave it hidden.
+      { rootMargin: '10000px 0px -10% 0px', threshold: 0.05 },
+    );
+    nodes.forEach((n) => io.observe(n));
+  }
 }

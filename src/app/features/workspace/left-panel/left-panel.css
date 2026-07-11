@@ -9,12 +9,36 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  gap: 18px;
+  gap: 16px;
 }
 
-/* Pin the generate action to the bottom of the rail. */
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Mirrors the right panel's .section-title so both rails share one voice. */
+.rail-title {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted-foreground);
+}
+
+.rail-divided {
+  border-top: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  padding-top: 14px;
+}
+
+/* Pin the generate action to the bottom of the rail; bleed past the
+ * sidebar's 18px padding so the rule spans edge to edge like .side-foot. */
 .gen-btn {
-  margin-top: auto;
+  margin: auto -18px 0;
+  padding: 14px 18px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
 }
 
 /* Identical to the right-panel Studio/Pro switch. */
@@ -69,15 +93,15 @@
   opacity: 0.4;
 }
 
-/* Match the right-panel tool buttons; tooltip pushed to the far end. */
+/* Quiet supporting labels under the section titles; tooltip at the far end. */
 .field-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   font-size: 0.72rem;
-  text-transform: capitalize;
-  color: var(--foreground);
+  font-weight: 600;
+  color: var(--muted-foreground);
 }
 
 .og-info {
@@ -255,6 +279,7 @@
 }
 
 .insufficient {
+  margin-bottom: 12px;
   font-size: 0.75rem;
   color: var(--warn);
   text-align: center;

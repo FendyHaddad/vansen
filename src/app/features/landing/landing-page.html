@@ -1,27 +1,67 @@
-<div class="min-h-screen">
+<div class="landing min-h-screen">
   <app-site-header />
 
-  <section class="mx-auto max-w-6xl px-6 pb-14 pt-16 text-center">
-    <span hlmBadge variant="secondary" class="mb-5">
-      <ng-icon name="lucideSparkles" size="14" />
-      One wrapper. Every model.
-    </span>
-    <h1 class="mx-auto max-w-3xl text-4xl font-semibold tracking-tight sm:text-6xl">
-      Generate images and video with the best AI models — in one place.
-    </h1>
-    <p class="muted mx-auto mt-5 max-w-2xl text-lg">
-      Vansen brokers the top generation models from Google, OpenAI, ByteDance and more.
-      Buy credits once, pick a model, generate, and keep everything in a private library.
-    </p>
-    <div class="mt-8 flex items-center justify-center gap-3">
-      <a routerLink="/login" hlmBtn size="lg">
-        Start generating
-        <ng-icon name="lucideArrowRight" size="18" />
-      </a>
-      <a routerLink="/pricing" hlmBtn variant="outline" size="lg">See pricing</a>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-backdrop" aria-hidden="true"></div>
+    <div class="hero-inner mx-auto max-w-6xl px-6">
+      <span hlmBadge variant="secondary" class="hero-badge">
+        <ng-icon name="lucideSparkles" size="14" />
+        One studio. Every frontier model.
+      </span>
+      <h1 class="hero-title">
+        Create with the best AI models.<br />
+        <span class="hero-title-dim">Pay only for what you make.</span>
+      </h1>
+      <p class="hero-sub">
+        Vansen puts Google, OpenAI, Black Forest Labs and ByteDance behind one prompt box —
+        then hands you a full editor to finish the job. No subscriptions for generating,
+        no watermarks, no expiring credits.
+      </p>
+      <div class="hero-ctas">
+        <a routerLink="/login" hlmBtn size="lg">
+          Start creating
+          <ng-icon name="lucideArrowRight" size="18" />
+        </a>
+        <a routerLink="/pricing" hlmBtn variant="outline" size="lg">See pricing</a>
+      </div>
+
+      <div class="prompt-mock" role="presentation">
+        <div class="prompt-mock-bar">
+          <ng-icon name="lucideWandSparkles" size="15" class="prompt-mock-icon" />
+          <span class="prompt-mock-rotator">
+            @for (p of heroPrompts; track p; let i = $index) {
+              <span class="prompt-mock-line" [style.animation-delay.s]="i * 4">{{ p }}</span>
+            }
+          </span>
+          <span class="prompt-mock-price num">$0.05</span>
+          <span class="prompt-mock-btn">Generate</span>
+        </div>
+        <p class="prompt-mock-note">The exact price of every run, shown before you press it.</p>
+      </div>
+
+      <dl class="hero-stats" data-reveal>
+        <div class="hero-stat">
+          <dt>Model families</dt>
+          <dd><span class="num">9</span></dd>
+        </div>
+        <div class="hero-stat">
+          <dt>Editing tools</dt>
+          <dd><span class="num">23</span></dd>
+        </div>
+        <div class="hero-stat">
+          <dt>Images from</dt>
+          <dd><span class="num">$0.04</span></dd>
+        </div>
+        <div class="hero-stat">
+          <dt>Keep it all for</dt>
+          <dd><span class="num">$5</span>/mo</dd>
+        </div>
+      </dl>
     </div>
   </section>
 
+  <!-- Provider marquee -->
   <section class="provider-strip border-y py-8">
     <p class="muted text-center text-xs font-medium uppercase tracking-widest">
       Models brokered from
@@ -44,47 +84,162 @@
     </div>
   </section>
 
-  <section class="mx-auto max-w-6xl px-6 py-14">
-    <div class="grid items-center gap-10 lg:grid-cols-2">
-      <div class="showcase-frame mx-auto w-full max-w-sm">
-        <img
-          [src]="showcaseImage"
-          alt="AI generated artwork placeholder"
-          class="showcase-image"
-          loading="lazy"
-        />
+  <!-- Model catalog -->
+  <section class="mx-auto max-w-6xl px-6 py-20" data-reveal>
+    <p class="eyebrow">The catalog</p>
+    <h2 class="section-heading">Pick the model that fits the job.</h2>
+    <p class="section-sub">
+      Each family has its own look, strengths and price. Switch per prompt — your balance
+      works across all of them.
+    </p>
+
+    <div class="family-grid mt-10">
+      @for (card of imageFamilies; track card.family.id) {
+        <div class="family-card" data-reveal>
+          <div class="family-card-top">
+            <img [src]="card.family.logo" [alt]="card.family.provider" class="family-card-logo" />
+            <span class="family-card-provider">{{ card.family.provider }}</span>
+          </div>
+          <h3 class="family-card-name">{{ card.family.name }}</h3>
+          <p class="family-card-blurb">{{ card.family.blurb }}</p>
+          <p class="family-card-price">
+            typical <span class="num">${{ card.fromPrice | number: '1.2-2' }}</span> / image
+          </p>
+        </div>
+      }
+    </div>
+
+    <div class="video-teaser mt-6" data-reveal>
+      <div class="video-teaser-head">
+        <ng-icon name="lucideVideo" size="16" />
+        <h3>Video is next</h3>
+        <span hlmBadge variant="secondary">Coming with Pro</span>
       </div>
-      <div class="text-center lg:text-left">
-        <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Made for people who create daily.
-        </h2>
-        <p class="muted mt-4 text-lg leading-relaxed">
-          Concept art, product shots, storyboards, short-form video — pick the model that
-          fits the job instead of settling for whatever one provider offers. Every output
-          lands in your private library, full resolution, ready to download.
-        </p>
-        <div class="mt-6 flex justify-center gap-3 lg:justify-start">
-          <a routerLink="/login" hlmBtn>
-            Start generating
-            <ng-icon name="lucideArrowRight" size="16" />
-          </a>
+      <p class="video-teaser-body">
+        @for (f of videoFamilies; track f.id; let last = $last) {
+          <span class="video-teaser-name">{{ f.name }}</span>{{ last ? '' : ' · ' }}
+        }
+      </p>
+      <p class="video-teaser-note">
+        The same pay-per-clip pricing, the same private library — cinematic clips with
+        native audio, arriving with the Pro tier.
+      </p>
+    </div>
+  </section>
+
+  <!-- Studio editing -->
+  <section class="studio-band">
+    <div class="mx-auto max-w-6xl px-6 py-20" data-reveal>
+      <p class="eyebrow">Studio editing</p>
+      <h2 class="section-heading">Generating is half the work.<br />The editor is the other half.</h2>
+      <p class="section-sub">
+        Every image opens on a canvas with a full editing suite — the kind you'd otherwise
+        pay a photo app for, included with Studio.
+      </p>
+
+      <div class="chip-cloud mt-10" data-reveal>
+        @for (chip of studioToolChips; track chip) {
+          <span class="tool-chip">{{ chip }}</span>
+        }
+        <span class="tool-chip tool-chip-free">all included</span>
+      </div>
+
+      <div class="pillar-grid mt-12">
+        @for (pillar of studioPillars; track pillar.title) {
+          <div class="pillar" data-reveal>
+            <div class="pillar-icon">
+              <ng-icon [name]="pillar.icon" size="18" />
+            </div>
+            <h3 class="pillar-title">{{ pillar.title }}</h3>
+            <p class="pillar-body">{{ pillar.body }}</p>
+          </div>
+        }
+      </div>
+
+      <div class="ai-price-strip mt-12" data-reveal>
+        <p class="ai-price-label">Generative edits</p>
+        <div class="ai-price-row">
+          @for (tool of editTools; track tool.id) {
+            <div class="ai-price-item" [title]="tool.blurb">
+              <span class="ai-price-name">{{ tool.name }}</span>
+              <span class="ai-price-tag num">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
+            </div>
+          }
+          <div class="ai-price-item" title="Saving an edited version costs nothing.">
+            <span class="ai-price-name">Save a version</span>
+            <span class="ai-price-tag ai-price-free">Free</span>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="services" class="mx-auto max-w-6xl px-6 py-14">
-    <h2 class="text-center text-2xl font-semibold tracking-tight">What you can do</h2>
-    <div class="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-      @for (service of services; track service.title) {
-        <div hlmCard>
-          <div hlmCardHeader>
-            <ng-icon [name]="service.icon" class="text-primary" size="24" />
-            <h3 hlmCardTitle class="mt-3">{{ service.title }}</h3>
-            <p hlmCardDescription>{{ service.body }}</p>
-          </div>
+  <!-- Workflow -->
+  <section class="mx-auto max-w-6xl px-6 py-20" data-reveal>
+    <p class="eyebrow">How it works</p>
+    <h2 class="section-heading">From blank prompt to finished file.</h2>
+    <div class="workflow-grid mt-10">
+      @for (item of workflow; track item.step) {
+        <div class="workflow-step" data-reveal>
+          <span class="workflow-num num">{{ item.step }}</span>
+          <h3 class="workflow-title">{{ item.title }}</h3>
+          <p class="workflow-body">{{ item.body }}</p>
         </div>
       }
+    </div>
+  </section>
+
+  <!-- Pricing teaser -->
+  <section class="pricing-band">
+    <div class="mx-auto max-w-6xl px-6 py-20" data-reveal>
+      <div class="pricing-teaser">
+        <div class="pricing-teaser-copy">
+          <p class="eyebrow">Pricing</p>
+          <h2 class="section-heading">No subscription for generating.<br />Just $5 to keep the lights on.</h2>
+          <p class="section-sub">
+            Generation is pay-as-you-go from a balance that never expires. Studio — your
+            private library, versions and editing suite — is $5 a month, first month
+            included with your first top-up.
+          </p>
+          <a routerLink="/pricing" hlmBtn variant="outline" class="mt-6">
+            See full pricing
+            <ng-icon name="lucideArrowRight" size="16" />
+          </a>
+        </div>
+        <ul class="pricing-teaser-perks">
+          <li>
+            <ng-icon name="lucideZap" size="15" />
+            <span>Start at <span class="num">$15</span> — <span class="num">$10</span> balance + first Studio month</span>
+          </li>
+          <li>
+            <ng-icon name="lucideInfinity" size="15" />
+            <span>Balance never expires while Studio is active</span>
+          </li>
+          <li>
+            <ng-icon name="lucideImage" size="15" />
+            <span>Fixed price per output — most images cost cents</span>
+          </li>
+          <li>
+            <ng-icon name="lucideFolderLock" size="15" />
+            <span>Private, full-resolution library only you can see</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="cta-final mx-auto max-w-4xl px-6 py-24 text-center" data-reveal>
+    <h2 class="cta-title">Your next image is a prompt away.</h2>
+    <p class="section-sub mx-auto">
+      Top up once, try every model, keep everything. If it's not for you, your balance
+      waits — it never expires.
+    </p>
+    <div class="hero-ctas justify-center">
+      <a routerLink="/login" hlmBtn size="lg">
+        Start creating
+        <ng-icon name="lucideArrowRight" size="18" />
+      </a>
     </div>
   </section>
 

@@ -126,3 +126,42 @@
   font-family: var(--font-app-mono);
   font-variant-numeric: tabular-nums;
 }
+
+.price-value-free {
+  color: var(--profit);
+}
+
+.price-kind-edit {
+  color: var(--primary);
+}
+
+.free-tools {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--muted) 30%, transparent);
+  padding: 16px 18px;
+}
+
+.free-tools-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+  margin-bottom: 12px;
+}
+
+.free-tools-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.free-tool-chip {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  font-size: 0.78rem;
+  font-weight: 500;
+}

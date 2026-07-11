@@ -96,7 +96,7 @@ function sanitizePrefs(raw: Record<string, unknown>): Record<string, unknown> | 
   return clean;
 }
 
-type Vars = { Variables: { userId: string; email: string } };
+type Vars = { Variables: { userId: string; email: string; requestId: string } };
 const app = new Hono<Vars>().basePath('/api');
 
 app.use(
@@ -111,6 +111,52 @@ app.use(
 function fail(c: { json: (b: unknown, s: number) => Response }, status: number, code: string, message: string) {
   return c.json({ error: { code, message } }, status);
 }
+
+type ErrCtx = { req: { url: string; method: string }; get: (k: 'userId' | 'requestId') => string | undefined };
+
+/** Fire-and-forget write to app_errors — monitoring must never break a request.
+ * Never log request bodies or headers here: prompts are user content, headers
+ * carry tokens. Message + stack only. */
+function logError(c: ErrCtx, code: string, err: unknown): void {
+  const e = err instanceof Error ? err : new Error(String(err));
+  admin
+    .from('app_errors')
+    .insert({
+      source: 'api',
+      route: new URL(c.req.url).pathname,
+      method: c.req.method,
+      code,
+      message: (e.message || 'unknown').slice(0, 1000),
+      stack: (e.stack ?? '').slice(0, 4000),
+      user_id: c.get('userId') ?? null,
+      request_id: c.get('requestId') ?? null,
+    })
+    .then(({ error }) => {
+      if (error) console.error('app_errors insert failed:', error.message);
+    });
+}
+
+app.use('*', async (c, next) => {
+  c.set('requestId', crypto.randomUUID().slice(0, 8));
+  await next();
+});
+
+// Any exception nothing else caught: log it, answer with a request id the
+// user can quote back so the row is findable.
+app.onError((err, c) => {
+  logError(c, 'unhandled', err);
+  return c.json(
+    { error: { code: 'internal', message: 'Something went wrong', requestId: c.get('requestId') } },
+    500,
+  );
+});
+
+// Unauthenticated liveness probe for uptime monitors (registered before the
+// auth middleware; returning a response stops the chain).
+app.get('/health', async (c) => {
+  const { error } = await admin.from('models').select('id').limit(1);
+  return c.json({ ok: !error, db: !error, requestId: c.get('requestId') }, error ? 503 : 200);
+});
 
 app.use('*', async (c, next) => {
   const token = c.req.header('authorization')?.replace(/^Bearer /i, '');
@@ -304,7 +350,7 @@ app.delete('/profile', async (c) => {
       });
       for (const sub of subs.data) await stripe.subscriptions.cancel(sub.id);
     } catch (e) {
-      console.error('subscription cancel on delete failed:', e);
+      logError(c, 'delete_failed', e);
       return fail(c, 400, 'delete_failed', 'Could not cancel Studio — try again');
     }
   }
@@ -380,6 +426,7 @@ app.get('/jobs', async (c) => {
       const result = await adapterFor(gen.family_id).check(job.provider_ref);
       await finishJob(job, result);
     } catch (e) {
+      logError(c, 'provider_check_failed', e);
       await admin.rpc('fn_fail_job', { p_job: job.id, p_error: String(e).slice(0, 500) });
     }
   }
@@ -515,7 +562,7 @@ app.post('/generations', async (c) => {
     if (error.message.includes('insufficient_balance')) {
       return fail(c, 402, 'insufficient_balance', 'Balance too low for this run');
     }
-    console.error('charge_failed:', error.message);
+    logError(c, 'charge_failed', new Error(error.message));
     return fail(c, 400, 'charge_failed', 'Charge could not be completed');
   }
 
@@ -545,6 +592,7 @@ app.post('/generations', async (c) => {
         await finishJob({ id: jobRow!.id, user_id: userId, generation_id: genId }, submitted.inline);
       }
     } catch (e) {
+      logError(c, 'provider_submit_failed', e);
       await admin.rpc('fn_fail_job', { p_job: jobRow!.id, p_error: String(e).slice(0, 500) });
     }
   }
@@ -595,7 +643,7 @@ app.post('/billing/checkout', async (c) => {
     });
     return c.json({ url: session.url });
   } catch (e) {
-    console.error('checkout_failed:', e);
+    logError(c, 'checkout_failed', e);
     return fail(c, 400, 'billing_failed', 'Could not start checkout');
   }
 });
@@ -609,7 +657,7 @@ app.post('/billing/portal', async (c) => {
     });
     return c.json({ url: portal.url });
   } catch (e) {
-    console.error('portal_failed:', e);
+    logError(c, 'portal_failed', e);
     return fail(c, 400, 'billing_failed', 'Could not open billing portal');
   }
 });
@@ -645,7 +693,7 @@ app.post('/billing/reconcile', async (c) => {
     }
     return c.json({ credited, balanceUsd: await balanceOf(userId) });
   } catch (e) {
-    console.error('reconcile_failed:', e);
+    logError(c, 'reconcile_failed', e);
     return fail(c, 400, 'billing_failed', 'Reconcile failed');
   }
 });

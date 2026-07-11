@@ -22,167 +22,175 @@
     </button>
   </div>
 
-  <div class="field">
-    <span class="field-label">
-      Model
-      <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
-        <span class="og-info">ⓘ</span>
-      </app-hint>
-    </span>
-    <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
-      <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
-      <span class="model-trigger-name">{{ family().name }}</span>
-      <ng-icon name="lucideChevronDown" size="14" class="model-chevron"/>
-    </button>
-    <ng-template #modelMenu>
-      <div hlmDropdownMenu class="model-menu">
-        @for (f of families(); track f.id) {
+  <section class="rail-section">
+    <h3 class="rail-title">Create</h3>
+
+    <div class="field">
+      <span class="field-label">
+        Model
+        <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
+          <span class="og-info">ⓘ</span>
+        </app-hint>
+      </span>
+      <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
+        <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
+        <span class="model-trigger-name">{{ family().name }}</span>
+        <ng-icon name="lucideChevronDown" size="14" class="model-chevron"/>
+      </button>
+      <ng-template #modelMenu>
+        <div hlmDropdownMenu class="model-menu">
+          @for (f of families(); track f.id) {
+            <button
+              hlmDropdownMenuItem
+              class="model-item"
+              [class.model-item-active]="familyId() === f.id"
+              [disabled]="disabledFamily(f.id)"
+              (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
+            >
+              <span class="model-item-top">
+                <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
+                <span class="model-item-name">{{ f.name }}</span>
+                @if (disabledFamily(f.id)) {
+                  <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
+                }
+              </span>
+              <span class="model-item-blurb">{{ f.blurb }}</span>
+            </button>
+          }
+        </div>
+      </ng-template>
+    </div>
+
+    <div class="field">
+      <span class="field-label">Prompt</span>
+      <textarea
+        rows="4"
+        class="prompt-input"
+        placeholder="Describe the {{ mode() }} you want..."
+        [value]="prompt()"
+        (input)="updatePrompt($any($event.target).value)"
+      ></textarea>
+    </div>
+
+    <div class="field" [class.field-disabled]="!family().capabilities.imageInput">
+      <span class="field-label">
+        Reference image
+        <app-hint
+          text="Attach an image to edit or guide the generation (image-to-image). Not all models accept image input."
+        >
+          <span class="og-info">ⓘ</span>
+        </app-hint>
+      </span>
+      @if (reference(); as ref) {
+        <div class="ref-preview">
+          <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
           <button
-            hlmDropdownMenuItem
-            class="model-item"
-            [class.model-item-active]="familyId() === f.id"
-            [disabled]="disabledFamily(f.id)"
-            (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
+            type="button"
+            class="ref-clear"
+            (click)="setReference(null)"
+            aria-label="Remove reference"
           >
-            <span class="model-item-top">
-              <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
-              <span class="model-item-name">{{ f.name }}</span>
-              @if (disabledFamily(f.id)) {
-                <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
-              }
-            </span>
-            <span class="model-item-blurb">{{ f.blurb }}</span>
+            <ng-icon name="lucideX" size="14"/>
           </button>
+        </div>
+      } @else {
+        <div class="ref-actions">
+          <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput || uploading()">
+            <ng-icon name="lucideImagePlus" size="16"/>
+            {{ uploading() ? 'Uploading…' : 'Upload' }}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              class="ref-file-input"
+              [disabled]="!family().capabilities.imageInput || uploading()"
+              (change)="onFilePicked($event)"
+            />
+          </label>
+          <button
+            type="button"
+            class="ref-drop"
+            [disabled]="!family().capabilities.imageInput"
+            (click)="pickReferenceRequested.emit()"
+          >
+            From library
+          </button>
+        </div>
+        @if (uploadError()) {
+          <p class="ref-error">{{ uploadError() }}</p>
         }
-      </div>
-    </ng-template>
-  </div>
-
-  <div class="field">
-    <span class="field-label">Prompt</span>
-    <textarea
-      rows="4"
-      class="prompt-input"
-      placeholder="Describe the {{ mode() }} you want..."
-      [value]="prompt()"
-      (input)="updatePrompt($any($event.target).value)"
-    ></textarea>
-  </div>
-
-  <div class="field" [class.field-disabled]="!family().capabilities.imageInput">
-    <span class="field-label">
-      Reference image
-      <app-hint
-        text="Attach an image to edit or guide the generation (image-to-image). Not all models accept image input."
-      >
-        <span class="og-info">ⓘ</span>
-      </app-hint>
-    </span>
-    @if (reference(); as ref) {
-      <div class="ref-preview">
-        <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
-        <button
-          type="button"
-          class="ref-clear"
-          (click)="setReference(null)"
-          aria-label="Remove reference"
-        >
-          <ng-icon name="lucideX" size="14"/>
-        </button>
-      </div>
-    } @else {
-      <div class="ref-actions">
-        <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput || uploading()">
-          <ng-icon name="lucideImagePlus" size="16"/>
-          {{ uploading() ? 'Uploading…' : 'Upload' }}
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            class="ref-file-input"
-            [disabled]="!family().capabilities.imageInput || uploading()"
-            (change)="onFilePicked($event)"
-          />
-        </label>
-        <button
-          type="button"
-          class="ref-drop"
-          [disabled]="!family().capabilities.imageInput"
-          (click)="pickReferenceRequested.emit()"
-        >
-          From library
-        </button>
-      </div>
-      @if (uploadError()) {
-        <p class="ref-error">{{ uploadError() }}</p>
       }
-    }
-  </div>
+    </div>
+  </section>
 
-  <app-option-group
-    label="Version"
-    [axisTooltip]="axisTooltips.version"
-    [options]="versionOptions()"
-    [selected]="settings().version"
-    [disabledReason]="notSupported('Version selection')"
-    (changed)="setAxis('version', $event)"
-  />
+  <section class="rail-section rail-divided">
+    <h3 class="rail-title">Settings</h3>
 
-  <app-option-group
-    label="Aspect ratio"
-    [axisTooltip]="axisTooltips.aspect"
-    [options]="aspectOptions()"
-    [selected]="settings().aspectRatio"
-    (changed)="setAxis('aspectRatio', $event)"
-  />
-
-  <app-option-group
-    label="Resolution"
-    [axisTooltip]="axisTooltips.resolution"
-    [options]="resolutionOptions()"
-    [selected]="settings().resolution"
-    [disabledReason]="notSupported('Resolution')"
-    (changed)="setAxis('resolution', $event)"
-  />
-
-  <app-option-group
-    label="Quality"
-    [axisTooltip]="axisTooltips.quality"
-    [options]="qualityOptions()"
-    [selected]="settings().quality"
-    [disabledReason]="notSupported('A quality/effort dial')"
-    (changed)="setAxis('quality', $event)"
-  />
-
-  @if (mode() === 'video') {
     <app-option-group
-      label="Duration"
-      [axisTooltip]="axisTooltips.duration"
-      [options]="durationOptions()"
-      [selected]="settings().durationS?.toString()"
-      [disabledReason]="notSupported('Duration')"
-      (changed)="setDuration($event)"
+      label="Version"
+      [axisTooltip]="axisTooltips.version"
+      [options]="versionOptions()"
+      [selected]="settings().version"
+      [disabledReason]="notSupported('Version selection')"
+      (changed)="setAxis('version', $event)"
     />
-  }
 
-  <app-option-group
-    label="Batch"
-    [axisTooltip]="axisTooltips.batch"
-    [options]="batchOptions"
-    [selected]="batch().toString()"
-    (changed)="setBatch($event)"
-  />
+    <app-option-group
+      label="Aspect ratio"
+      [axisTooltip]="axisTooltips.aspect"
+      [options]="aspectOptions()"
+      [selected]="settings().aspectRatio"
+      (changed)="setAxis('aspectRatio', $event)"
+    />
 
-  @if (family().capabilities.audio) {
-    <p class="audio-note">
-      <app-hint text="This model generates a native soundtrack with every clip.">
-        <span>♪ Audio included</span>
-      </app-hint>
-    </p>
-  }
+    <app-option-group
+      label="Resolution"
+      [axisTooltip]="axisTooltips.resolution"
+      [options]="resolutionOptions()"
+      [selected]="settings().resolution"
+      [disabledReason]="notSupported('Resolution')"
+      (changed)="setAxis('resolution', $event)"
+    />
+
+    <app-option-group
+      label="Quality"
+      [axisTooltip]="axisTooltips.quality"
+      [options]="qualityOptions()"
+      [selected]="settings().quality"
+      [disabledReason]="notSupported('A quality/effort dial')"
+      (changed)="setAxis('quality', $event)"
+    />
+
+    @if (mode() === 'video') {
+      <app-option-group
+        label="Duration"
+        [axisTooltip]="axisTooltips.duration"
+        [options]="durationOptions()"
+        [selected]="settings().durationS?.toString()"
+        [disabledReason]="notSupported('Duration')"
+        (changed)="setDuration($event)"
+      />
+    }
+
+    <app-option-group
+      label="Batch"
+      [axisTooltip]="axisTooltips.batch"
+      [options]="batchOptions"
+      [selected]="batch().toString()"
+      (changed)="setBatch($event)"
+    />
+
+    @if (family().capabilities.audio) {
+      <p class="audio-note">
+        <app-hint text="This model generates a native soundtrack with every clip.">
+          <span>♪ Audio included</span>
+        </app-hint>
+      </p>
+    }
+  </section>
 
   <div class="gen-btn">
     @if (insufficient()) {
-      <p class="insufficient mb-4">
+      <p class="insufficient">
         Balance too low for this configuration — top up from the profile menu.
       </p>
     }

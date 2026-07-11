@@ -8,15 +8,15 @@
   opacity: 0.4;
 }
 
-/* Match the right-panel tool buttons; tooltip pushed to the far end. */
+/* Matches the left panel's .field-label; tooltip pushed to the far end. */
 .og-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   font-size: 0.72rem;
-  text-transform: capitalize;
-  color: var(--foreground);
+  font-weight: 600;
+  color: var(--muted-foreground);
 }
 
 .og-info {
