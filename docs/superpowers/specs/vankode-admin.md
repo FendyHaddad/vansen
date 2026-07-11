@@ -1,402 +1,423 @@
-# vankode-admin — Consolidated Vankode Administration Console
+# Vankode Backoffice — admin.vankode.com
 
-**Status: brainstorming / planning only. Nothing here is implemented, scheduled, or
-approved. This spec exists so that when the user is ready, the new `vankode-admin`
-project can be created from a settled design instead of from scratch.**
+**Status: planning spec, ready to paste into the `vankode-backoffice` repo as its
+product document. Nothing implemented yet. Supersedes the earlier draft of this file
+(which assumed a third Supabase project — no longer possible) and narrows
+`docs/vankode-backoffice.md`'s client-portal plan to a later phase.**
 
-Date: 2026-07-11. Scope: one admin console overseeing **Vansen** (this repo) and
-**Algawth** (separate repo in the same GitHub account), extensible to any future
-Vankode product. Pillars named by the owner: management, user blocking, finance,
-coupon giving, and overall business oversight.
+Date: 2026-07-11. Owner: Fendy / Vankode.
 
-> **Access note:** the Algawth repository could not be read while drafting this
-> (session repo access is scoped to `vansen`). Everything Algawth-specific is
-> therefore expressed as a pluggable connector plus an intake checklist (§4) to be
-> filled in before Phase D. The architecture is deliberately shaped so this gap
-> changes nothing structural.
+## 0. What this is
 
----
+One private console at **admin.vankode.com** where Vankode runs itself. Three
+concerns, one login:
 
-## 1. Why a separate admin project
+1. **Vankode (software house)** — clients, projects, todos, invoices, expenses, and
+   **consolidated finances across Vankode + Vansen + Algawth for tax**, since all
+   three funnel into the same Vankode account.
+2. **Vansen** — user administration (inspect, ban, invite), coupons/credit grants,
+   moderation appeals, kill switches, KPIs, and **overseer** (uptime + error-log
+   monitoring of the live service).
+3. **Algawth** — the entire `algawth-admin` dashboard scope absorbed as a module:
+   user table, ban/unban, delete, username change, password reset, gift
+   subscription, user cap, world map, audit log. No finance yet (app is free).
 
-What "admin" looks like today, honestly inventoried:
-
-- `/admin/pricing` and `/admin/compare` are routes **inside the consumer Angular app**
-  (`src/app/features/pricing`, `features/compare`) — and they carry **no `authGuard`**:
-  anyone who knows the URL loads the pricing calculator UI. They're client-side tools
-  over static catalog data, so nothing sensitive leaks *yet*, but it's admin surface
-  squatting in a public app.
-- Every real administrative act on Vansen — inspecting a user, resolving a moderation
-  appeal (`moderation_events.resolution`), toggling a `models.enabled` kill switch,
-  fixing a ledger issue — is done by hand in the Supabase dashboard or via SQL. No
-  audit trail, no roles, no second pair of eyes, easy to fat-finger.
-- Algawth presumably has its own equivalent ad-hoc situation.
-
-A consolidated console fixes all of this once: **one login, one audit log, one RBAC
-model, N products**. The consumer apps get *smaller* (embedded admin routes move out),
-and dangerous power stops living in database dashboards.
-
-### Non-goals
-
-- Not a rewrite of either product's backend. Products keep their own databases, their
-  own invariants, their own gateways. The console is a **client of admin APIs**, never
-  a second writer to product tables.
-- Not a public-facing app. No SEO, no marketing pages, no self-signup.
-- Not (initially) a data warehouse. KPI snapshots come first; real analytics
-  infrastructure is a later phase (§10, Phase E).
+Not public. No self-signup, no SEO, no marketing pages. The old client-portal idea
+(client.vankode.com, visual change requests) is **out of scope here** — it remains a
+possible later product on its own timeline.
 
 ---
 
-## 2. Product requirements (the five pillars, made concrete)
+## 1. The hard constraint that shapes everything
 
-### 2.1 Business oversight ("overlooking the business")
+**Two Supabase projects exist and no third can be created without paying:
+`algawth` and `vansen`.** So the backoffice cannot have its own Supabase project.
 
-- **Home dashboard**: per-product tiles — revenue today/7d/30d, active users, paying
-  users, generation volume, job failure rate, provider spend vs revenue (live margin),
-  open moderation appeals, alerts.
-- **Ops view (Vansen)**: job queue depth, stale-job sweep activity, per-provider error
-  rates and latency, kill-switch states, Storage growth.
-- **Catalog management (Vansen)**: the existing pricing calculator and model-compare
-  tools move here (finally auth-gated), extended to write real state: toggle
-  `models.enabled`, edit prices/margins once the catalog lives in the DB (per
-  `vansen.md` §1 — the console becomes the admin UI that plan always implied).
-- **Safety view (Vansen)**: moderation event stream, strike leaderboard, appeal queue
-  with the quarantined evidence, resolution workflow (`upheld` / `overturned: note`).
+Decision: **the backoffice backend lives inside the Algawth Supabase project**, in
+its own Postgres schema, with its own Edge Function gateway.
 
-### 2.2 User management & blocking
+Why Algawth and not Vansen:
 
-- Global user search (email / id / Stripe customer id), per-product.
-- User detail page: profile, strikes, suspension state, subscription + period end,
-  balance (sum of ledger), full ledger history, generations (metadata — see privacy
-  note §7.4), moderation events, sessions/devices.
-- Actions (all audited, all role-gated):
-  - **Suspend / unsuspend** — Vansen today infers suspension from `strikes >= 2`;
-    the console needs an explicit override both ways (block a bad actor at 0 strikes;
-    reinstate after appeal without deleting evidence). Requires a small product-side
-    addition: an explicit suspension flag or admin strike adjustment (§8).
-  - Revoke sessions (force logout everywhere — pairs with the account-sharing policy).
-  - Resolve moderation appeals (writes `resolution`).
-  - Delete account (existing `fn_delete_account` path, admin-invoked, two-person rule).
-  - Adjust strikes (with mandatory reason → audit log).
+- **Monitoring independence for the money product.** Vansen is the revenue-critical
+  service. A watcher must live outside the thing it watches — if backoffice ran in
+  the Vansen project, a Vansen-project outage would take the monitor down with it.
+  From the Algawth project, the backoffice pings Vansen's `/health` externally.
+- Vansen already carries heavy load (media storage, generation jobs, Stripe,
+  crons). Algawth is a light free app with headroom.
+- Algawth's admin needs are *local* to that project anyway — its module can use
+  same-project RPCs with zero cross-project secrets.
 
-### 2.3 Finance
+Accepted trade-offs (name them now, not during an incident):
 
-- **Revenue & reconciliation**: topups vs Stripe (surfacing the existing
-  `/billing/reconcile` self-heal per user, plus a batch view), webhook event log,
-  failed/duplicate payment triage.
-- **Ledger operations**: manual credit/debit **adjustments** — a new, admin-only
-  ledger entry type (`adjustment`, §8) with mandatory reason and audit linkage; goodwill
-  credits; correcting entries (never edits — the ledger stays append-only, corrections
-  are new signed entries, same philosophy as the product).
-- **Margin reporting**: per-model revenue vs provider cost (the pricing engine's math,
-  fed by real ledger data instead of hypotheticals), per-user unit economics, Stripe
-  fee amortization actuals.
-- **Exports**: CSV/Sheets export for accounting and tax (date-ranged ledger, revenue
-  by type, subscription MRR).
-- Algawth finance: same page templates, populated via its connector once §4 is filled.
+- Algawth-project outage takes the console down. Mitigation: Vansen keeps working
+  (console is not in Vansen's request path — it's a client of it), and a reverse
+  ping (§7.4) means Vansen alerts on Algawth being down.
+- Admin identity shares Supabase Auth with Algawth app users. Mitigation in §4:
+  admin status is NEVER inferred from having an account — only from the
+  `backoffice.admins` table, checked server-side on every request.
+- Free-tier quotas (500 MB DB, 500K function invocations/mo) are shared with the
+  Algawth app. Backoffice usage is tiny (§11 budget), but monitor it.
 
-### 2.4 Coupons & promotions
-
-- Vansen's decided policy is *"promo codes = Stripe-native coupons, zero code"* — keep
-  that. The console doesn't reinvent coupons; it becomes the **management UI over
-  Stripe**: create/expire coupons and promotion codes via the Stripe API, see
-  redemption counts, tie codes to campaigns.
-- **Direct credit grants**: separate from Stripe — pick user(s), grant N dollars of
-  balance as a `promo` ledger entry (type already exists in the schema) with a campaign
-  tag. Use cases: support goodwill, influencer seeding, beta rewards.
-- **Campaign registry** (admin DB, §6): name, product, mechanism (stripe-coupon |
-  credit-grant), budget cap, redemptions, owner — so marketing spend is visible and
-  capped, not scattered.
-
-### 2.5 Multi-product consolidation
-
-- Product switcher in the shell; identical page templates per product where concepts
-  align (users, finance, coupons), product-specific tabs where they don't (Vansen
-  safety/jobs; Algawth's own specifics TBD via §4).
-- Cross-product user linking (same email across products) — read-only correlation
-  first; shared Vankode identity is explicitly out of scope (§12 open question).
-
----
-
-## 3. Architecture
-
-### 3.1 Shape: one new repo, console + thin admin backend
+Isolation rules inside the Algawth project:
 
 ```
-vankode-admin (new repo)
-├── apps/console          Angular 22 admin SPA (same stack DNA as vansen:
-│                         standalone components, signals, zoneless, spartan/ui + Tailwind,
-│                         separate .ts/.html/.css files — reuse the house conventions)
-└── supabase/             dedicated Supabase project "vankode-admin"
-    ├── functions/admin-api   Hono gateway (same pattern as vansen's `api`):
-    │                         auth, RBAC, audit writes, connector fan-out
-    └── migrations/           admin schema (§6)
+schema public      → Algawth app tables (untouched, existing RLS)
+schema backoffice  → all console tables (§6). RLS deny-all, no policies.
+                     Only the backoffice-api gateway (service_role) reads/writes.
+functions/
+  backoffice-api   → new Hono gateway, same pattern as vansen's `api`
+  (existing algawth functions untouched)
 ```
-
-Rationale:
-
-- **Same stack as vansen on purpose** — one set of conventions, components copyable
-  between repos, and the team already knows the Supabase + Hono gateway pattern cold
-  (RLS deny-all, service-role-only RPCs, gateway as sole data path). The admin project
-  reuses the exact security posture that's already proven here.
-- **Dedicated Supabase project** for the console (admin users, audit log, campaigns,
-  KPI snapshots). Admin identity must not live inside a product's user pool — a Vansen
-  auth bug must never mint an admin session, and admins must survive any one product
-  being migrated/rebuilt (see java-migrate-plan).
-- If/when the Java migration happens, `admin-api` is one more Hono gateway to port —
-  or the admin module simply becomes part of the Java modular monolith. Nothing in
-  this spec fights that plan; §11 aligns them.
-
-### 3.2 The connector pattern (heart of the console)
-
-Mirror vansen's provider-adapter philosophy: **adding a managed product = a connector
-implementation + registry config, zero console-core changes.**
-
-```ts
-interface ProductConnector {
-  id: 'vansen' | 'algawth' | ...;
-  searchUsers(q): AdminUserSummary[];
-  getUser(id): AdminUserDetail;          // profile, balance, subs, flags
-  listLedger(id, cursor): LedgerPage;    // or product-equivalent money history
-  suspendUser(id, reason): void;
-  unsuspendUser(id, reason): void;
-  revokeSessions(id): void;
-  grantCredit(id, amount, campaign, reason): void;   // if product has balances
-  listModerationEvents(...)/resolveAppeal(...)       // capability-flagged
-  getKpis(range): KpiSet;
-  // capabilities descriptor drives which console tabs render per product
-}
-```
-
-Connectors run **server-side only** (inside `admin-api`), because they hold product
-credentials. The console SPA never talks to product infrastructure directly.
-
-### 3.3 How connectors reach the products — admin APIs, not databases
-
-**Rule: the console never gets a product's `service_role` key and never writes product
-tables directly.** Direct DB access would bypass every invariant the products enforce
-(advisory-lock charges, refund-once index, moderation-before-charge, Stripe dedupe)
-and would couple the console to product schemas forever.
-
-Instead, each product exposes a small **`/admin/*` route group on its existing
-gateway** (for Vansen: new routes on the `api` Edge Function; equivalents for Algawth
-TBD), authenticated service-to-service:
-
-- `admin-api` holds one secret per product (long random bearer or, better, short-lived
-  JWTs signed with a per-product shared key; scoped headers carry the acting admin's
-  id + role so product-side logs know *which human* acted).
-- Product-side `/admin/*` middleware verifies the token, checks an allowlist, rejects
-  everything else — same trust model the Stripe webhook already uses (verify, then act).
-- Product-side admin routes reuse the product's own RPCs/invariants (e.g. a credit
-  grant is a normal `promo` ledger insert; suspension flips the product's own flag) —
-  the product remains the sole guardian of its data rules.
-
-Rejected alternatives, for the record:
-- *Console → product DB directly*: fast to build, catastrophic coupling, bypasses
-  invariants, spreads `service_role` keys. No.
-- *One shared mega-database for all products*: destroys product isolation, makes the
-  java-migrate-plan's "DB never forks" property impossible. No.
-- *Read replicas for console reads + APIs for writes*: viable later purely for
-  analytics (Phase E), not for the operational console.
-
-### 3.4 Admin authentication & authorization
-
-- Supabase Auth on the **admin project**: email/password + TOTP MFA **mandatory**,
-  Google SSO restricted to the `@vankode.com` domain. No self-signup — admins are
-  provisioned by an owner.
-- **RBAC**, small and boring:
-
-| Role | Read | User actions | Finance/adjustments | Coupons | Catalog/kill switch | Admin mgmt |
-|---|---|---|---|---|---|---|
-| viewer | ✅ | — | — | — | — | — |
-| support | ✅ | suspend/appeals/sessions | — | credit grants ≤ cap | — | — |
-| finance | ✅ | — | ✅ | ✅ | — | — |
-| owner | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-- **Two-person rule** for irreversible/expensive ops (account deletion, adjustments
-  over a threshold, mass actions): second admin approves in-app before execution.
-  With a team of ~1–2 today this can start as a confirm-with-typed-reason speed bump,
-  but the data model supports real dual approval from day one (§6 `pending_actions`).
-- Session policy: short sessions (e.g. 12h), IP change re-auth, optional IP allowlist.
 
 ---
 
-## 4. Algawth intake checklist (fill before Phase D)
+## 2. Architecture
 
-The connector needs these answers; each maps to a §3.2 method:
+```
+apps (browser)
+  vankode-backoffice SPA  ──login──▶  Algawth Supabase Auth (admin account, MFA)
+        │ JWT
+        ▼
+  backoffice-api (Edge Function, Algawth project)
+        │  verifies JWT → backoffice.admins → role
+        │  writes backoffice.audit_log on every mutation
+        ├──▶ backoffice.* tables        (Vankode ops, finance, monitoring, audit)
+        ├──▶ Algawth public.* via same-project security-definer RPCs (Algawth module)
+        └──▶ Vansen `api` /admin/* routes, service-token auth (Vansen module)
+```
 
-1. Stack & hosting (Supabase too? Own backend? DB engine?).
-2. Where is the users table / identity provider, and is there a suspension concept?
-3. Money model: balances? subscriptions? Stripe account (same Vankode Stripe org or
-   separate)? Ledger-like history or mutable balances?
-4. What does "blocking a user" operationally mean there (auth ban, feature flag,
-   API key revocation…)?
-5. Existing admin/maintenance scripts or dashboards to absorb.
-6. Does it have coupons/promos today, and via what mechanism?
-7. KPIs that matter for its dashboard tile (the Vansen set won't transfer 1:1).
-8. Any compliance constraints (if Algawth is finance/trading-adjacent — the name
-   suggests it might be — its admin actions may carry stricter audit requirements;
-   the audit log in §6 is designed to be sufficient either way).
-9. A service-auth story its backend can support (§3.3 pattern or equivalent).
+### 2.1 Frontend
 
-Filling this checklist is itself the first task of Phase D and requires adding the
-`algawth` repo to a session so the connector spec can be grounded in real code.
+- **Angular** (latest LTS), standalone components, signals, spartan/ui + Tailwind —
+  the exact house stack of `vansen` and `algawth-admin`. Components, conventions,
+  and the panel design language (sectioned rails, uppercase micro-titles) copy over.
+- Separate `.ts` / `.html` / `.css` files per component. Never inline.
+- Vanrot (the earlier backoffice-repo choice) is deliberately NOT used here: this
+  console wants boring, proven velocity, and two of three Vankode frontends are
+  already Angular. Vanrot stays the candidate for the future client portal.
+- Hosting: static deploy (Vercel/Netlify/Cloudflare Pages free tier) on
+  `admin.vankode.com`. The SPA holds no secrets — only the admin's own session.
+
+### 2.2 The one rule that keeps products safe
+
+**The console never holds a product's `service_role` key and never writes product
+tables directly across projects.** Vansen is reached ONLY through a new `/admin/*`
+route group on Vansen's existing `api` gateway (§8), so every write goes through
+Vansen's own invariants (advisory-lock charges, refund-once, append-only ledger,
+moderation gates). The Algawth module, being same-project, uses narrow
+security-definer RPCs (`fn_admin_*`) instead of raw table access — same discipline,
+zero network hop.
+
+Cross-project auth (backoffice → Vansen): one long random bearer token stored as
+`ADMIN_API_TOKEN` in BOTH projects' Edge Function secrets (never in either repo).
+`backoffice-api` attaches it plus `x-acting-admin: <email>` headers; Vansen's
+`/admin/*` middleware verifies the token with a constant-time compare and logs the
+acting admin. Rotate by setting a new secret in both projects.
 
 ---
 
-## 5. Console UX sketch
+## 3. Modules (what you actually see)
 
-- **Shell**: left nav — Dashboard, Users, Finance, Coupons, Safety, Catalog, Ops,
-  Audit, Settings. Product switcher (Vansen / Algawth / All) pinned top. Same
-  spartan/ui "New York" look as vansen; dark-first.
-- **Dashboard**: cross-product tiles (§2.1), alert strip (failed webhooks, job-queue
-  anomalies, spend spikes — thresholds configurable).
-- **Users**: search-first page; detail page = header (identity, flags, balance) +
-  tabs (Ledger, Generations, Subscriptions, Moderation, Sessions, Audit). Every action
-  button opens a reason-required dialog.
-- **Finance**: revenue charts, reconciliation table, adjustments composer,
-  export panel.
-- **Coupons**: campaign list → campaign detail (mechanism, budget, redemptions) →
-  create wizard (Stripe coupon | credit grant | both).
-- **Safety** (Vansen tab): appeal queue with evidence viewer, resolve actions.
-- **Audit**: filterable, immutable, exportable — every screen's actions land here.
+Left nav: **Dashboard · Vankode · Vansen · Algawth · Finance · Monitor · Audit ·
+Settings**.
+
+### 3.1 Dashboard (cross-company)
+
+- Tiles per entity: Vankode (unpaid invoices, active projects, open todos),
+  Vansen (revenue 7d/30d, active users, job failure rate, open incidents,
+  new `app_errors` in 24h), Algawth (users, cap %, signups this week).
+- Alert strip: down monitors, overdue invoices, error spikes, failed webhooks.
+
+### 3.2 Vankode ops (software house)
+
+- **Clients**: company, contacts, notes, linked projects/invoices. CRUD.
+- **Projects**: name, client, status (lead → quoted → active → maintenance →
+  done), rate/fixed price, start/end, notes, linked todos + invoices.
+- **Todos**: lightweight tasks; title, product/project link, status, priority,
+  due date. Kanban + list views. This is your working memory, not Jira.
+- **Invoices**: numbered `VK-YYYY-NNN`, client, line items (description, qty,
+  unit price), currency, tax field, status draft → sent → paid → overdue →
+  void. PDF generated client-side (print stylesheet or pdfmake) — no server
+  dependency. Payments recorded manually (bank transfer reference, date).
+  Payment-provider automation is post-MVP.
+- **Expenses**: date, entity (vankode|vansen|algawth), category (hosting, API
+  keys, Apple dev, domains, tools…), **amount in MYR as actually charged on the
+  bank/card statement** (optional original USD amount kept for reference), note,
+  optional receipt upload (Algawth-project Storage, private bucket).
+
+### 3.3 Vansen module
+
+Reached via Vansen `/admin/*` (§8). Tabs:
+
+- **Users**: search (email/id/Stripe customer), detail page — profile, strikes,
+  suspension, subscription + period end, balance, ledger history, generation
+  metadata, moderation events. Actions (all reason-required, all audited):
+  suspend/unsuspend (explicit flag, §8.3), adjust strikes, revoke sessions,
+  resolve appeals, delete account (typed-confirmation).
+- **Invites**: create invite codes/links (new small Vansen feature, §8.7) for
+  controlled onboarding or comped access; list redemptions.
+- **Coupons & credits**: Stripe-native coupons/promotion codes managed via the
+  Stripe API (create, expire, redemption counts) + **direct credit grants**
+  (`promo` ledger entries) with campaign tags. Campaign registry with budget
+  caps lives in `backoffice.coupon_campaigns`.
+- **Safety**: moderation appeal queue, evidence viewer (short-lived signed URL,
+  itself audited), resolution workflow.
+- **Ops**: kill switches (`models.enabled` toggles), job queue stats,
+  **`app_errors` browser** — the table shipped 2026-07-11 (filter by code/route/
+  time, expandable stack traces, requestId lookup). This replaces reading it in
+  the Supabase SQL editor.
+- **Catalog**: absorb `/admin/pricing` + `/admin/compare` from the consumer app,
+  auth-gated at last; delete them from the Vansen public app afterwards.
+
+### 3.4 Algawth module
+
+Same-project RPCs. Implements the `algawth-admin` spec's scope:
+
+- Dashboard: total/active/banned users, cap progress (`user_limits`), signups
+  chart, users by country (Leaflet + OpenStreetMap world map), subscription mix.
+- Users table: search/sort/filter, detail sheet (profile, location, preferences,
+  subscription).
+- Actions: ban/unban (`is_active`), delete (storage avatar → rows → `delete-user`
+  function), change username, send password reset, gift subscription. Each via
+  `fn_admin_*` RPC that also writes the audit log.
+- No finance tab until Algawth charges money.
+
+### 3.5 Finance (consolidated — the tax view)
+
+- **Currency policy (decided 2026-07-11)**: the books are **MYR**. Vankode
+  invoices are MYR-only. Vansen income is USD at retail but is recorded at the
+  **Stripe-settled MYR value** — pulled from Stripe **balance transactions**
+  (each carries the converted amount, the exchange rate applied at charge time,
+  and the Stripe fee), so the P&L equals what actually flows into the bank, not
+  a spot-rate approximation. Product-side USD numbers (ledger, prices) stay USD
+  for unit economics; conversion happens only at the finance layer.
+- **Revenue ingestion**:
+  - Vansen: nightly pull via `/admin/kpis` + ledger aggregates (topups, studio
+    fees, refunds) for USD unit economics, **plus Stripe balance-transaction
+    pull (proxied through Vansen `/admin/*`, since the Stripe key lives there)**
+    for settled MYR gross, fees, and net — both land in
+    `backoffice.finance_snapshots`; reconciliation view compares the two.
+  - Vankode: paid invoices (§3.2) are already local, already MYR.
+  - Algawth: zero for now; slot exists.
+- **Expense side**: manual expenses (§3.2) + Vansen provider-spend aggregate
+  (from its ledger/jobs data, via admin API) so margin is real.
+- **Views**: monthly P&L per entity and consolidated, all in MYR; year selector;
+  MRR (Vansen Studio subs, shown USD and settled-MYR); outstanding receivables
+  (unpaid invoices).
+- **Tax exports**: date-ranged CSV in MYR — consolidated income, per-entity
+  breakdown, expense list by category, invoice register, Stripe settlement
+  detail (gross/fee/net per balance transaction) as the audit trail for the
+  Vansen line.
+- Numbers are **snapshots + local records**, not live queries against Vansen —
+  dashboards stay fast and the products stay unloaded.
+
+### 3.6 Monitor (overseer — replaces UptimeRobot)
+
+Runs where the watcher belongs: outside Vansen.
+
+- `checks` registry: URL, method, expected status, interval, enabled.
+  Seed rows: Vansen `GET /functions/v1/api/health` (expects `200`, checks db
+  flag), Vansen landing page, Algawth external APIs if desired.
+- **pg_cron every 5 min** in the Algawth project + `pg_net` HTTP GET → insert
+  into `check_results` (status, latency ms, ok boolean).
+- **Incidents**: 2 consecutive failures open an incident; first success closes
+  it with duration. Open incidents show on the Dashboard.
+- **Alerting**: Resend (free 100/day) email on incident open/close, called from
+  a small `monitor-alert` function triggered by the cron logic.
+- **Error-spike rule**: nightly + hourly count of Vansen `app_errors` via admin
+  API; alert when count(1h) > threshold from `alert_rules`.
+- **Reverse ping** (§7.4): Vansen's existing cron infrastructure gets one tiny
+  job pinging an Algawth-project health endpoint, emailing on failure — so the
+  watcher is also watched.
+- Retention: `check_results` purged after 90 days (same cron pattern as
+  `purge_app_errors`).
+
+### 3.7 Audit
+
+Every mutation in every module lands in `backoffice.audit_log`: acting admin,
+module, action, target, mandatory reason, payload jsonb, timestamp. Append-only —
+no UPDATE/DELETE grants to anyone, owner included. Filterable UI + CSV export.
 
 ---
 
-## 6. Admin-project data model (its own Supabase Postgres)
+## 4. Authentication & authorization
+
+- Login = Supabase Auth **of the Algawth project** (email/password; enable TOTP
+  MFA for the admin account). No self-signup: signups for backoffice don't exist —
+  admin rows are inserted manually (SQL) by the owner.
+- **`backoffice.admins` is the only source of admin truth**: `user_uuid` (auth
+  FK), email, role, status. The gateway resolves the JWT → looks up this table →
+  rejects anyone absent. An ordinary Algawth app account gets 403 forever.
+- Roles, small and boring (solo-founder reality, schema ready for more):
+
+| Role | Read all | Vankode ops | User actions | Finance | Coupons | Kill switch | Admin mgmt |
+|---|---|---|---|---|---|---|---|
+| owner | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| support | ✅ | todos only | suspend/appeals | — | grants ≤ cap | — | — |
+| viewer | ✅ | — | — | — | — | — | — |
+
+- Destructive ops (account deletion, adjustments over threshold): typed-reason +
+  typed-target confirmation now; `pending_actions` table exists from day one so a
+  real two-person rule can switch on when the team grows.
+- Sessions: default Supabase expiry; console auto-locks UI after inactivity.
+  Optional IP allowlist enforcement in the gateway (secret-stored list).
+
+---
+
+## 5. Algawth study (grounding, from repo reading 2026-07-11)
+
+- Flutter iOS app (prayer times, Quran, Hadith, Qibla, Hijri calendar, member
+  cards), Supabase backend, Malaysia/Singapore focus. Free; premium tier exists
+  in schema (`subscriptions`, `users.subscription_id`, default Free).
+- Tables: `users` (serial id + auth uuid, `is_active` = ban flag), `preferences`
+  (auto-created by trigger), `locations` (one row per user), `subscriptions`,
+  `user_limits` (signup cap, trigger-maintained count).
+- Existing Edge Functions: `delete-user` (auth deletion, reusable), `quran-proxy`.
+- The separate `algawth-admin` Angular repo/spec defined the dashboard + 5 admin
+  actions + `admin_audit_log` table. **This module supersedes that repo** — build
+  once here, retire the standalone dashboard plan. Its `admin_audit_log` design
+  folds into `backoffice.audit_log` (product column distinguishes).
+
+---
+
+## 6. Backoffice data model (`backoffice` schema, Algawth project)
 
 ```
-admins            id (auth FK), display_name, role, status, mfa_enrolled, created_at
-product_registry  id, name, base_url, capabilities jsonb, enabled, created_at
-audit_log         id, admin_id, product_id, action, target_type, target_id,
-                  reason text NOT NULL, payload jsonb, created_at   -- append-only,
-                  RLS deny-all, no UPDATE/DELETE grants to anyone (owner included)
-pending_actions   id, requested_by, action payload, status queued|approved|rejected,
-                  approved_by, created_at, resolved_at              -- two-person rule
-coupon_campaigns  id, product_id, name, mechanism, stripe_coupon_id, budget_usd,
-                  granted_usd, status, owner_admin_id, created_at
-kpi_snapshots     product_id, day, metrics jsonb                    -- nightly pull per
-                  connector; dashboards read snapshots, not live product DBs
-alert_rules       id, product_id, metric, threshold, channel, enabled
+admins            id, user_uuid FK auth.users, email, role, status, created_at
+audit_log         id, admin_email, product (vankode|vansen|algawth|backoffice),
+                  action, target_type, target_id, reason NOT NULL, payload jsonb,
+                  created_at            -- append-only, no UPDATE/DELETE grants
+pending_actions   id, requested_by, action jsonb, status, approved_by, timestamps
+
+clients           id, name, contact_name, email, phone, notes, status, created_at
+projects          id, client_id FK, name, status, pricing_mode, amount, currency,
+                  starts_on, ends_on, notes, created_at
+todos             id, title, body, product, project_id FK NULL, status, priority,
+                  due_on, done_at, created_at
+invoices          id, number UNIQUE (VK-YYYY-NNN), client_id FK, project_id NULL,
+                  status, issued_on, due_on, tax_rate, notes, created_at
+                  -- MYR only (decided); no currency column until a non-MYR
+                  -- client actually exists
+invoice_items     id, invoice_id FK, position, description, qty, unit_price
+payments          id, invoice_id FK, paid_on, amount, method, reference, created_at
+expenses          id, entity, category, amount_myr, spent_on, note,
+                  original_amount NULL, original_currency NULL,  -- e.g. USD API bill
+                  receipt_path NULL, created_at
+                  -- amount_myr = what the bank/card statement actually charged,
+                  -- same settled-value principle as Vansen revenue
+
+finance_snapshots product, day, metrics jsonb        -- nightly pull per connector
+coupon_campaigns  id, product, name, mechanism (stripe-coupon|credit-grant),
+                  stripe_coupon_id NULL, budget_usd, granted_usd, status,
+                  created_at
+kpi_snapshots     product, day, metrics jsonb
+alert_rules       id, product, metric, threshold, window, channel, enabled
+
+checks            id, name, url, method, expected_status, interval_min, enabled
+check_results     id, check_id FK, checked_at, ok, http_status, latency_ms, error
+incidents         id, check_id FK, opened_at, closed_at, fail_count, notified
 ```
 
-Same hardening habits as vansen: RLS deny-all + gateway-only access, size CHECKs on
-jsonb, `reason` mandatory on anything that mutates a product.
+Hardening habits copied from Vansen: RLS enabled deny-all on every table, size
+CHECKs on jsonb columns, mandatory `reason` on mutating gateway routes, purge
+crons for `check_results` (90d) and stale `pending_actions`.
 
 ---
 
 ## 7. Security posture
 
-1. **Blast-radius isolation**: console compromise ≠ product compromise. The console's
-   product credentials only open the deliberately narrow `/admin/*` routes; they can't
-   run SQL, can't read Storage wholesale, can't mint user sessions.
-2. **Every mutation audited** with acting admin, reason, and payload — in the admin DB
-   *and* in the product's own logs (acting-admin header, §3.3).
-3. **MFA mandatory, no self-signup, role least-privilege** (§3.4).
-4. **Privacy inside the console**: admins see user *content* (prompts, generated
-   media) only where operationally necessary — the safety/appeal flow — not as casual
-   browsing on the user page. Generations tab shows metadata by default; media opens
-   via short-lived signed URL fetched through the product admin API, and that view is
-   itself audited. (Aligns with the moderation-evidence stance already in the product.)
-5. **Secrets**: product admin tokens + Stripe keys live only in `admin-api` function
-   secrets. The SPA holds nothing but the admin's own session. Never in either repo.
-6. The two embedded vansen routes (`/admin/pricing`, `/admin/compare`) are **removed
-   from the consumer app** once the console hosts them — closing today's ungated
-   admin surface (§1).
+1. **Blast-radius isolation**: console compromise ≠ Vansen compromise. The only
+   cross-project credential opens Vansen's deliberately narrow `/admin/*` group —
+   it cannot run SQL, read Storage wholesale, or mint user sessions.
+2. **Admin ≠ app user**: `backoffice.admins` gate on every request; JWT alone
+   grants nothing.
+3. **Everything audited** with acting admin + reason, in backoffice AND in the
+   product's own logs (`x-acting-admin` header → Vansen `app_errors`-style admin
+   log or route logs).
+4. **Reverse monitoring**: Vansen pings the Algawth project (a public
+   `backoffice-api/health` route) so watcher-down is also alerted. Both directions
+   covered with zero third-party services.
+5. **Privacy**: user content (prompts, media) visible only in the safety/appeal
+   flow via short-lived signed URLs, each view audited. User pages show metadata.
+6. **Secrets** only in Edge Function secrets of the respective project:
+   `ADMIN_API_TOKEN` (both), `STRIPE_SECRET_KEY` (already in Vansen; coupon
+   management calls Stripe FROM Vansen's `/admin/*`, so the backoffice never
+   holds Stripe keys at all), `RESEND_API_KEY` (Algawth project). Nothing in repos.
+7. Remove the ungated `/admin/pricing` + `/admin/compare` routes from the Vansen
+   consumer app the moment the Catalog tab ships (they carry no authGuard today).
 
 ---
 
-## 8. Required product-side additions (Vansen) — future work list, not implemented
+## 8. Required Vansen-side additions (small, additive)
 
-Small, additive, all consistent with existing patterns:
+1. `/admin/*` route group on the existing `api` Edge Function: constant-time
+   bearer check middleware, `x-acting-admin` propagation, routes — user search/
+   detail, ledger list, suspend/unsuspend, strike adjust, session revoke, appeal
+   resolve, credit grant (`promo`), adjustment, kill-switch toggle, KPI/error
+   aggregates (`app_errors` reader), Stripe coupon CRUD proxy.
+2. Ledger type **`adjustment`** added to the `ledger_entries.type` CHECK.
+3. **Explicit suspension**: `profiles.suspended_at timestamptz` + `suspended_reason`,
+   checked alongside `strikes >= 2` — ban at 0 strikes, reinstate without erasing
+   evidence.
+4. `moderation_events.resolved_by text`.
+5. Session revocation via Supabase Auth admin API (gateway-invoked).
+6. Reverse-ping cron (one `pg_cron` + `pg_net` job hitting backoffice health).
+7. **Invites**: `invites` table (code, grants, max_uses, expires_at) + redemption
+   at signup — the one genuinely new product feature on the list.
 
-1. **`/admin/*` route group** on the `api` Edge Function: service-token middleware +
-   routes for user search/detail, suspend/unsuspend, session revoke, ledger list,
-   credit grant (`promo`), adjustment (`adjustment`), appeal resolve, kill-switch
-   toggle, KPI aggregate. Each reuses existing RPCs or adds thin `security definer`
-   ones following the `fn_*` conventions.
-2. **Ledger type `adjustment`** added to the `ledger_entries.type` CHECK — admin
-   corrections distinguishable from product-originated `promo`/`refund` forever.
-3. **Explicit suspension override** — e.g. `profiles.suspended_at timestamptz` +
-   `suspended_reason`, checked alongside the `strikes >= 2` rule, so blocking and
-   reinstating stop being arithmetic on strikes.
-4. **`moderation_events.resolved_by`** (text) — which admin resolved an appeal.
-5. Session revocation path via Supabase Auth admin API (gateway-invoked).
-6. Eventually: `/admin/pricing`'s catalog write-path lands here when the model catalog
-   moves to the `models` table (already planned in `vansen.md`).
-
-Equivalent list for Algawth falls out of the §4 checklist.
-
----
-
-## 9. KPI catalog (Vansen connector, v1)
-
-Finance: gross revenue (topups + studio fees), MRR, ARPU, margin per family
-(price − provider cost from ledger + jobs), Stripe fees actual, refund rate.
-Growth: signups, activation (first generation), DAU/WAU, paying conversion, churn
-(subscription lapses), library size distribution.
-Ops: generations/day by family, job success rate, median/p95 generation latency,
-stale-sweep kills, provider spend per provider per day.
-Safety: moderation flags/day, strikes issued, suspensions, appeal turnaround,
-overturn rate.
-
-All computable from existing tables (`ledger_entries`, `generations`, `jobs`,
-`moderation_events`, `subscriptions`) — no product schema changes needed for v1 KPIs.
+Algawth-side additions: `fn_admin_*` security-definer RPCs wrapping the 5 admin
+actions + gift subscription, so even the same-project module never raw-writes.
 
 ---
 
-## 10. Phasing
+## 9. Phasing (each phase ships alone and is useful)
 
-- **Phase A — Read-only console (highest value, near-zero risk).** Admin project +
-  auth + RBAC + audit skeleton; Vansen connector implementing only reads (user search/
-  detail, ledger, KPIs); dashboard + users + finance pages read-only. No product
-  writes at all yet.
-- **Phase B — Safety & user actions.** Product-side §8 items 1/3/4/5; suspend/
-  unsuspend, appeal resolution, session revoke; two-person rule live.
-- **Phase C — Money & coupons.** `adjustment` type, credit grants, Stripe coupon
-  management, campaign registry, exports. Migrate `/admin/pricing` + `/admin/compare`
-  into the console and delete them from the consumer app.
-- **Phase D — Algawth onboarding.** Intake checklist (§4) → its `/admin/*` surface →
-  its connector → product switcher lights up.
-- **Phase E — Analytics maturity (optional).** Nightly KPI snapshots grow into a real
-  reporting store (or a read replica) once dashboard queries outgrow live aggregates.
-
-Each phase ships alone; A is a complete, useful product by itself.
-
----
-
-## 11. Relationship to java-migrate-plan
-
-The two specs are designed not to collide:
-
-- The console consumes products through **HTTP admin APIs** — it cannot tell whether
-  a product's gateway is a Deno Edge Function or a Java service. When vansen's Java
-  migration reaches Phase 3 (writes), the `/admin/*` group is just more routes in the
-  golden contract suite and ports with everything else.
-- The admin OpenAPI surfaces should join the same contract-first discipline
-  (java-migrate-plan §10) from day one.
-- If Vankode ends up on the Java modular monolith, `admin-api` itself is a candidate
-  to fold in as an `admin` module — the connector interface survives as Java
-  interfaces. Decision deferred; nothing blocks either order.
-
-## 12. Open questions (decide before creating the repo)
-
-1. **Algawth**: everything in §4 — the biggest unknown.
-2. **Stripe topology**: one Vankode Stripe account for both products or separate?
-   (Determines whether Finance is one reconciliation view or two.)
-3. **Admin team size & roles now vs 12 months** — how much of RBAC/two-person to
-   enforce on day one vs keep as schema-ready.
-4. **Hosting the console**: same Supabase org (simplest) — any reason not to?
-5. **Domain**: `admin.vankode.com`? Affects auth redirect config early.
-6. **Shared Vankode user identity** across products — out of scope here, but coupon
-   campaigns spanning products will eventually raise it.
-7. **Monorepo temptation**: this spec assumes `vankode-admin` is its own repo (matches
-   "create the new project"); a Vankode-wide monorepo is a different, bigger decision
-   this spec deliberately does not make.
-8. **i18n**: consumer apps are en/ms — is the admin console en-only (recommended)?
+- **Phase A — Scaffold + Vankode ops.** Repo, Angular shell, auth + admins gate,
+  audit skeleton, `backoffice` schema, gateway. Clients / projects / todos /
+  invoices / expenses fully working. Zero product dependencies — immediate
+  daily-driver value.
+- **Phase B — Monitor.** Checks, cron pinger, incidents, Resend alerts, reverse
+  ping. Kills the UptimeRobot question for good.
+- **Phase C — Vansen read-only.** `/admin/*` GET routes, user search/detail,
+  ledger, KPIs, `app_errors` browser, dashboard tiles.
+- **Phase D — Vansen actions + money.** Suspension/appeals/invites/kill switches,
+  `adjustment` type, credit grants, Stripe coupon management, campaign registry.
+  Migrate pricing/compare tools in; delete them from the consumer app.
+- **Phase E — Finance consolidation.** Snapshots, P&L, reconciliation, tax
+  exports.
+- **Phase F — Algawth module.** RPCs + users/actions/map/audit; retire the
+  standalone `algawth-admin` plan.
 
 ---
 
-*End of brainstorming spec. No implementation authorized by this document. Next step
-when ready: create the `vankode-admin` repo, grant a session access to `algawth`, fill
-§4, then start Phase A.*
+## 10. Free-tier budget sanity (Algawth project)
+
+- Monitor: 288 pings/day × ~3 checks ≈ 26K function-adjacent pg_net calls/mo —
+  pg_cron/pg_net run in Postgres, not against the 500K function-invocation quota.
+- Console usage: one admin, hundreds of gateway calls/day ≈ <20K/mo. Safe.
+- DB: backoffice tables are KB-scale; `check_results` at 90d retention ≈ tens of
+  MB worst case. Within 500 MB shared budget; the purge cron keeps it flat.
+- Watch: Supabase dashboard usage page monthly; alert rule at 80% is itself a
+  `alert_rules` row once Phase B lands.
+
+## 11. Open questions (decide before Phase A)
+
+1. ~~Invoice currency~~ **Decided 2026-07-11**: invoices MYR-only; Vansen income
+   recorded at Stripe-settled MYR from balance transactions (§3.5). Remaining
+   sub-question: SST/tax line on invoices — schema has `tax_rate`, confirm rate
+   or leave 0.
+2. MFA enrollment for the admin account — do it at project setup (recommended).
+3. IP allowlist for the gateway: on from day one or after go-live?
+4. Domain/auth config: `admin.vankode.com` redirect URLs registered in the
+   Algawth Supabase Auth settings early.
+5. Vansen invites (§8.7): exact grant semantics (free credits? Studio trial?) —
+   product decision, not console decision.
+6. When Vansen's Java migration (java-migrate-plan) reaches writes, `/admin/*`
+   joins the golden contract suite and ports with everything else — nothing here
+   blocks it.
+
+---
+
+*Next step when ready: paste this into the `vankode-backoffice` repo as its product
+doc (replacing the client-portal-era `docs/vankode-backoffice.md` scope), then start
+Phase A.*
