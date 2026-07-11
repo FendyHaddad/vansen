@@ -244,7 +244,7 @@ export class ToolOptions {
         }
       });
     });
-    // Deselecting a tool destroys this strip (studio-panel @if). An un-applied
+    // Deselecting a tool destroys this strip (right-panel @if). An un-applied
     // slider/filter preview would otherwise linger on the canvas with no owner
     // to clear it — drop it so closing a tool discards its preview.
     inject(DestroyRef).onDestroy(() => {

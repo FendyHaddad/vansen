@@ -5,7 +5,7 @@
 }
 
 /* Studio editing rail — third column after the main area */
-app-studio-panel {
+app-right-panel {
   flex-shrink: 0;
   height: 100vh;
 }

@@ -17,7 +17,7 @@
   margin-top: auto;
 }
 
-/* Identical to the studio-panel Studio/Pro switch. */
+/* Identical to the right-panel Studio/Pro switch. */
 .mode-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;

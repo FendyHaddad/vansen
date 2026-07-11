@@ -19,7 +19,7 @@
     </div>
 
     <div class="side-scroll">
-      <app-settings-rail
+      <app-left-panel
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
       />
@@ -188,7 +188,7 @@
     </main>
   </div>
 
-  <app-studio-panel
+  <app-right-panel
     [editing]="mode() === 'edit'"
     (saveRequested)="onSaveEdit()"
     (aiToolRequested)="onAiTool($event)"

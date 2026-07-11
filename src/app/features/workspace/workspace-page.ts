@@ -33,11 +33,11 @@ import { GenerationOp } from '../../core/enums';
 import { EditSession } from '../../core/editing/edit-session';
 import { editToolById } from '../../core/catalog/model-families';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
-import { SettingsRail, GenerateRequest } from './settings-rail/settings-rail';
+import { LeftPanel, GenerateRequest } from './left-panel/left-panel';
 import { LibraryGrid } from './library-grid/library-grid';
 import { DetailOverlay } from './detail-overlay/detail-overlay';
 import { CanvasViewport } from '../studio/canvas-viewport/canvas-viewport';
-import { StudioPanel } from '../studio/studio-panel/studio-panel';
+import { RightPanel } from '../studio/right-panel/right-panel';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
@@ -54,11 +54,11 @@ const SAMPLE_PROMPTS = [
     RouterLink,
     NgIcon,
     ProfileMenu,
-    SettingsRail,
+    LeftPanel,
     LibraryGrid,
     DetailOverlay,
     CanvasViewport,
-    StudioPanel,
+    RightPanel,
   ],
   providers: [
     provideIcons({
@@ -85,9 +85,9 @@ export class WorkspacePage {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  readonly rail = viewChild.required(SettingsRail);
+  readonly rail = viewChild.required(LeftPanel);
   readonly viewport = viewChild(CanvasViewport);
-  readonly panel = viewChild.required(StudioPanel);
+  readonly panel = viewChild.required(RightPanel);
   readonly editSession = inject(EditSession);
 
   /** 'library' shows the grid; 'edit' swaps in the canvas viewport. */

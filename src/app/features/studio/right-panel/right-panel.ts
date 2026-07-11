@@ -93,9 +93,9 @@ const EXPORT_FORMATS: ExportFormat[] = [
 
 /** Right rail: free local tools on top, priced AI tools below, Studio-gated. */
 @Component({
-  selector: 'app-studio-panel',
-  templateUrl: './studio-panel.html',
-  styleUrl: './studio-panel.css',
+  selector: 'app-right-panel',
+  templateUrl: './right-panel.html',
+  styleUrl: './right-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DecimalPipe, NgIcon, HlmButton, ToolOptions],
   providers: [
@@ -126,7 +126,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
     }),
   ],
 })
-export class StudioPanel {
+export class RightPanel {
   readonly session = inject(EditSession);
   private readonly ledger = inject(LedgerService);
   private readonly profileStore = inject(ProfileStore);

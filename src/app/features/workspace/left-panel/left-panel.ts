@@ -69,9 +69,9 @@ const AXIS_TOOLTIPS = {
 } as const;
 
 @Component({
-  selector: 'app-settings-rail',
-  templateUrl: './settings-rail.html',
-  styleUrl: './settings-rail.css',
+  selector: 'app-left-panel',
+  templateUrl: './left-panel.html',
+  styleUrl: './left-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint, CachedSrc, ...HlmDropdownMenuImports],
   providers: [
@@ -86,7 +86,7 @@ const AXIS_TOOLTIPS = {
     }),
   ],
 })
-export class SettingsRail {
+export class LeftPanel {
   private readonly ledger = inject(LedgerService);
   private readonly prefsService = inject(PreferencesService);
   private readonly api = inject(ApiService);
