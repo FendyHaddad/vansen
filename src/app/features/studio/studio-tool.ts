@@ -16,7 +16,10 @@ export type StudioTool =
   | 'bgremove'
   | 'bokeh'
   | 'upscale'
-  | 'select';
+  | 'select'
+  | 'dehaze'
+  | 'portraitsmooth'
+  | 'erase';
 
 /** Tools that own the left-click/drag gesture on the canvas (no click-drag
  * panning) — brushes plus the point-pick tools. */
@@ -29,4 +32,5 @@ export const DRAG_TOOLS: ReadonlySet<StudioTool> = new Set([
   'retouch',
   'bokeh',
   'select',
+  'erase',
 ]);

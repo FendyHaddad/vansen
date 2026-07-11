@@ -10,9 +10,10 @@ import {
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
+  lucideArrowLeft,
   lucideRedo2,
-  lucideSearch,
   lucideUndo2,
+  lucideUpload,
   lucideX,
   lucideZoomIn,
   lucideZoomOut,
@@ -61,9 +62,10 @@ const SAMPLE_PROMPTS = [
   ],
   providers: [
     provideIcons({
+      lucideArrowLeft,
       lucideRedo2,
-      lucideSearch,
       lucideUndo2,
+      lucideUpload,
       lucideX,
       lucideZoomIn,
       lucideZoomOut,
@@ -107,6 +109,9 @@ export class WorkspacePage {
 
   /** Top-bar library search. */
   readonly searchTerm = signal('');
+
+  /** True while an imported image uploads — drives the topbar spinner + overlay. */
+  readonly uploading = signal(false);
 
   /** Open item in the detail overlay, null = closed. */
   readonly openedId = signal<string | null>(null);
@@ -251,14 +256,25 @@ export class WorkspacePage {
     this.pickingReference.set(true);
   }
 
+  /** Topbar file input — pull the file, reset input, hand off to onUpload. */
+  onUploadPick(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) void this.onUpload(file);
+  }
+
   /** Import the user's own image as a library item and open it for editing. */
   async onUpload(file: File): Promise<void> {
+    this.uploading.set(true);
     try {
       const item = await this.store.importImage(file);
       this.notice.set('');
       await this.enterEdit(item.id);
     } catch (e) {
       this.showError(e, 'Upload failed');
+    } finally {
+      this.uploading.set(false);
     }
   }
 
@@ -281,6 +297,18 @@ export class WorkspacePage {
       this.showError(e, 'Delete failed');
     }
     this.openedId.set(null);
+  }
+
+  /** Library grid delete — one card or a multi-select batch. */
+  async onDeleteMany(ids: string[]): Promise<void> {
+    for (const id of ids) {
+      try {
+        await this.store.remove(id);
+      } catch (e) {
+        this.showError(e, 'Delete failed');
+        return;
+      }
+    }
   }
 
   async onDownload(id: string): Promise<void> {

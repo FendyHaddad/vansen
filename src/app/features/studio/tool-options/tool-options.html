@@ -193,6 +193,26 @@
           </button>
         }
       </div>
+      @if (filterPreset() === 'duotone') {
+        <div class="duotone-row">
+          <label class="duotone-swatch">
+            Shadows
+            <input
+              type="color"
+              [value]="rgbToHex(duotoneA())"
+              (input)="setDuotone('a', $any($event.target).value)"
+            />
+          </label>
+          <label class="duotone-swatch">
+            Highlights
+            <input
+              type="color"
+              [value]="rgbToHex(duotoneB())"
+              (input)="setDuotone('b', $any($event.target).value)"
+            />
+          </label>
+        </div>
+      }
       <label>
         <span class="opt-row">
           Intensity
@@ -245,6 +265,89 @@
       </label>
       <p class="opt-hint">Auto contrast and white balance — previewing already, tune the strength to taste.</p>
       <button type="button" class="apply-btn" (click)="applyEnhance()">Apply enhance</button>
+    </div>
+  }
+  @case ('dehaze') {
+    <div class="opts">
+      <label>
+        <span class="opt-row">
+          Strength
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="0"
+              max="100"
+              [value]="dehazeStrength()"
+              (input)="dehazeStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="dehazeStrength()"
+          (input)="dehazeStrength.set(+$any($event.target).value); schedulePreview()"
+        />
+      </label>
+      <p class="opt-hint">Cuts fog and haze to bring back contrast and color — great on misty or underwater shots.</p>
+      <button type="button" class="apply-btn" (click)="applyDehaze()">Apply dehaze</button>
+    </div>
+  }
+  @case ('portraitsmooth') {
+    <div class="opts">
+      <label>
+        <span class="opt-row">
+          Strength
+          <span class="num-wrap">
+            <input
+              class="num"
+              type="number"
+              min="0"
+              max="100"
+              [value]="portraitStrength()"
+              (input)="portraitStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+            />%
+          </span>
+        </span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="portraitStrength()"
+          (input)="portraitStrength.set(+$any($event.target).value); schedulePreview()"
+        />
+      </label>
+      <p class="opt-hint">Softens pores and blemishes on skin while keeping eyes, hair and edges sharp.</p>
+      <button type="button" class="apply-btn" (click)="applyPortrait()">Apply smoothing</button>
+    </div>
+  }
+  @case ('erase') {
+    <div class="opts">
+      <p class="opt-hint">
+        Tap the thing you want gone — we select it and fill the space behind it.
+        Runs on your device — free, nothing leaves your browser.
+      </p>
+      @if (enginePct() !== null) {
+        <p class="opt-hint">
+          Preparing engine — one-time download,
+          <span class="num">{{ enginePct() }}%</span>
+        </p>
+      }
+      @if (healPct() !== null) {
+        <p class="opt-hint">
+          Preparing fill engine — one-time download,
+          <span class="num">{{ healPct() }}%</span>
+        </p>
+      }
+      @if (engineBusy()) {
+        <p class="opt-hint">Working…</p>
+      }
+      @if (engineError()) {
+        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      }
+      <p class="opt-hint">Every tap removes one object. Undo brings it back.</p>
     </div>
   }
   @case ('levels') {

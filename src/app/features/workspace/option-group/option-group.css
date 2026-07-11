@@ -125,11 +125,26 @@
   opacity: 0.75;
 }
 
-.og-na {
-  font-size: 0.75rem;
+/* Tooltip host wraps the disabled trigger; must span the column like a real dropdown. */
+.og-na-hint {
+  display: flex;
+  width: 100%;
+}
+
+.og-na-hint ::ng-deep .hint-trigger {
+  width: 100%;
+}
+
+.og-trigger-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
   color: var(--muted-foreground);
-  border: 1px dashed var(--border);
-  border-radius: calc(var(--radius) - 4px);
-  padding: 6px 12px;
-  display: inline-block;
+}
+
+.og-trigger-disabled:hover {
+  border-color: var(--border);
+}
+
+.og-na-label {
+  color: var(--muted-foreground);
 }

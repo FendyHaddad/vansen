@@ -1,18 +1,29 @@
 <div class="library-head">
   <h1>{{ pickMode() ? 'Pick a reference' : 'Library' }}</h1>
   <div class="library-head-right">
-    <span class="muted">{{ visible().length }} of {{ items().length }}</span>
-    @if (canUpload() && !pickMode()) {
-      <label class="upload-btn">
-        <ng-icon name="lucideUpload" size="14" />
-        Upload to edit
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          class="upload-input"
-          (change)="onUploadPick($event)"
-        />
-      </label>
+    @if (selectMode()) {
+      <span class="muted">{{ selectedCount() }} selected</span>
+      <button
+        type="button"
+        class="head-btn head-danger"
+        [disabled]="selectedCount() === 0"
+        (click)="deleteSelected()"
+      >
+        <ng-icon name="lucideTrash2" size="14" />
+        Delete
+      </button>
+      <button type="button" class="head-btn" (click)="toggleSelectMode()">
+        <ng-icon name="lucideX" size="14" />
+        Cancel
+      </button>
+    } @else {
+      <span class="muted">{{ visible().length }} of {{ items().length }}</span>
+      @if (!pickMode() && items().length) {
+        <button type="button" class="head-btn" (click)="toggleSelectMode()">
+          <ng-icon name="lucideCheck" size="14" />
+          Select
+        </button>
+      }
     }
   </div>
 </div>
@@ -49,8 +60,19 @@
 } @else {
   <div class="library-grid">
     @for (item of visible(); track item.id) {
-      <figure class="gen-card" (click)="onCardClick(item)">
+      <figure
+        class="gen-card"
+        [class.card-selected]="selectMode() && isSelected(item.id)"
+        (click)="onCardClick(item)"
+      >
         <div class="gen-thumb">
+          @if (selectMode()) {
+            <span class="select-check" [class.select-on]="isSelected(item.id)">
+              @if (isSelected(item.id)) {
+                <ng-icon name="lucideCheck" size="13" />
+              }
+            </span>
+          }
           @if (item.status === 'pending') {
             <div class="gen-pending">
               <span class="spinner"></span>
@@ -81,7 +103,7 @@
             @if (item.op === 'edit' || item.op === 'upscale') {
               <span class="op-tag">{{ item.op === 'edit' ? 'edited' : 'upscaled' }}</span>
             }
-            @if (!pickMode()) {
+            @if (!pickMode() && !selectMode()) {
               <div class="qa-overlay">
                 <button
                   type="button"
@@ -91,14 +113,15 @@
                 >
                   <ng-icon name="lucideDownload" size="13" />
                 </button>
+                <button
+                  type="button"
+                  class="qa qa-danger"
+                  aria-label="Delete"
+                  (click)="deleteOne(item.id); $event.stopPropagation()"
+                >
+                  <ng-icon name="lucideTrash2" size="13" />
+                </button>
                 @if (item.kind === 'image') {
-                  <button
-                    type="button"
-                    class="qa"
-                    (click)="upscale.emit(item.id); $event.stopPropagation()"
-                  >
-                    Upscale <span class="num">${{ upscalePrice | number: '1.2-2' }}</span>
-                  </button>
                   <button
                     type="button"
                     class="qa"

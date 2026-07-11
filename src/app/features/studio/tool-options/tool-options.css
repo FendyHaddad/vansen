@@ -120,3 +120,29 @@
   outline: none;
   border-color: #2563eb;
 }
+
+/* Duotone tint pickers — shown only while that preset is active. */
+.duotone-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.duotone-swatch {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.duotone-swatch input[type='color'] {
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  cursor: pointer;
+}

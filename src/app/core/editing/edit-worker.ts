@@ -4,12 +4,14 @@ import { AdjustParams, adjust } from './ops/adjust';
 import { CloneStep, cloneStamp } from './ops/clone';
 import { sharpen, smooth } from './ops/convolve';
 import { CropRect, crop, rotate90 } from './ops/crop';
+import { DehazeParams, dehaze } from './ops/dehaze';
 import { enhance } from './ops/enhance';
 import { FilterParams, filter } from './ops/filters';
 import { heal } from './ops/heal';
 import { LevelsParams, levels } from './ops/levels';
 import { LiquifyStep, liquify } from './ops/liquify';
 import { PerspectiveParams, perspective } from './ops/perspective';
+import { PortraitSmoothParams, portraitSmooth } from './ops/portrait-smooth';
 import { RetouchStep, retouch } from './ops/retouch';
 import { FlipAxis, StraightenParams, flip, rotate90ccw, straighten } from './ops/transform';
 
@@ -29,7 +31,9 @@ export type WorkerOp =
   | { kind: 'retouch'; buffer: PixelBuffer; params: RetouchStep }
   | { kind: 'perspective'; buffer: PixelBuffer; params: PerspectiveParams }
   | { kind: 'liquify'; buffer: PixelBuffer; params: LiquifyStep }
-  | { kind: 'heal'; buffer: PixelBuffer; params: { mask: Uint8Array } };
+  | { kind: 'heal'; buffer: PixelBuffer; params: { mask: Uint8Array } }
+  | { kind: 'dehaze'; buffer: PixelBuffer; params: DehazeParams }
+  | { kind: 'portraitSmooth'; buffer: PixelBuffer; params: PortraitSmoothParams };
 
 /** Shared dispatch — the worker calls it; tests and no-Worker envs call it directly. */
 export function runOpSync(op: WorkerOp): PixelBuffer {
@@ -66,6 +70,10 @@ export function runOpSync(op: WorkerOp): PixelBuffer {
       return liquify(op.buffer, op.params);
     case 'heal':
       return heal(op.buffer, op.params.mask);
+    case 'dehaze':
+      return dehaze(op.buffer, op.params);
+    case 'portraitSmooth':
+      return portraitSmooth(op.buffer, op.params);
   }
 }
 

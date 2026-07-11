@@ -17,10 +17,13 @@
   margin-top: auto;
 }
 
+/* Identical to the studio-panel Studio/Pro switch. */
 .mode-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: center;
   gap: 4px;
+  height: 36px;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
   background: color-mix(in oklch, var(--muted) 45%, transparent);
@@ -31,13 +34,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 7px 0;
+  gap: 6px;
+  height: 26px;
   border: none;
   border-radius: calc(var(--radius) - 4px);
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition:

@@ -22,7 +22,7 @@ app-studio-panel {
 /* Sidebar */
 
 .sidebar {
-  width: 300px;
+  width: 270px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -121,27 +121,85 @@ app-studio-panel {
   min-width: 0;
 }
 
-.search-box {
-  display: flex;
+/* Topbar upload — replaces the old search box. Semi-round like the Generate
+   button; 36px tall so it lines up with the Studio/Pro switch beside it. */
+.upload-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border));
   border-radius: calc(var(--radius) - 2px);
-  background: var(--background);
-  padding: 0 10px;
-  color: var(--muted-foreground);
-  width: min(280px, 34vw);
-}
-
-.search-box input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
   color: var(--foreground);
   font-size: 0.8125rem;
-  padding: 8px 0;
-  outline: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.upload-btn:hover {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+.upload-btn.is-uploading {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.upload-input {
+  display: none;
+}
+
+.btn-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 25%, transparent);
+  border-top-color: var(--foreground);
+  animation: ws-spin 0.7s linear infinite;
+}
+
+/* Full-content upload feedback so the wait never looks frozen. */
+.upload-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 72px 24px;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  animation: ws-fade-in 0.15s ease;
+}
+
+.upload-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in oklch, var(--primary) 22%, transparent);
+  border-top-color: var(--primary);
+  animation: ws-spin 0.7s linear infinite;
+}
+
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ws-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* Edit-mode toolbar — second bar under the topbar: zoom + undo/redo. */
@@ -208,6 +266,17 @@ app-studio-panel {
   width: 1px;
   height: 18px;
   background: color-mix(in oklch, var(--border) 80%, transparent);
+}
+
+/* Obvious escape hatch back to the library after an edit/upload. */
+.et-back {
+  font-weight: 600;
+  border-color: color-mix(in oklch, var(--primary) 40%, var(--border));
+}
+
+.et-back:hover {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  border-color: var(--primary);
 }
 
 .content {

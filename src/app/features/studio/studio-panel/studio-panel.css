@@ -2,9 +2,11 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: 240px;
+  width: 270px;
   height: 100%;
-  padding: 14px;
+  /* 10px top centers the 36px switch in the same 56px band as the topbar,
+     so it lines up horizontally with the Upload button. */
+  padding: 10px 14px 14px;
   border-left: 1px solid var(--border, #26262a);
   overflow-y: auto;
 }
@@ -12,7 +14,9 @@
 .tier-switch {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: center;
   gap: 4px;
+  height: 36px;
   padding: 4px;
   border: 1px solid var(--border, #26262a);
   border-radius: calc(var(--radius, 8px) - 2px);
@@ -23,8 +27,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 6px 0;
+  gap: 6px;
+  height: 26px;
   border: none;
   border-radius: calc(var(--radius, 8px) - 4px);
   background: transparent;

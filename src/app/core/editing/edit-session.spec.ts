@@ -43,6 +43,19 @@ describe('EditSession', () => {
     expect(s.dirty()).toBe(false);
   });
 
+  it('previewOp downscales the preview buffer when maxDim is smaller than the image', async () => {
+    const s = make();
+    const big: PixelBuffer = {
+      width: 2000,
+      height: 1000,
+      data: new Uint8ClampedArray(2000 * 1000 * 4),
+    };
+    s.openWithBuffer(item, big);
+    await s.previewOp('filter', { preset: 'bw', intensity: 100 }, 1100);
+    const prev = s.previewBuffer()!;
+    expect(Math.max(prev.width, prev.height)).toBeLessThanOrEqual(1100);
+  });
+
   it('close resets state', async () => {
     const s = make();
     s.openWithBuffer(item, px(10));

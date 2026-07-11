@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   computed,
   effect,
@@ -26,6 +27,7 @@ import {
 } from '../../../core/editing/engines/engine-status';
 import { healModelProgress } from '../../../core/editing/heal-status';
 import { PixelBuffer } from '../../../core/editing/pixel-buffer';
+import { PreviewScheduler } from '../../../core/editing/preview-scheduler';
 import { FilterPreset } from '../../../core/editing/ops/filters';
 import { lumaHistogram } from '../../../core/editing/ops/levels';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
@@ -62,6 +64,16 @@ const FILTER_PRESETS: { id: FilterPreset; label: string }[] = [
   { id: 'cool', label: 'Cool' },
   { id: 'grain', label: 'Film Grain' },
   { id: 'vignette', label: 'Vignette' },
+  { id: 'fade', label: 'Fade' },
+  { id: 'noir', label: 'Noir' },
+  { id: 'matte', label: 'Matte' },
+  { id: 'tealorange', label: 'Teal & Orange' },
+  { id: 'goldenhour', label: 'Golden Hour' },
+  { id: 'crossprocess', label: 'Cross Process' },
+  { id: 'infrared', label: 'Infrared' },
+  { id: 'bleach', label: 'Bleach Bypass' },
+  { id: 'duotone', label: 'Duotone' },
+  { id: 'clarity', label: 'Clarity' },
 ];
 
 /** Geometry sliders (straighten, perspective) preview on a copy no larger
@@ -117,6 +129,9 @@ export class ToolOptions {
   readonly straightenDeg = signal(0);
   readonly filterPreset = signal<FilterPreset>('bw');
   readonly filterIntensity = signal(80);
+  /** Duotone shadow/highlight tints (RGB) — only read by that preset. */
+  readonly duotoneA = signal<[number, number, number]>([26, 22, 55]);
+  readonly duotoneB = signal<[number, number, number]>([245, 226, 168]);
   readonly enhanceStrength = signal(80);
   readonly levelsBlack = signal(0);
   readonly levelsWhite = signal(255);
@@ -124,6 +139,8 @@ export class ToolOptions {
   readonly levelsGamma = signal(100);
   readonly perspV = signal(0);
   readonly perspH = signal(0);
+  readonly dehazeStrength = signal(60);
+  readonly portraitStrength = signal(60);
   readonly bokehStrength = signal(50);
   /** Focus point in image px; null = center until the user clicks. */
   readonly bokehFocus = signal<{ x: number; y: number } | null>(null);
@@ -177,7 +194,11 @@ export class ToolOptions {
 
   private readonly histCanvas = viewChild<ElementRef<HTMLCanvasElement>>('histCanvas');
 
-  private previewTimer: ReturnType<typeof setTimeout> | undefined;
+  /** One preview compute per animation frame — slider drags coalesce. */
+  private readonly previewSched = new PreviewScheduler(() => this.runPreview());
+
+  /** Bokeh is heavier (ONNX) — it keeps a longer, fixed debounce. */
+  private bokehTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     // Switching tools drops any un-applied preview and resets the sliders.
@@ -187,7 +208,9 @@ export class ToolOptions {
       const t = this.tool();
       untracked(() => {
         this.resetPending();
-        if (t === 'enhance' || t === 'filters') this.schedulePreview();
+        if (t === 'enhance' || t === 'filters' || t === 'dehaze' || t === 'portraitsmooth') {
+          this.schedulePreview();
+        }
       });
     });
     // Histogram behind the Levels sliders — redrawn after every commit AND
@@ -216,8 +239,19 @@ export class ToolOptions {
             this.selPoints().length && this.selMode() === 'subtract' ? 0 : 1;
           this.selPoints.update((pts) => [...pts, { x: pick.x, y: pick.y, label }]);
           void this.runSelect();
+        } else if (t === 'erase') {
+          void this.runErase({ x: pick.x, y: pick.y, label: 1 });
         }
       });
+    });
+    // Deselecting a tool destroys this strip (studio-panel @if). An un-applied
+    // slider/filter preview would otherwise linger on the canvas with no owner
+    // to clear it — drop it so closing a tool discards its preview.
+    inject(DestroyRef).onDestroy(() => {
+      this.previewSched.cancel();
+      clearTimeout(this.bokehTimer);
+      this.session.resetPreview();
+      this.session.setPointPick(null);
     });
   }
 
@@ -228,24 +262,27 @@ export class ToolOptions {
     return Math.min(hi, Math.max(lo, Math.round(n)));
   }
 
-  /** Debounced live preview — renders without committing to history. */
+  /** Live preview, coalesced to one compute per frame — no history commit. */
   schedulePreview(): void {
-    clearTimeout(this.previewTimer);
-    this.previewTimer = setTimeout(() => void this.runPreview(), 80);
+    this.previewSched.schedule();
   }
 
   private async runPreview(): Promise<void> {
     const t = this.tool();
     if (t === 'adjust') {
-      await this.session.previewOp('adjust', {
-        brightness: this.brightness(),
-        contrast: this.contrast(),
-        saturation: this.saturation(),
-      });
+      await this.session.previewOp(
+        'adjust',
+        {
+          brightness: this.brightness(),
+          contrast: this.contrast(),
+          saturation: this.saturation(),
+        },
+        PREVIEW_MAX_DIM,
+      );
     } else if (t === 'sharpen') {
-      await this.session.previewOp('sharpen', this.amount());
+      await this.session.previewOp('sharpen', this.amount(), PREVIEW_MAX_DIM);
     } else if (t === 'smooth') {
-      await this.session.previewOp('smooth', this.amount());
+      await this.session.previewOp('smooth', this.amount(), PREVIEW_MAX_DIM);
     } else if (t === 'crop') {
       // Rotate/flip/straighten live inside the crop options.
       if (this.straightenDeg() === 0) this.session.resetPreview();
@@ -256,14 +293,28 @@ export class ToolOptions {
           PREVIEW_MAX_DIM,
         );
     } else if (t === 'filters') {
-      await this.session.previewOp('filter', {
-        preset: this.filterPreset(),
-        intensity: this.filterIntensity(),
-      });
+      await this.session.previewOp(
+        'filter',
+        {
+          preset: this.filterPreset(),
+          intensity: this.filterIntensity(),
+          colorA: this.duotoneA(),
+          colorB: this.duotoneB(),
+        },
+        PREVIEW_MAX_DIM,
+      );
     } else if (t === 'enhance') {
-      await this.session.previewOp('enhance', this.enhanceStrength());
+      await this.session.previewOp('enhance', this.enhanceStrength(), PREVIEW_MAX_DIM);
+    } else if (t === 'dehaze') {
+      await this.session.previewOp('dehaze', { strength: this.dehazeStrength() }, PREVIEW_MAX_DIM);
+    } else if (t === 'portraitsmooth') {
+      await this.session.previewOp(
+        'portraitSmooth',
+        { strength: this.portraitStrength() },
+        PREVIEW_MAX_DIM,
+      );
     } else if (t === 'levels') {
-      await this.session.previewOp('levels', this.levelsParams());
+      await this.session.previewOp('levels', this.levelsParams(), PREVIEW_MAX_DIM);
     } else if (t === 'perspective') {
       if (this.perspV() === 0 && this.perspH() === 0) this.session.resetPreview();
       else
@@ -276,7 +327,8 @@ export class ToolOptions {
   }
 
   private resetPending(): void {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
+    clearTimeout(this.bokehTimer);
     this.brightness.set(0);
     this.contrast.set(0);
     this.saturation.set(0);
@@ -284,12 +336,16 @@ export class ToolOptions {
     this.straightenDeg.set(0);
     this.filterPreset.set('bw');
     this.filterIntensity.set(80);
+    this.duotoneA.set([26, 22, 55]);
+    this.duotoneB.set([245, 226, 168]);
     this.enhanceStrength.set(80);
     this.levelsBlack.set(0);
     this.levelsWhite.set(255);
     this.levelsGamma.set(100);
     this.perspV.set(0);
     this.perspH.set(0);
+    this.dehazeStrength.set(60);
+    this.portraitStrength.set(60);
     this.bokehStrength.set(50);
     this.bokehFocus.set(null);
     this.selMask.set(null);
@@ -316,8 +372,22 @@ export class ToolOptions {
     this.schedulePreview();
   }
 
+  hexToRgb(hex: string): [number, number, number] {
+    const n = parseInt(hex.replace('#', ''), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  rgbToHex([r, g, b]: [number, number, number]): string {
+    return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  setDuotone(which: 'a' | 'b', hex: string): void {
+    (which === 'a' ? this.duotoneA : this.duotoneB).set(this.hexToRgb(hex));
+    this.schedulePreview();
+  }
+
   async applyAdjust(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('adjust', {
       brightness: this.brightness(),
       contrast: this.contrast(),
@@ -329,12 +399,12 @@ export class ToolOptions {
   }
 
   async applySharpen(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('sharpen', this.amount());
   }
 
   async applySmooth(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('smooth', this.amount());
   }
 
@@ -351,7 +421,7 @@ export class ToolOptions {
   }
 
   async applyStraighten(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     const degrees = this.straightenDeg();
     if (degrees === 0) return;
     await this.session.apply('straighten', { degrees, crop: true });
@@ -359,20 +429,32 @@ export class ToolOptions {
   }
 
   async applyFilter(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('filter', {
       preset: this.filterPreset(),
       intensity: this.filterIntensity(),
+      colorA: this.duotoneA(),
+      colorB: this.duotoneB(),
     });
   }
 
   async applyEnhance(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('enhance', this.enhanceStrength());
   }
 
+  async applyDehaze(): Promise<void> {
+    this.previewSched.cancel();
+    await this.session.apply('dehaze', { strength: this.dehazeStrength() });
+  }
+
+  async applyPortrait(): Promise<void> {
+    this.previewSched.cancel();
+    await this.session.apply('portraitSmooth', { strength: this.portraitStrength() });
+  }
+
   async applyLevels(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     await this.session.apply('levels', this.levelsParams());
     this.levelsBlack.set(0);
     this.levelsWhite.set(255);
@@ -380,7 +462,7 @@ export class ToolOptions {
   }
 
   async applyPerspective(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    this.previewSched.cancel();
     if (this.perspV() === 0 && this.perspH() === 0) return;
     await this.session.apply('perspective', {
       vertical: this.perspV(),
@@ -406,9 +488,22 @@ export class ToolOptions {
     });
   }
 
+  /** Magic Erase: tap an object → SAM mask → grow → MI-GAN inpaint it away. */
+  private async runErase(point: SelectPoint): Promise<void> {
+    await this.runEngine(async () => {
+      const buf = this.session.current();
+      if (!buf) return;
+      const { smartSelect } = await import('../../../core/editing/engines/select-engine');
+      const mask = await smartSelect(buf, [point]);
+      const { dilateMask } = await import('../../../core/editing/engines/raster');
+      const grown = dilateMask(mask, buf.width, buf.height, 3);
+      await this.session.applyHeal(grown);
+    });
+  }
+
   scheduleBokehPreview(): void {
-    clearTimeout(this.previewTimer);
-    this.previewTimer = setTimeout(() => void this.runBokehPreview(), 150);
+    clearTimeout(this.bokehTimer);
+    this.bokehTimer = setTimeout(() => void this.runBokehPreview(), 150);
   }
 
   private async runBokehPreview(): Promise<void> {
@@ -434,7 +529,7 @@ export class ToolOptions {
   }
 
   async applyBokeh(): Promise<void> {
-    clearTimeout(this.previewTimer);
+    clearTimeout(this.bokehTimer);
     const focus = this.bokehFocus();
     const strength = this.bokehStrength();
     await this.runEngine(async () => {

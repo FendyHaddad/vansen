@@ -6,7 +6,7 @@
       [class.mode-active]="mode() === 'image'"
       (click)="setMode('image')"
     >
-      <ng-icon name="lucideImage" size="15"/>
+      <ng-icon name="lucideImage" size="13"/>
       Image
     </button>
     <button
@@ -17,7 +17,7 @@
       [attr.title]="videoLocked ? 'Video — coming with Pro' : null"
       (click)="setMode('video')"
     >
-      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="15"/>
+      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="13"/>
       Video
     </button>
   </div>

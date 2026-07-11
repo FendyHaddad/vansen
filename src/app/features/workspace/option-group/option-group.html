@@ -57,6 +57,11 @@
       </div>
     </ng-template>
   } @else {
-    <app-hint [text]="disabledReason()"><span class="og-na">Not available</span></app-hint>
+    <app-hint class="og-na-hint" [text]="disabledReason()">
+      <button type="button" class="og-trigger og-trigger-disabled" disabled>
+        <span class="og-trigger-label og-na-label">Not available</span>
+        <ng-icon name="lucideChevronDown" size="13" class="og-chevron" />
+      </button>
+    </app-hint>
   }
 </div>

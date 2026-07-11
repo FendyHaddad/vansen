@@ -137,7 +137,7 @@ export class CanvasViewport {
   /** Crosshair cursor for the click-to-pick tools. */
   readonly pickToolActive = computed(() => {
     const t = this.tool();
-    return t === 'bokeh' || t === 'select';
+    return t === 'bokeh' || t === 'select' || t === 'erase';
   });
 
   /** Clone-stamp sample point in image px; null until the user marks one. */
@@ -453,8 +453,8 @@ export class CanvasViewport {
       this.retouchLast = p;
       this.postRetouchDab(p);
     }
-    // Point-pick tools: bokeh focus, smart select. Tool options react.
-    if ((t === 'bokeh' || t === 'select') && e.button === 0) {
+    // Point-pick tools: bokeh focus, smart select, magic erase. Tool options react.
+    if ((t === 'bokeh' || t === 'select' || t === 'erase') && e.button === 0) {
       this.session.setPointPick(p);
     }
   }

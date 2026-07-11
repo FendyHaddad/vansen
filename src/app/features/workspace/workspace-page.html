@@ -44,20 +44,34 @@
         }
       </div>
       <div class="topbar-right">
-        <div class="search-box">
-          <ng-icon name="lucideSearch" size="14" />
-          <input
-            type="search"
-            placeholder="Search your library..."
-            [value]="searchTerm()"
-            (input)="searchTerm.set($any($event.target).value)"
-          />
-        </div>
+        @if (mode() === 'library' && studioActive()) {
+          <label class="upload-btn" [class.is-uploading]="uploading()">
+            @if (uploading()) {
+              <span class="btn-spinner"></span>
+              Uploading…
+            } @else {
+              <ng-icon name="lucideUpload" size="14" />
+              Upload to edit
+            }
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              class="upload-input"
+              [disabled]="uploading()"
+              (change)="onUploadPick($event)"
+            />
+          </label>
+        }
       </div>
     </header>
 
     @if (mode() === 'edit') {
       <div class="edit-toolbar">
+        <button type="button" class="et-btn et-labeled et-back" (click)="exitEdit()">
+          <ng-icon name="lucideArrowLeft" size="14" />
+          Back to library
+        </button>
+        <span class="et-sep"></span>
         <div class="et-group">
           <button
             type="button"
@@ -136,6 +150,12 @@
           </button>
         </div>
       }
+      @if (uploading()) {
+        <div class="upload-overlay">
+          <span class="upload-spinner"></span>
+          <p>Uploading your image…</p>
+        </div>
+      }
       @if (mode() === 'edit') {
         <app-canvas-viewport
           [tool]="panel().activeTool()"
@@ -154,8 +174,6 @@
           [pickMode]="pickingReference()"
           [samplePrompts]="samplePrompts"
           [search]="searchTerm()"
-          [canUpload]="studioActive()"
-          (uploaded)="onUpload($event)"
           (picked)="onReferencePicked($event)"
           (opened)="onOpened($event)"
           (download)="onDownload($event)"
@@ -163,6 +181,7 @@
           (variation)="onVariation($event)"
           (edit)="onEdit($event)"
           (retry)="onRetry($event)"
+          (deleted)="onDeleteMany($event)"
           (promptPicked)="usePrompt($event)"
         />
       }

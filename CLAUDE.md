@@ -56,6 +56,18 @@
   ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,
   fal FLUX-fill (mask as data URI) + BiRefNet, kill-switch rows in `models`.
   Expand = client pads canvas 25%/side + border mask. Video = Phase 4b, locked teaser.
+- Studio expansion (2026-07-11): 17 filter presets (new: fade/noir/matte/tealorange/
+  goldenhour/crossprocess/infrared/bleach/duotone/clarity; duotone takes colorA/colorB,
+  clarity precomputes blurred luminance), Dehaze (dark-channel prior, `ops/dehaze.ts`) +
+  Portrait Smooth (freq-separation, `ops/portrait-smooth.ts`) pure ops, Magic Erase
+  (`erase` tool: tap → SlimSAM → dilate 3px → MI-GAN heal, no new model). Perf: all
+  color/filter previews run on the ≤1100px proxy; slider input coalesced per frame via
+  `core/editing/preview-scheduler.ts` (bokeh keeps 150ms timer). Phase-4 engine ledger:
+  AI Sharpen = NAFNet deblur ONNX, MIT, 87.5MB, HF `opencv/deblurring_nafnet`
+  (dynamic HxW, RGB 0..1) — verified but NOT wired yet; Denoise (NAFNet-SIDD .pth MIT)
+  and Colorize (DDColor tiny, Apache) have NO license-clean hosted ONNX — need offline
+  export + self-hosting (see docs/superpowers/plans/2026-07-11-phase4-model-notes.md).
+  GFPGAN / CodeFormer / MODNet weights / face-parsing CelebA weights = banned (NC).
 
 ## Project docs
 - Product spec: `vansen.md`

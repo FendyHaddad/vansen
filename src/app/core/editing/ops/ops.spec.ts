@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PixelBuffer, clonePixels } from '../pixel-buffer';
 import { adjust } from './adjust';
 import { cloneStamp } from './clone';
+import { dehaze } from './dehaze';
 import { sharpen, smooth } from './convolve';
 import { crop, rotate90 } from './crop';
 import { enhance } from './enhance';
@@ -10,6 +11,7 @@ import { heal } from './heal';
 import { levels, lumaHistogram } from './levels';
 import { liquify } from './liquify';
 import { perspective } from './perspective';
+import { portraitSmooth } from './portrait-smooth';
 import { retouch } from './retouch';
 import { flip, rotate90ccw, straighten } from './transform';
 import { dilateMask } from '../engines/raster';
@@ -210,6 +212,144 @@ describe('filter', () => {
     const a = filter(src, { preset: 'grain', intensity: 100 });
     const b = filter(src, { preset: 'grain', intensity: 100 });
     expect(Array.from(a.data)).toEqual(Array.from(b.data));
+  });
+});
+
+describe('dehaze', () => {
+  it('strength 0 is identity', () => {
+    const hazy = solid(4, 4, [180, 180, 180, 255]);
+    const out = dehaze(hazy, { strength: 0 });
+    expect(Array.from(out.data)).toEqual(Array.from(hazy.data));
+  });
+
+  it('increases contrast (widens the value range) at full strength', () => {
+    const graded: PixelBuffer = {
+      width: 4,
+      height: 4,
+      data: new Uint8ClampedArray(
+        Array.from({ length: 64 }, (_, i) => (i % 4 === 3 ? 255 : 120 + ((i >> 2) % 16) * 4)),
+      ),
+    };
+    const out = dehaze(graded, { strength: 100 });
+    const range = (d: ArrayLike<number>) => {
+      let lo = 255;
+      let hi = 0;
+      for (let i = 0; i < d.length; i++) {
+        if (i % 4 !== 3) {
+          lo = Math.min(lo, d[i]);
+          hi = Math.max(hi, d[i]);
+        }
+      }
+      return hi - lo;
+    };
+    expect(range(out.data)).toBeGreaterThanOrEqual(range(graded.data));
+    expect(out.data[3]).toBe(255);
+  });
+});
+
+describe('portraitSmooth', () => {
+  it('strength 0 is identity', () => {
+    const buf = solid(8, 8, [150, 150, 150, 255]);
+    const out = portraitSmooth(buf, { strength: 0 });
+    expect(Array.from(out.data)).toEqual(Array.from(buf.data));
+  });
+
+  it('reduces high-frequency variance on skin-tone noise, keeps alpha', () => {
+    // Skin-ish base with per-pixel speckle.
+    const w = 16;
+    const h = 16;
+    const data = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      const q = i * 4;
+      const n = i % 2 ? 12 : -12;
+      data[q] = 200 + n;
+      data[q + 1] = 150 + n;
+      data[q + 2] = 120 + n;
+      data[q + 3] = 255;
+    }
+    const buf: PixelBuffer = { width: w, height: h, data };
+    const out = portraitSmooth(buf, { strength: 100 });
+    const variance = (d: ArrayLike<number>) => {
+      let s = 0;
+      let s2 = 0;
+      let count = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        s += d[i];
+        s2 += d[i] * d[i];
+        count++;
+      }
+      return s2 / count - (s / count) ** 2;
+    };
+    expect(variance(out.data)).toBeLessThan(variance(buf.data));
+    expect(out.data[3]).toBe(255);
+  });
+});
+
+describe('filter — new presets', () => {
+  const px = (r: number, g: number, b: number): PixelBuffer => ({
+    width: 1,
+    height: 1,
+    data: new Uint8ClampedArray([r, g, b, 255]),
+  });
+  const presets = [
+    'fade',
+    'noir',
+    'matte',
+    'tealorange',
+    'goldenhour',
+    'crossprocess',
+    'infrared',
+    'bleach',
+    'duotone',
+    'clarity',
+  ] as const;
+
+  it('intensity 0 is identity for every new preset', () => {
+    for (const preset of presets) {
+      const out = filter(px(120, 90, 60), { preset, intensity: 0 });
+      expect([out.data[0], out.data[1], out.data[2]]).toEqual([120, 90, 60]);
+    }
+  });
+
+  it('keeps alpha untouched and stays in 0..255', () => {
+    for (const preset of presets) {
+      const out = filter(px(200, 40, 10), { preset, intensity: 100 });
+      expect(out.data[3]).toBe(255);
+      for (let c = 0; c < 3; c++) expect(out.data[c]).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('duotone maps luminance between colorA (shadow) and colorB (highlight)', () => {
+    const params = {
+      intensity: 100,
+      colorA: [10, 20, 30] as [number, number, number],
+      colorB: [240, 230, 220] as [number, number, number],
+    };
+    const black = filter(px(0, 0, 0), { preset: 'duotone', ...params });
+    const white = filter(px(255, 255, 255), { preset: 'duotone', ...params });
+    expect([black.data[0], black.data[1], black.data[2]]).toEqual([10, 20, 30]);
+    expect([white.data[0], white.data[1], white.data[2]]).toEqual([240, 230, 220]);
+  });
+
+  it('noir at full intensity produces gray', () => {
+    const out = filter(px(200, 50, 100), { preset: 'noir', intensity: 100 });
+    expect(out.data[0]).toBe(out.data[1]);
+    expect(out.data[1]).toBe(out.data[2]);
+  });
+
+  it('clarity boosts local contrast on an edge', () => {
+    // Left half dark, right half bright — clarity must push them apart.
+    const w = 12;
+    const data = new Uint8ClampedArray(w * w * 4);
+    for (let i = 0; i < w * w; i++) {
+      const v = i % w < w / 2 ? 80 : 180;
+      data.set([v, v, v, 255], i * 4);
+    }
+    const out = filter({ width: w, height: w, data }, { preset: 'clarity', intensity: 100 });
+    const mid = (Math.floor(w / 2) * w + Math.floor(w / 2)) * 4; // bright side of the seam
+    const midLeft = (Math.floor(w / 2) * w + Math.floor(w / 2) - 1) * 4; // dark side
+    expect(out.data[mid]).toBeGreaterThanOrEqual(180);
+    expect(out.data[midLeft]).toBeLessThanOrEqual(80);
   });
 });
 
