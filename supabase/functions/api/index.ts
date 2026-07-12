@@ -172,15 +172,15 @@ const round2 = (v: number) => Math.round(v * 100) / 100;
 
 // ---------- Backoffice admin (Phase C: read-only) ----------
 // The backoffice SPA calls these with the admin's own Vansen session token;
-// membership in public.admins is the only gate (federation design §5.1).
+// the email allowlist below is the only gate (federation design §5.1 —
+// kept in code rather than a DB table so the prod schema stays untouched).
+
+const ADMIN_EMAILS = new Set(['fendyhaddad@vankode.com']);
 
 app.use('/admin/*', async (c, next) => {
-  const { data } = await admin
-    .from('admins')
-    .select('user_id')
-    .eq('user_id', c.get('userId'))
-    .maybeSingle();
-  if (!data) return fail(c, 403, 'forbidden', 'Admin access required');
+  if (!ADMIN_EMAILS.has(c.get('email'))) {
+    return fail(c, 403, 'forbidden', 'Admin access required');
+  }
   await next();
 });
 
