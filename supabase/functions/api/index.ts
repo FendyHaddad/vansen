@@ -102,7 +102,7 @@ const app = new Hono<Vars>().basePath('/api');
 app.use(
   '*',
   cors({
-    origin: ['http://localhost:4200'],
+    origin: ['http://localhost:4200', 'http://localhost:4300'], // 4300 = Vankode backoffice
     allowHeaders: ['authorization', 'content-type'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   }),
@@ -169,6 +169,150 @@ app.use('*', async (c, next) => {
 });
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
+
+// ---------- Backoffice admin (Phase C: read-only) ----------
+// The backoffice SPA calls these with the admin's own Vansen session token;
+// membership in public.admins is the only gate (federation design §5.1).
+
+app.use('/admin/*', async (c, next) => {
+  const { data } = await admin
+    .from('admins')
+    .select('user_id')
+    .eq('user_id', c.get('userId'))
+    .maybeSingle();
+  if (!data) return fail(c, 403, 'forbidden', 'Admin access required');
+  await next();
+});
+
+app.get('/admin/kpis', async (c) => {
+  const { data, error } = await admin.rpc('backoffice_summary');
+  if (error) return fail(c, 400, 'query_failed', error.message);
+  return c.json(data);
+});
+
+app.get('/admin/users', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().toLowerCase();
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+  if (error) return fail(c, 400, 'query_failed', error.message);
+  const matched = (q
+    ? data.users.filter((u) => (u.email ?? '').toLowerCase().includes(q) || u.id === q)
+    : data.users
+  ).slice(0, 50);
+  const ids = matched.map((u) => u.id);
+  const [{ data: profiles }, { data: subs }] = await Promise.all([
+    admin.from('profiles').select('id,display_name,strikes,created_at').in('id', ids),
+    admin.from('subscriptions').select('user_id,plan,status').in('user_id', ids),
+  ]);
+  const profById = new Map((profiles ?? []).map((p) => [p.id as string, p]));
+  const subById = new Map((subs ?? []).map((s) => [s.user_id as string, s]));
+  return c.json({
+    users: matched.map((u) => {
+      const p = profById.get(u.id);
+      const s = subById.get(u.id);
+      return {
+        id: u.id,
+        email: u.email ?? '',
+        displayName: p?.display_name ?? null,
+        strikes: p?.strikes ?? 0,
+        plan: s?.plan ?? null,
+        planStatus: s?.status ?? null,
+        createdAt: u.created_at,
+        lastSignInAt: u.last_sign_in_at ?? null,
+      };
+    }),
+  });
+});
+
+app.get('/admin/users/:id', async (c) => {
+  const id = c.req.param('id');
+  const { data: authUser, error } = await admin.auth.admin.getUserById(id);
+  if (error || !authUser?.user) return fail(c, 404, 'not_found', 'User not found');
+  const [profileRes, subRes, balanceUsd, genCountRes, modsRes] = await Promise.all([
+    admin
+      .from('profiles')
+      .select('display_name,strikes,created_at,stripe_customer_id')
+      .eq('id', id)
+      .maybeSingle(),
+    admin
+      .from('subscriptions')
+      .select('plan,status,current_period_end')
+      .eq('user_id', id)
+      .maybeSingle(),
+    balanceOf(id),
+    admin.from('generations').select('id', { count: 'exact', head: true }).eq('user_id', id),
+    admin
+      .from('moderation_events')
+      .select('id,source,categories,resolution,created_at')
+      .eq('user_id', id)
+      .order('created_at', { ascending: false })
+      .limit(20),
+  ]);
+  const profile = profileRes.data;
+  const sub = subRes.data;
+  return c.json({
+    id,
+    email: authUser.user.email ?? '',
+    createdAt: authUser.user.created_at,
+    lastSignInAt: authUser.user.last_sign_in_at ?? null,
+    displayName: profile?.display_name ?? null,
+    strikes: profile?.strikes ?? 0,
+    suspended: (profile?.strikes ?? 0) >= SUSPEND_STRIKES,
+    stripeCustomerId: profile?.stripe_customer_id ?? null,
+    balanceUsd,
+    subscription: sub
+      ? { plan: sub.plan, status: sub.status, currentPeriodEnd: sub.current_period_end }
+      : null,
+    generationCount: genCountRes.count ?? 0,
+    moderation: modsRes.data ?? [],
+  });
+});
+
+app.get('/admin/users/:id/ledger', async (c) => {
+  const { data, error } = await admin
+    .from('ledger_entries')
+    .select('*')
+    .eq('user_id', c.req.param('id'))
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) return fail(c, 400, 'query_failed', error.message);
+  return c.json({ entries: (data ?? []).map(toLedgerDto) });
+});
+
+app.get('/admin/users/:id/generations', async (c) => {
+  const { data, error } = await admin
+    .from('generations')
+    .select('id,kind,family_name,op,prompt,price_usd,status,created_at')
+    .eq('user_id', c.req.param('id'))
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) return fail(c, 400, 'query_failed', error.message);
+  return c.json({
+    items: (data ?? []).map((g) => ({
+      id: g.id,
+      kind: g.kind,
+      familyName: g.family_name,
+      op: g.op,
+      prompt: g.prompt,
+      priceUsd: Number(g.price_usd),
+      status: g.status,
+      createdAt: g.created_at,
+    })),
+  });
+});
+
+app.get('/admin/errors', async (c) => {
+  const code = (c.req.query('code') ?? '').trim();
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 50) || 50, 1), 200);
+  let query = admin
+    .from('app_errors')
+    .select('id,created_at,source,route,method,code,message,stack,user_id,request_id')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (code) query = query.eq('code', code);
+  const { data, error } = await query;
+  if (error) return fail(c, 400, 'query_failed', error.message);
+  return c.json({ errors: data ?? [] });
+});
 
 /** Warm-isolate memo so list reloads don't re-sign every media path, and the
  * URL stays stable across requests (lets browser HTTP caching work too). */
