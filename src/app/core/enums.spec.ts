@@ -18,7 +18,7 @@ describe('domain enums', () => {
     );
     expect(Object.values(GenerationStatus).sort()).toEqual(['done', 'failed', 'pending'].sort());
     expect(Object.values(MediaKind).sort()).toEqual(['image', 'video'].sort());
-    expect(Object.values(SubscriptionPlan).sort()).toEqual(['studio', 'studio_pro'].sort());
+    expect(Object.values(SubscriptionPlan).sort()).toEqual(['owner', 'pro', 'studio'].sort());
     expect(Object.values(SubscriptionStatus).sort()).toEqual(
       ['active', 'canceled', 'expired'].sort(),
     );

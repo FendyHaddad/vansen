@@ -15,9 +15,13 @@
       </span>
       <span class="bar-email">{{ email() }}</span>
     </span>
-    <span class="bar-balance" [class.bar-balance-low]="balanceUsd() < 1">
-      ${{ balanceUsd() | number: '1.2-2' }}
-    </span>
+    @if (isOwner()) {
+      <span class="bar-balance">Unlimited</span>
+    } @else {
+      <span class="bar-balance" [class.bar-balance-low]="balanceUsd() < 1">
+        ${{ balanceUsd() | number: '1.2-2' }}
+      </span>
+    }
   </button>
 } @else {
   <button
@@ -35,7 +39,11 @@
   <div hlmDropdownMenu class="profile-dropdown">
     <div class="menu-head">
       <span class="menu-email">{{ email() }}</span>
-      <span class="menu-balance">${{ balanceUsd() | number: '1.2-2' }}</span>
+      @if (isOwner()) {
+        <span class="menu-balance">Unlimited</span>
+      } @else {
+        <span class="menu-balance">${{ balanceUsd() | number: '1.2-2' }}</span>
+      }
     </div>
     <hlm-dropdown-menu-separator />
     <button hlmDropdownMenuItem (triggered)="topUp.emit()">

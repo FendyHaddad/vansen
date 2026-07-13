@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../api/api-service';
 import { ProfileDto, ProfileResponse, SubscriptionDto } from '../api/dtos';
-import { SubscriptionStatus } from '../enums';
+import { SubscriptionPlan, SubscriptionStatus } from '../enums';
 import { LedgerService } from '../ledger/ledger-service';
 import { PreferencesService } from '../preferences/preferences-service';
 import { currentUid, readCache, writeCache } from '../api/local-cache';
@@ -25,6 +25,21 @@ export class ProfileStore {
     const sub = this.subscriptionSig();
     if (!sub) return false;
     // 'canceled' still runs until the paid period ends
+    if (sub.status === SubscriptionStatus.Expired) return false;
+    return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
+  });
+
+  /** Hidden internal tier — unlimited credits, never surfaced as a plan name. */
+  readonly isOwner = computed(() => {
+    const sub = this.subscriptionSig();
+    return !!sub && sub.plan === SubscriptionPlan.Owner && sub.status !== SubscriptionStatus.Expired;
+  });
+
+  /** Pro benefits: pro or owner plan, not expired past its paid period. */
+  readonly proActive = computed(() => {
+    const sub = this.subscriptionSig();
+    if (!sub) return false;
+    if (sub.plan !== SubscriptionPlan.Pro && sub.plan !== SubscriptionPlan.Owner) return false;
     if (sub.status === SubscriptionStatus.Expired) return false;
     return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
   });

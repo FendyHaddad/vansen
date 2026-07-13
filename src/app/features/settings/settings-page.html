@@ -8,7 +8,11 @@
       <span class="header-title">Settings</span>
     </div>
     <div class="ws-header-right">
-      <span class="balance-chip">${{ balanceUsd() | number: '1.2-2' }}</span>
+      @if (isOwner()) {
+        <span class="balance-chip">Unlimited</span>
+      } @else {
+        <span class="balance-chip">${{ balanceUsd() | number: '1.2-2' }}</span>
+      }
       <app-profile-menu (topUp)="topUp()" (signOut)="signOut()" />
     </div>
   </header>

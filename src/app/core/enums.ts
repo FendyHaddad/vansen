@@ -39,7 +39,8 @@ export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 
 export const SubscriptionPlan = {
   Studio: 'studio',
-  StudioPro: 'studio_pro',
+  Pro: 'pro',
+  Owner: 'owner',
 } as const;
 export type SubscriptionPlan = (typeof SubscriptionPlan)[keyof typeof SubscriptionPlan];
 

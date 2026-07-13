@@ -68,9 +68,8 @@
             <span>{{ tool.label }}</span>
           </button>
         }
-        <!-- Pro tools sit in the same grid — no divider. When Studio goes live
-             the lock pass disables these for non-Pro subscribers with a lock
-             icon; unlocked for everyone while testing. -->
+        <!-- Pro tools sit in the same grid — no divider. Disabled with a lock
+             icon for anyone below the pro/owner tier. -->
         @for (tool of proTools; track tool.id) {
           <button
             type="button"
@@ -102,21 +101,28 @@
     </section>
 
     <section class="tool-section ai-section">
-      <h3 class="section-title">AI Tools <span class="ai-note">· uses balance</span></h3>
+      <h3 class="section-title">
+        AI Tools
+        @if (proLocked()) {
+          <span class="ai-note">· Pro</span>
+        } @else {
+          <span class="ai-note">· uses balance</span>
+        }
+      </h3>
       @for (tool of aiTools; track tool.id) {
         <div class="ai-tool">
           <button
             type="button"
             class="ai-run"
-            [disabled]="!editing() || !affordable(tool.userPriceUsd)"
-            [title]="tool.blurb"
+            [disabled]="!editing() || proLocked() || !affordable(tool.userPriceUsd)"
+            [title]="proLocked() ? 'Pro tool — upgrade to unlock' : tool.blurb"
             (click)="runAiTool(tool.id)"
           >
-            <ng-icon name="lucideSparkles" size="14" />
+            <ng-icon [name]="proLocked() ? 'lucideLock' : 'lucideSparkles'" size="14" />
             <span>{{ tool.name }}</span>
             <span class="price-chip">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
           </button>
-          @if (tool.needsPrompt && editing()) {
+          @if (tool.needsPrompt && editing() && !proLocked()) {
             <input
               class="fill-prompt"
               type="text"
@@ -127,7 +133,7 @@
           }
         </div>
       }
-      @if (editing() && balanceUsd() < 0.05) {
+      @if (editing() && !proLocked() && balanceUsd() < 0.05) {
         <p class="ai-note">Balance too low — top up to use AI tools.</p>
       }
     </section>

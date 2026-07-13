@@ -11,29 +11,34 @@
   <div class="card-row">
     <div class="panel balance-panel">
       <span class="eyebrow">Generation balance</span>
-      <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
-      <p class="muted small">
-        @if (needsStudio()) {
-          First purchase includes your first month of Studio (+<span class="num">$5</span>).
-        } @else {
-          Never expires while Studio is active.
+      @if (isOwner()) {
+        <span class="balance-big">Unlimited</span>
+        <p class="muted small">Usage is tracked in Transactions below.</p>
+      } @else {
+        <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
+        <p class="muted small">
+          @if (needsStudio()) {
+            First purchase includes your first month of Studio (+<span class="num">$5</span>).
+          } @else {
+            Never expires while Studio is active.
+          }
+        </p>
+        <div class="topup-row">
+          @for (credits of presets; track credits) {
+            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="topUp(credits)">
+              <span class="num">+${{ credits }}</span>
+              @if (needsStudio()) {
+                <span class="due-hint">due <span class="num">${{ dueFor(credits) }}</span></span>
+              }
+            </button>
+          }
+        </div>
+        <button type="button" class="reconcile-link" [disabled]="busy()" (click)="reconcile()">
+          Didn’t receive your credits?
+        </button>
+        @if (reconcileResult(); as result) {
+          <p class="muted small">{{ result }}</p>
         }
-      </p>
-      <div class="topup-row">
-        @for (credits of presets; track credits) {
-          <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="topUp(credits)">
-            <span class="num">+${{ credits }}</span>
-            @if (needsStudio()) {
-              <span class="due-hint">due <span class="num">${{ dueFor(credits) }}</span></span>
-            }
-          </button>
-        }
-      </div>
-      <button type="button" class="reconcile-link" [disabled]="busy()" (click)="reconcile()">
-        Didn’t receive your credits?
-      </button>
-      @if (reconcileResult(); as result) {
-        <p class="muted small">{{ result }}</p>
       }
     </div>
 

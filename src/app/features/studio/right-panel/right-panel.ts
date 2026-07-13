@@ -57,10 +57,11 @@ const LOCAL_TOOLS: LocalToolDef[] = [
   { id: 'sharpen', label: 'Sharpen', icon: 'lucideWand' },
   { id: 'smooth', label: 'Smooth', icon: 'lucideWand' },
   { id: 'heal', label: 'Spot Heal', icon: 'lucideBrush' },
+  { id: 'dehaze', label: 'Dehaze', icon: 'lucideCloudFog' },
+  { id: 'portraitsmooth', label: 'Portrait Smooth', icon: 'lucideSmile' },
 ];
 
-/** Pro-tier locals — unlocked for everyone while they're being test-driven;
- * the lock pass happens once they graduate. */
+/** Pro-tier locals — pro/owner subscribers only (see `proLocked`). */
 const PRO_TOOLS: LocalToolDef[] = [
   { id: 'select', label: 'Ai Select', icon: 'lucideMousePointerClick' },
   { id: 'upscale', label: 'Ai Upscale', icon: 'lucideMaximize2' },
@@ -73,8 +74,6 @@ const PRO_TOOLS: LocalToolDef[] = [
   { id: 'perspective', label: 'Perspective', icon: 'lucideMove3d' },
   { id: 'liquify', label: 'Liquify', icon: 'lucideScan' },
   { id: 'erase', label: 'Magic Erase', icon: 'lucideEraser' },
-  { id: 'dehaze', label: 'Dehaze', icon: 'lucideCloudFog' },
-  { id: 'portraitsmooth', label: 'Portrait Smooth', icon: 'lucideSmile' },
 ];
 
 interface ExportFormat {
@@ -174,10 +173,8 @@ export class RightPanel {
    * not flash the "subscribe" overlay at subscribed users. */
   readonly locked = computed(() => this.profileStore.loaded() && !this.studioActive());
 
-  /** Pro tools are unlocked for everyone while testing. When Studio goes live
-   * this flips true for non-Pro subscribers so the tiles disable + show a lock;
-   * flip to a profile-driven check at that point. */
-  readonly proLocked = signal(false);
+  /** Pro tools lock: pro/owner subscribers only. Waits for /profile like `locked`. */
+  readonly proLocked = computed(() => this.profileStore.loaded() && !this.profileStore.proActive());
 
   selectTool(id: StudioTool): void {
     this.activeTool.set(this.activeTool() === id ? null : id);
@@ -202,6 +199,7 @@ export class RightPanel {
   }
 
   runAiTool(toolId: string): void {
+    if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === toolId);
     if (!tool || !this.affordable(tool.userPriceUsd)) return;
     if (tool.needsPrompt && !this.fillPrompt().trim()) return;
@@ -210,6 +208,7 @@ export class RightPanel {
 
   /** AI edit scoped to an Ai Select mask — priced like the mask-painted flow. */
   onAiSelection(req: { toolId: string; prompt: string; maskPngBase64: string }): void {
+    if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === req.toolId);
     if (!tool || !this.affordable(tool.userPriceUsd)) return;
     this.aiToolRequested.emit(req);

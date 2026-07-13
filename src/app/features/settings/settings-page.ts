@@ -12,6 +12,7 @@ import {
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { BillingService } from '../../core/billing/billing-service';
+import { ProfileStore } from '../../core/profile/profile-store';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { ProfileTab } from './profile-tab/profile-tab';
 import { BillingTab } from './billing-tab/billing-tab';
@@ -50,8 +51,10 @@ export class SettingsPage {
   private readonly ledger = inject(LedgerService);
   private readonly billing = inject(BillingService);
   private readonly router = inject(Router);
+  private readonly profileStore = inject(ProfileStore);
 
   readonly balanceUsd = this.ledger.balanceUsd;
+  readonly isOwner = this.profileStore.isOwner;
 
   readonly active = signal<SettingsTab>('profile');
   readonly tabs: { id: SettingsTab; label: string; icon: string; hint: string }[] = [

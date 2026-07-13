@@ -607,6 +607,14 @@ app.post('/generations', async (c) => {
 
 app.post('/billing/checkout', async (c) => {
   const userId = c.get('userId');
+  const { data: ownSub } = await admin
+    .from('subscriptions')
+    .select('plan, status')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (ownSub?.plan === 'owner' && ownSub.status === 'active') {
+    return fail(c, 400, 'owner_plan', 'Owner accounts have unlimited credits');
+  }
   const body = await c.req.json().catch(() => ({}));
   const studioOnly = body.studioOnly === true;
   const creditsUsd = Number(body.creditsUsd);

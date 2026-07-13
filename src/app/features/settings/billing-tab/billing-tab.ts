@@ -37,6 +37,7 @@ export class BillingTab {
   readonly balanceUsd = this.ledger.balanceUsd;
   readonly entries = this.ledger.entries;
   readonly studioActive = this.profileStore.studioActive;
+  readonly isOwner = this.profileStore.isOwner;
   readonly profileLoaded = this.profileStore.loaded;
   readonly subscription = this.profileStore.subscription;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
