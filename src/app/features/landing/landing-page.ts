@@ -5,7 +5,6 @@ import {
   afterNextRender,
   inject,
 } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -26,22 +25,11 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
-import {
-  EDIT_TOOLS,
-  MODEL_FAMILIES,
-  ModelFamily,
-  defaultSettings,
-  userPriceUsd,
-} from '../../core/catalog/model-families';
+import { MODEL_FAMILIES, ModelFamily } from '../../core/catalog/model-families';
 
 interface ProviderLogo {
   name: string;
   logoUrl: string;
-}
-
-interface FamilyCard {
-  family: ModelFamily;
-  fromPrice: number;
 }
 
 interface WorkflowStep {
@@ -61,7 +49,7 @@ interface StudioPillar {
   templateUrl: './landing-page.html',
   styleUrl: './landing-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter],
+  imports: [RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter],
   providers: [
     provideIcons({
       lucideArrowRight,
@@ -102,13 +90,9 @@ export class LandingPage {
     'portrait in golden hour, 85mm, shallow depth of field',
   ];
 
-  readonly imageFamilies: FamilyCard[] = MODEL_FAMILIES.filter((f) => f.kind === 'image').map(
-    (family) => ({ family, fromPrice: userPriceUsd(family, defaultSettings(family)) }),
-  );
+  readonly imageFamilies: ModelFamily[] = MODEL_FAMILIES.filter((f) => f.kind === 'image');
 
   readonly videoFamilies: ModelFamily[] = MODEL_FAMILIES.filter((f) => f.kind === 'video');
-
-  readonly editTools = EDIT_TOOLS;
 
   /** On-canvas tools included with Studio — mirrors the workspace right panel. */
   readonly studioToolChips = [
@@ -142,7 +126,7 @@ export class LandingPage {
     {
       icon: 'lucideEraser',
       title: 'Generative edits, priced per use',
-      body: 'Mask anything and let a frontier model repaint it — remove objects, fill with a prompt, expand the canvas, drop the background. Flat prices from $0.05, shown before you run.',
+      body: 'Mask anything and let a frontier model repaint it — remove objects, fill with a prompt, expand the canvas, drop the background. Flat per-use prices, shown before you run.',
     },
     {
       icon: 'lucideLayers',
@@ -154,8 +138,8 @@ export class LandingPage {
   readonly workflow: WorkflowStep[] = [
     {
       step: '01',
-      title: 'Top up once',
-      body: 'Start at $15 — $10 of balance plus your first month of Studio. No subscription for generating, ever.',
+      title: 'Pick your plan',
+      body: 'Studio $15/mo (1,500 credits) or Pro $30/mo (3,750 credits + video). Switch or add credits any time.',
     },
     {
       step: '02',

@@ -7,6 +7,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -33,6 +34,11 @@ import { GenerationOp } from '../../core/enums';
 import { EditSession } from '../../core/editing/edit-session';
 import { editToolById } from '../../core/catalog/model-families';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
+import { NotificationBell } from '../../shared/notification-bell/notification-bell';
+import { NotificationToast } from '../../shared/notification-toast/notification-toast';
+import { NotificationStore } from '../../core/notifications/notification-store';
+import { TourService } from '../../core/tour/tour-service';
+import { TourOverlay } from '../../shared/tour-overlay/tour-overlay';
 import { LeftPanel, GenerateRequest } from './left-panel/left-panel';
 import { LibraryGrid } from './library-grid/library-grid';
 import { DetailOverlay } from './detail-overlay/detail-overlay';
@@ -51,9 +57,13 @@ const SAMPLE_PROMPTS = [
   styleUrl: './workspace-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    DecimalPipe,
     RouterLink,
     NgIcon,
     ProfileMenu,
+    NotificationBell,
+    NotificationToast,
+    TourOverlay,
     LeftPanel,
     LibraryGrid,
     DetailOverlay,
@@ -82,6 +92,8 @@ export class WorkspacePage {
   private readonly poller = inject(JobPoller);
   private readonly availability = inject(ModelAvailability);
   private readonly mediaCache = inject(MediaCache);
+  private readonly notifications = inject(NotificationStore);
+  readonly tour = inject(TourService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
@@ -98,7 +110,8 @@ export class WorkspacePage {
 
   readonly userEmail = this.auth.userEmail;
   readonly displayName = this.profileStore.displayName;
-  readonly balanceUsd = this.ledger.balanceUsd;
+  readonly totalCredits = this.ledger.totalCredits;
+  readonly isOwner = this.profileStore.isOwner;
   readonly studioActive = this.profileStore.studioActive;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
   readonly generations = this.store.items;
@@ -137,6 +150,7 @@ export class WorkspacePage {
       this.handleCheckoutReturn();
       this.poller.watch();
       if (editParam) void this.enterEdit(editParam);
+      else this.maybeStartTour();
     });
 
     // When an AI edit on the open session's chain completes, jump to the result.
@@ -174,14 +188,14 @@ export class WorkspacePage {
       return;
     }
     if (result !== 'success') return;
-    const before = this.balanceUsd();
+    const before = this.totalCredits();
     let attempts = 0;
     const poll = setInterval(async () => {
       attempts += 1;
       await this.profileStore.load();
-      if (this.balanceUsd() !== before) {
+      if (this.totalCredits() !== before) {
         clearInterval(poll);
-        this.notice.set(`Payment received — balance $${this.balanceUsd().toFixed(2)}.`);
+        this.notice.set(`Payment received — ${this.totalCredits().toLocaleString()} credits.`);
       } else if (attempts >= 6) {
         clearInterval(poll);
         this.notice.set(
@@ -201,8 +215,16 @@ export class WorkspacePage {
 
   private showError(e: unknown, fallback: string): void {
     if (e instanceof ApiError) {
-      if (e.code === 'insufficient_balance') {
-        this.notice.set('Balance too low — top up to continue.');
+      if (e.code === 'insufficient_credits') {
+        this.notice.set('Not enough credits — add a pack from Billing to continue.');
+        return;
+      }
+      if (e.code === 'subscription_required') {
+        this.notice.set('An active subscription is required — pick a plan to start creating.');
+        return;
+      }
+      if (e.code === 'pro_required') {
+        this.notice.set('That model needs the Pro plan — upgrade from Billing.');
         return;
       }
       if (e.code === 'account_suspended') {
@@ -213,6 +235,11 @@ export class WorkspacePage {
         this.notice.set(
           'This request violates our content policy and was blocked. Two violations suspend your account. If this was a mistake, contact support to appeal.',
         );
+        this.notifications.add({
+          kind: 'blocked',
+          title: 'Blocked by moderation',
+          detail: 'The request violated the content policy — nothing was charged.',
+        });
         return;
       }
       if (e.code === 'model_disabled') {
@@ -226,10 +253,11 @@ export class WorkspacePage {
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
+    // confirmOverUsd is a USD threshold; 100 credits = $1 of Studio retail value.
     const threshold = this.prefsService.prefs().confirmOverUsd;
     if (
-      req.priceUsd > threshold &&
-      !confirm(`This generation costs $${req.priceUsd.toFixed(2)}. Continue?`)
+      req.priceCredits / 100 > threshold &&
+      !confirm(`This generation costs ${req.priceCredits} credits. Continue?`)
     ) {
       return;
     }
@@ -518,20 +546,32 @@ export class WorkspacePage {
     this.rail().updatePrompt(value);
   }
 
-  async topUp(): Promise<void> {
+  /** Profile-menu "Buy credits" → Billing tab (packs live there). */
+  topUp(): void {
+    void this.router.navigate(['/app/settings'], { queryParams: { tab: 'billing' } });
+  }
+
+  /** Grace banner / teaser CTA — restart a Studio subscription. */
+  async reactivateStudio(): Promise<void> {
     try {
-      await this.billing.checkout(20);
+      await this.billing.subscribe('studio');
     } catch (e) {
       this.showError(e, 'Could not start checkout');
     }
   }
 
-  async reactivateStudio(): Promise<void> {
-    try {
-      await this.billing.reactivateStudio();
-    } catch (e) {
-      this.showError(e, 'Could not start checkout');
-    }
+  /** First-load onboarding: only when the server-synced pref says unseen. */
+  private maybeStartTour(): void {
+    if (this.prefsService.prefs().tourSeen || this.suspended()) return;
+    // Let the first frame paint so data-tour targets have settled rects.
+    requestAnimationFrame(() => requestAnimationFrame(() => this.tour.start()));
+  }
+
+  /** Replay from the profile menu. Tour targets only exist in library mode. */
+  onStartTour(): void {
+    if (this.mode() === 'edit') this.exitEdit();
+    if (this.mode() !== 'library') return; // user kept unsaved edits
+    this.tour.start();
   }
 
   async signOut(): Promise<void> {
@@ -539,6 +579,7 @@ export class WorkspacePage {
     this.ledger.reset();
     this.store.reset();
     this.profileStore.reset();
+    this.notifications.reset();
     this.editSession.close();
     // Wipe cached snapshots and media so nothing lingers on shared machines.
     clearAllCaches();

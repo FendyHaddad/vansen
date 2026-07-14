@@ -711,7 +711,7 @@
           stays untouched.
         </p>
         <button type="button" class="apply-btn" [disabled]="engineBusy()" (click)="selectAiRemove()">
-          AI Remove · ${{ aiRemovePrice }}
+          AI Remove · {{ aiRemovePrice }} cr
         </button>
         <input
           class="fill-prompt"
@@ -726,7 +726,7 @@
           [disabled]="engineBusy() || !selPrompt().trim()"
           (click)="selectAiFill()"
         >
-          AI Fill · ${{ aiFillPrice }}
+          AI Fill · {{ aiFillPrice }} cr
         </button>
       }
     </div>

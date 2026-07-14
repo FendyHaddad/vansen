@@ -1,0 +1,52 @@
+<button
+  type="button"
+  class="bell-btn"
+  [hlmDropdownMenuTrigger]="menu"
+  align="end"
+  aria-label="Notifications"
+>
+  <ng-icon name="lucideBell" size="16" />
+  @if (store.unreadCount() > 0) {
+    <span class="bell-badge">{{ badge() }}</span>
+  }
+</button>
+
+<ng-template #menu>
+  <div hlmDropdownMenu class="notif-dropdown">
+    <div class="notif-head">
+      <span class="notif-head-title">Notifications</span>
+      @if (store.unreadCount() > 0) {
+        <button type="button" class="notif-mark-all" (click)="store.markAllRead()">
+          Mark all read
+        </button>
+      }
+    </div>
+    <hlm-dropdown-menu-separator />
+    <div class="notif-list">
+      @for (n of store.list(); track n.id) {
+        <button
+          type="button"
+          class="notif-row"
+          [class.notif-unread]="!n.read"
+          (click)="onRow(n)"
+        >
+          <ng-icon
+            [name]="kindIcon(n)"
+            size="15"
+            class="notif-icon"
+            [class.notif-icon-blocked]="n.kind === 'blocked'"
+          />
+          <span class="notif-text">
+            <span class="notif-title">{{ n.title }}</span>
+            @if (n.detail) {
+              <span class="notif-detail">{{ n.detail }}</span>
+            }
+            <span class="notif-time">{{ timeAgo(n.at) }}</span>
+          </span>
+        </button>
+      } @empty {
+        <p class="notif-empty">Nothing yet.</p>
+      }
+    </div>
+  </div>
+</ng-template>

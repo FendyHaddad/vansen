@@ -175,14 +175,44 @@
   color: var(--muted-foreground);
 }
 
-.type-topup {
+.type-pack_purchase,
+.type-cycle_reset {
   border-color: color-mix(in oklch, var(--profit) 50%, transparent);
   color: var(--profit);
 }
 
-.type-studio_fee {
+.type-pack_expiry {
   border-color: color-mix(in oklch, var(--primary) 50%, transparent);
   color: var(--primary);
+}
+
+.bucket-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  color: var(--muted-foreground);
+}
+
+.bucket-tag-pack {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+
+.bucket-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pack-eyebrow {
+  margin-top: 10px;
 }
 
 .ledger-family {

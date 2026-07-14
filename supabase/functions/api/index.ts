@@ -6,11 +6,13 @@ import { cors } from 'jsr:@hono/hono/cors';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import {
+  CREDIT_PACKS,
   UPSCALER,
+  creditCost,
   editToolById,
   familyById,
-  upscaleUserPriceUsd,
-  userPriceUsd,
+  packCredits,
+  upscaleCreditCost,
   type GenerationSettings,
 } from './_shared/model-families.ts';
 import { GenerationOp, LedgerType, MediaKind } from './_shared/enums.ts';
@@ -33,9 +35,12 @@ const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
   apiVersion: '2024-06-20' as Stripe.LatestApiVersion,
   httpClient: Stripe.createFetchHttpClient(),
 });
-const STUDIO_PRICE_ID = Deno.env.get('STRIPE_STUDIO_PRICE_ID')!;
+const PLAN_PRICE_IDS: Record<string, string | undefined> = {
+  studio: Deno.env.get('STRIPE_STUDIO_PRICE_ID'),
+  pro: Deno.env.get('STRIPE_PRO_PRICE_ID'),
+};
+const LAUNCH_COUPON_ID = Deno.env.get('STRIPE_LAUNCH_COUPON_ID'); // $5 off, 2 months
 const APP_ORIGIN = 'http://localhost:4200';
-const TOPUP_PRESETS = [10, 20, 50, 100];
 
 /** Detect image type from magic bytes; returns extension or null. */
 function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'webp' | null {
@@ -82,6 +87,7 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
   ['confirmOverUsd', (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000],
+  ['tourSeen', (v) => typeof v === 'boolean'],
 ];
 
 /** Whitelist prefs: unknown keys dropped, invalid values reject the request. */
@@ -168,8 +174,6 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-const round2 = (v: number) => Math.round(v * 100) / 100;
-
 /** Warm-isolate memo so list reloads don't re-sign every media path, and the
  * URL stays stable across requests (lets browser HTTP caching work too). */
 const signedUrlMemo = new Map<string, { url: string; expiresAt: number }>();
@@ -196,7 +200,7 @@ async function toGenerationDto(row: Record<string, unknown>) {
     op: row.op,
     prompt: row.prompt,
     settings: row.settings,
-    priceUsd: Number(row.price_usd),
+    priceCredits: Number(row.price_credits),
     status: row.status,
     mediaUrl: await signMedia((row.media_path as string) ?? null),
     parentId: row.parent_id,
@@ -213,9 +217,13 @@ async function isSuspended(userId: string): Promise<boolean> {
   return (data?.strikes ?? 0) >= SUSPEND_STRIKES;
 }
 
-async function modelEnabled(familyId: string): Promise<boolean> {
-  const { data } = await admin.from('models').select('enabled').eq('id', familyId).maybeSingle();
-  return data?.enabled ?? false;
+async function modelGate(familyId: string): Promise<{ enabled: boolean; minPlan: string }> {
+  const { data } = await admin
+    .from('models')
+    .select('enabled,min_plan')
+    .eq('id', familyId)
+    .maybeSingle();
+  return { enabled: data?.enabled ?? false, minPlan: data?.min_plan ?? 'studio' };
 }
 
 async function recordStrike(
@@ -258,17 +266,19 @@ function toLedgerDto(row: Record<string, unknown>) {
   return {
     id: row.id,
     type: row.type,
-    amountUsd: Number(row.amount_usd),
+    amountCredits: Number(row.amount_credits),
+    bucket: row.bucket,
     familyId: row.family_id,
     note: row.note,
     createdAt: row.created_at,
   };
 }
 
-async function balanceOf(userId: string): Promise<number> {
-  const { data, error } = await admin.rpc('fn_balance', { p_user: userId });
-  if (error) throw error;
-  return Number(data ?? 0);
+async function creditsOf(userId: string): Promise<{ plan: number; pack: number }> {
+  const { data, error } = await admin.rpc('fn_balances', { p_user: userId });
+  if (error) throw new Error(error.message);
+  const row = Array.isArray(data) ? data[0] : data;
+  return { plan: row?.plan_credits ?? 0, pack: row?.pack_credits ?? 0 };
 }
 
 async function stripeCustomerFor(userId: string, email: string): Promise<string> {
@@ -283,21 +293,29 @@ async function stripeCustomerFor(userId: string, email: string): Promise<string>
   return customer.id;
 }
 
-async function hasActiveStudio(userId: string): Promise<boolean> {
+/** Highest active plan, or null. canceled = works until period end. */
+async function activePlan(userId: string): Promise<'studio' | 'pro' | 'owner' | null> {
   const { data } = await admin
     .from('subscriptions')
-    .select('status,current_period_end')
+    .select('plan, status, current_period_end')
     .eq('user_id', userId)
     .maybeSingle();
-  if (!data || data.status !== 'active') return false;
-  return !data.current_period_end || new Date(data.current_period_end) > new Date();
+  if (!data) return null;
+  if (data.status === 'expired') return null;
+  if (
+    data.status === 'canceled' &&
+    data.current_period_end && new Date(data.current_period_end).getTime() < Date.now()
+  ) {
+    return null;
+  }
+  return data.plan as 'studio' | 'pro' | 'owner';
 }
 
 app.get('/profile', async (c) => {
   const userId = c.get('userId');
-  const [{ data: profile, error }, balanceUsd, { data: subscription }] = await Promise.all([
+  const [{ data: profile, error }, credits, { data: subscription }] = await Promise.all([
     admin.from('profiles').select('*').eq('id', userId).single(),
-    balanceOf(userId),
+    creditsOf(userId),
     admin.from('subscriptions').select('*').eq('user_id', userId).maybeSingle(),
   ]);
   if (error || !profile) return fail(c, 404, 'not_found', 'Profile missing');
@@ -309,7 +327,7 @@ app.get('/profile', async (c) => {
       prefs: profile.prefs,
       createdAt: profile.created_at,
     },
-    balanceUsd,
+    credits,
     subscription: subscription
       ? {
           plan: subscription.plan,
@@ -467,47 +485,57 @@ app.post('/generations', async (c) => {
     return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
   }
 
+  // Subscription gate: no active plan, no generation of any kind.
+  const plan = await activePlan(userId);
+  if (!plan) {
+    return fail(c, 403, 'subscription_required', 'An active subscription is required to generate.');
+  }
+
   let familyId: string;
   let familyName: string;
   let kind: string;
-  let unitPrice: number;
+  let unitCredits: number;
 
   if (op === GenerationOp.Upscale) {
     familyId = UPSCALER.id;
     familyName = UPSCALER.name;
     kind = MediaKind.Image;
-    unitPrice = round2(upscaleUserPriceUsd());
+    unitCredits = upscaleCreditCost();
   } else {
     const editTool = editToolById(String(body.familyId ?? ''));
     if (editTool) {
-      // Studio panel AI tool — fixed retail price, edit op only, Studio members only.
+      // Studio panel AI tool — fixed credit price, edit op only.
       if (op !== GenerationOp.Edit) return fail(c, 400, 'invalid_op', 'Edit tools use op=edit');
-      if (!(await hasActiveStudio(userId))) {
-        return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
-      }
       if (editTool.needsMask && typeof body.maskPngBase64 !== 'string') {
         return fail(c, 400, 'invalid_payload', `${editTool.name} requires a mask`);
       }
       familyId = editTool.id;
       familyName = editTool.name;
       kind = MediaKind.Image;
-      unitPrice = editTool.userPriceUsd; // fixed retail — no rounding drift
+      unitCredits = editTool.creditCost; // fixed — no margin formula
     } else {
       const family = familyById(String(body.familyId ?? ''));
       if (!family) return fail(c, 400, 'invalid_family', 'Unknown model family');
       if (family.kind === MediaKind.Video && op !== GenerationOp.Generate && op !== GenerationOp.Variation) {
         return fail(c, 400, 'invalid_op', 'Video supports generate/variation only');
       }
+      if (family.kind === MediaKind.Video && plan === 'studio') {
+        return fail(c, 403, 'pro_required', 'Video models require the Pro plan.');
+      }
       familyId = family.id;
       familyName = family.name;
       kind = family.kind;
-      unitPrice = round2(userPriceUsd(family, settings));
+      unitCredits = creditCost(family, settings);
     }
   }
 
-  // Kill switch.
-  if (!(await modelEnabled(familyId))) {
+  // Kill switch + per-model plan floor.
+  const gate = await modelGate(familyId);
+  if (!gate.enabled) {
     return fail(c, 503, 'model_disabled', 'This model is temporarily unavailable.');
+  }
+  if (gate.minPlan === 'pro' && plan === 'studio') {
+    return fail(c, 403, 'pro_required', 'This model requires the Pro plan.');
   }
 
   // Moderation gate — BEFORE charge and BEFORE any provider call.
@@ -534,7 +562,7 @@ app.post('/generations', async (c) => {
     referenceUrl = data?.signedUrl ?? undefined;
   }
 
-  const total = round2(unitPrice * batch);
+  const total = unitCredits * batch;
   const ledgerType = op === GenerationOp.Variation ? LedgerType.Generate : (op as LedgerType);
   const note = batch > 1 ? `${familyName} ×${batch}` : familyName;
 
@@ -545,7 +573,7 @@ app.post('/generations', async (c) => {
     op,
     prompt,
     settings,
-    priceUsd: unitPrice,
+    priceCredits: unitCredits,
     mediaUrl: '', // filled when the provider job completes
     parentId,
   }));
@@ -560,7 +588,7 @@ app.post('/generations', async (c) => {
   });
   if (error) {
     if (error.message.includes('insufficient_balance')) {
-      return fail(c, 402, 'insufficient_balance', 'Balance too low for this run');
+      return fail(c, 402, 'insufficient_credits', 'Not enough credits for this run');
     }
     logError(c, 'charge_failed', new Error(error.message));
     return fail(c, 400, 'charge_failed', 'Charge could not be completed');
@@ -601,57 +629,77 @@ app.post('/generations', async (c) => {
     .from('generations')
     .select('*')
     .in('id', created.map((g) => g.id));
-  const balanceUsd = await balanceOf(userId);
-  return c.json({ items: await toGenerationDtos(finalRows ?? []), balanceUsd });
+  return c.json({ items: await toGenerationDtos(finalRows ?? []), credits: await creditsOf(userId) });
 });
 
-app.post('/billing/checkout', async (c) => {
+app.post('/billing/subscribe', async (c) => {
   const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const plan = body.plan === 'pro' ? 'pro' : body.plan === 'studio' ? 'studio' : null;
+  if (!plan) return fail(c, 400, 'invalid_plan', 'plan must be studio or pro');
   const { data: ownSub } = await admin
     .from('subscriptions')
-    .select('plan, status')
+    .select('plan, status, stripe_subscription_id')
     .eq('user_id', userId)
     .maybeSingle();
   if (ownSub?.plan === 'owner' && ownSub.status === 'active') {
     return fail(c, 400, 'owner_plan', 'Owner accounts have unlimited credits');
   }
-  const body = await c.req.json().catch(() => ({}));
-  const studioOnly = body.studioOnly === true;
-  const creditsUsd = Number(body.creditsUsd);
-  if (!studioOnly && !TOPUP_PRESETS.includes(creditsUsd)) {
-    return fail(c, 400, 'invalid_amount', `creditsUsd must be one of ${TOPUP_PRESETS.join(', ')} (min $10)`);
+  if (ownSub?.stripe_subscription_id && ownSub.status === 'active') {
+    return fail(c, 400, 'already_subscribed', 'Use the billing portal to change plans');
   }
   try {
     const customer = await stripeCustomerFor(userId, c.get('email'));
-    const active = await hasActiveStudio(userId);
-    const needsStudio = studioOnly || !active;
-
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-    if (needsStudio) lineItems.push({ price: STUDIO_PRICE_ID, quantity: 1 });
-    if (!studioOnly) {
-      lineItems.push({
-        price_data: {
-          currency: 'usd',
-          product_data: { name: 'Vansen generation credits' },
-          unit_amount: creditsUsd * 100,
-        },
-        quantity: 1,
-      });
-    }
-
+    // Launch promo: first-time subscribers only (never had a Stripe subscription).
+    const firstTime = !ownSub?.stripe_subscription_id;
     const session = await stripe.checkout.sessions.create({
       customer,
-      mode: needsStudio ? 'subscription' : 'payment',
-      line_items: lineItems,
-      allow_promotion_codes: true,
+      mode: 'subscription',
+      line_items: [{ price: PLAN_PRICE_IDS[plan]!, quantity: 1 }],
+      discounts: firstTime && LAUNCH_COUPON_ID ? [{ coupon: LAUNCH_COUPON_ID }] : undefined,
       success_url: `${APP_ORIGIN}/app?checkout=success`,
       cancel_url: `${APP_ORIGIN}/app?checkout=canceled`,
-      metadata: { user_id: userId, credits_usd: studioOnly ? '0' : String(creditsUsd) },
-      subscription_data: needsStudio ? { metadata: { user_id: userId } } : undefined,
+      metadata: { user_id: userId, plan },
+      subscription_data: { metadata: { user_id: userId, plan } },
     });
     return c.json({ url: session.url });
   } catch (e) {
-    logError(c, 'checkout_failed', e);
+    logError(c, 'subscribe_failed', e);
+    return fail(c, 400, 'billing_failed', 'Could not start checkout');
+  }
+});
+
+app.post('/billing/pack', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const usd = Number(body.usd);
+  const plan = await activePlan(userId);
+  if (!plan) return fail(c, 403, 'subscription_required', 'Packs are for active subscribers.');
+  if (plan === 'owner') return fail(c, 400, 'owner_plan', 'Owner accounts have unlimited credits');
+  if (!CREDIT_PACKS.some((p) => p.usd === usd)) {
+    return fail(c, 400, 'invalid_amount', `usd must be one of ${CREDIT_PACKS.map((p) => p.usd).join(', ')}`);
+  }
+  const credits = packCredits(usd, plan);
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const session = await stripe.checkout.sessions.create({
+      customer,
+      mode: 'payment',
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: { name: `Vansen credit pack — ${credits.toLocaleString()} credits` },
+          unit_amount: usd * 100,
+        },
+        quantity: 1,
+      }],
+      success_url: `${APP_ORIGIN}/app?checkout=success`,
+      cancel_url: `${APP_ORIGIN}/app?checkout=canceled`,
+      metadata: { user_id: userId, pack_usd: String(usd), pack_credits: String(credits) },
+    });
+    return c.json({ url: session.url });
+  } catch (e) {
+    logError(c, 'pack_failed', e);
     return fail(c, 400, 'billing_failed', 'Could not start checkout');
   }
 });
@@ -679,7 +727,7 @@ app.post('/billing/reconcile', async (c) => {
       .eq('id', userId)
       .single();
     if (!profile?.stripe_customer_id) {
-      return c.json({ credited: 0, balanceUsd: await balanceOf(userId) });
+      return c.json({ credited: 0, credits: await creditsOf(userId) });
     }
     const sessions = await stripe.checkout.sessions.list({
       customer: profile.stripe_customer_id,
@@ -688,18 +736,14 @@ app.post('/billing/reconcile', async (c) => {
     let credited = 0;
     for (const s of sessions.data) {
       if (s.payment_status !== 'paid') continue;
-      const credits = Number(s.metadata?.credits_usd ?? 0);
+      const credits = Number(s.metadata?.pack_credits ?? 0);
       if (!credits) continue;
-      const { error } = await admin.from('ledger_entries').insert({
-        user_id: userId,
-        type: 'topup',
-        amount_usd: credits,
-        note: 'Top-up (reconciled)',
-        stripe_ref: s.id,
+      const { error } = await admin.rpc('fn_grant_pack', {
+        p_user: userId, p_credits: credits, p_stripe_ref: s.id,
       });
       if (!error) credited += 1; // unique(stripe_ref) bounces already-credited sessions
     }
-    return c.json({ credited, balanceUsd: await balanceOf(userId) });
+    return c.json({ credited, credits: await creditsOf(userId) });
   } catch (e) {
     logError(c, 'reconcile_failed', e);
     return fail(c, 400, 'billing_failed', 'Reconcile failed');
@@ -746,8 +790,8 @@ app.post('/edits/save', async (c) => {
   if (await isSuspended(userId)) {
     return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
   }
-  if (!(await hasActiveStudio(userId))) {
-    return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
+  if (!(await activePlan(userId))) {
+    return fail(c, 403, 'subscription_required', 'An active subscription is required for editing tools.');
   }
   const form = await c.req.formData().catch(() => null);
   const file = form?.get('file');
@@ -791,7 +835,7 @@ app.post('/edits/save', async (c) => {
       op: GenerationOp.Edit,
       prompt: parent.prompt,
       settings: parent.settings,
-      price_usd: 0,
+      price_credits: 0,
       status: 'done',
       media_url: '',
       parent_id: parentId,
@@ -819,8 +863,8 @@ app.post('/library/import', async (c) => {
   if (await isSuspended(userId)) {
     return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
   }
-  if (!(await hasActiveStudio(userId))) {
-    return fail(c, 403, 'studio_required', 'Studio subscription required for editing tools.');
+  if (!(await activePlan(userId))) {
+    return fail(c, 403, 'subscription_required', 'An active subscription is required for editing tools.');
   }
   const form = await c.req.formData().catch(() => null);
   const file = form?.get('file');
@@ -856,7 +900,7 @@ app.post('/library/import', async (c) => {
       op: GenerationOp.Generate,
       prompt: 'Imported image',
       settings: {},
-      price_usd: 0,
+      price_credits: 0,
       status: 'done',
       media_url: '',
     })

@@ -1,0 +1,109 @@
+<div class="tour-root">
+  @if (rect()) {
+    <div class="tour-spot" [style]="spotStyle()"></div>
+  } @else {
+    <div class="tour-dim"></div>
+  }
+
+  <div
+    #card
+    class="tour-card"
+    [class.tour-card-center]="!rect()"
+    [style]="cardStyle()"
+    tabindex="-1"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="tour.current().title"
+  >
+    <p class="tour-kicker">Step {{ stepNumber() }} of {{ total() }}</p>
+
+    <div class="tour-art">
+      @switch (tour.current().id) {
+        @case ('welcome') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <circle cx="110" cy="45" r="26" class="art-accent" />
+            <path d="M110 27v36M92 45h36M97 32l26 26M123 32l-26 26" class="art-accent" />
+            <circle cx="110" cy="45" r="6" class="art-fill" />
+            <path d="M30 45h44M146 45h44" class="art-line" stroke-dasharray="2 4" />
+          </svg>
+        }
+        @case ('left-panel') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <rect x="30" y="18" width="120" height="54" rx="8" class="art-line" />
+            <path d="M42 34h72M42 46h56M42 58h34" class="art-line" stroke-linecap="round" />
+            <rect x="162" y="30" width="30" height="30" rx="8" class="art-accent" />
+            <path d="M177 37v16M169 45h16" class="art-accent" />
+          </svg>
+        }
+        @case ('library') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <rect x="28" y="20" width="48" height="48" rx="6" class="art-line" />
+            <rect x="86" y="20" width="48" height="48" rx="6" class="art-accent" />
+            <circle cx="100" cy="33" r="4" class="art-accent" />
+            <path d="M89 63l13-15 9 9 8-8 12 14" class="art-accent" />
+            <rect x="144" y="20" width="48" height="48" rx="6" class="art-line" />
+          </svg>
+        }
+        @case ('right-panel') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <rect x="88" y="10" width="44" height="70" rx="8" class="art-line" />
+            <path d="M103 22l14 14M117 22l-14 14" class="art-accent" />
+            <rect x="103" y="44" width="14" height="14" rx="3" class="art-line" />
+            <path d="M103 74h14M110 67v7" class="art-line" />
+            <path d="M40 45h36M144 45h36" class="art-line" stroke-dasharray="2 4" />
+          </svg>
+        }
+        @case ('credits') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <circle cx="96" cy="45" r="22" class="art-accent" />
+            <path d="M96 33v24M90 39c0-3 12-3 12 0s-12 3-12 6 12 3 12 6" class="art-accent" />
+            <path d="M132 28a24 24 0 1 1-8 34" class="art-line" />
+            <path d="M126 22l8 9-12 3z" class="art-fill" />
+          </svg>
+        }
+        @case ('bell') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <path d="M96 60h34c-5-4-6-9-6-17a11 11 0 0 0-22 0c0 8-1 13-6 17z" class="art-line" />
+            <path d="M109 66a4 4 0 0 0 8 0" class="art-line" />
+            <circle cx="128" cy="34" r="5" class="art-fill" />
+            <rect x="146" y="26" width="48" height="18" rx="6" class="art-line" />
+            <path d="M154 35h30" class="art-line" stroke-dasharray="2 3" />
+          </svg>
+        }
+        @case ('subscribe') {
+          <svg viewBox="0 0 220 90" fill="none" aria-hidden="true">
+            <rect x="42" y="20" width="60" height="50" rx="8" class="art-line" />
+            <path d="M54 34h36M54 44h24M54 54h30" class="art-line" stroke-linecap="round" />
+            <rect x="118" y="14" width="60" height="62" rx="8" class="art-accent" />
+            <path d="M130 30h36M130 40h24M130 50h30" class="art-accent" stroke-linecap="round" />
+            <circle cx="166" cy="62" r="6" class="art-fill" />
+          </svg>
+        }
+      }
+    </div>
+
+    <h3 class="tour-title">{{ tour.current().title }}</h3>
+    <p class="tour-body">{{ tour.current().body }}</p>
+
+    <div class="tour-dots" aria-hidden="true">
+      @for (step of tour.visibleSteps(); track step.id; let i = $index) {
+        <span class="tour-dot" [class.tour-dot-on]="i <= tour.activeIndex()"></span>
+      }
+    </div>
+
+    <div class="tour-actions">
+      <button type="button" class="tour-skip" (click)="tour.skip()">Skip</button>
+      <span class="tour-spacer"></span>
+      @if (tour.activeIndex() > 0) {
+        <button type="button" class="tour-back" (click)="tour.prev()">Back</button>
+      }
+      @if (tour.current().id === 'subscribe') {
+        <button type="button" class="tour-next" (click)="seePlans()">See plans</button>
+      } @else {
+        <button type="button" class="tour-next" (click)="tour.next()">
+          {{ tour.activeIndex() === total() - 1 ? 'Done' : 'Next' }}
+        </button>
+      }
+    </div>
+  </div>
+</div>

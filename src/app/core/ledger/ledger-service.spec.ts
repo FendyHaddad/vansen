@@ -14,17 +14,27 @@ describe('LedgerService', () => {
     apiMock.get.mockReset();
   });
 
-  it('starts at zero and takes server-pushed balances', () => {
+  it('starts at zero and exposes bucket balances and total', () => {
     const ledger = TestBed.inject(LedgerService);
-    expect(ledger.balanceUsd()).toBe(0);
-    ledger.setBalance(14.42);
-    expect(ledger.balanceUsd()).toBe(14.42);
+    expect(ledger.totalCredits()).toBe(0);
+    ledger.setCredits({ plan: 1200, pack: 300 });
+    expect(ledger.planCredits()).toBe(1200);
+    expect(ledger.packCredits()).toBe(300);
+    expect(ledger.totalCredits()).toBe(1500);
   });
 
   it('loads entries from GET /ledger', async () => {
     apiMock.get.mockResolvedValue({
       entries: [
-        { id: '1', type: 'topup', amountUsd: 20, familyId: null, note: null, createdAt: 'now' },
+        {
+          id: '1',
+          type: 'cycle_reset',
+          amountCredits: 1500,
+          bucket: 'plan',
+          familyId: null,
+          note: null,
+          createdAt: 'now',
+        },
       ],
     });
     const ledger = TestBed.inject(LedgerService);
@@ -37,10 +47,10 @@ describe('LedgerService', () => {
   it('reset clears everything', async () => {
     apiMock.get.mockResolvedValue({ entries: [] });
     const ledger = TestBed.inject(LedgerService);
-    ledger.setBalance(5);
+    ledger.setCredits({ plan: 5, pack: 5 });
     await ledger.loadEntries();
     ledger.reset();
-    expect(ledger.balanceUsd()).toBe(0);
+    expect(ledger.totalCredits()).toBe(0);
     expect(ledger.entries().length).toBe(0);
     expect(ledger.entriesLoaded()).toBe(false);
   });

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideLogOut, lucidePlus, lucideSettings } from '@ng-icons/lucide';
+import { lucideCompass, lucideLogOut, lucidePlus, lucideSettings } from '@ng-icons/lucide';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
@@ -14,7 +14,7 @@ import { ProfileStore } from '../../core/profile/profile-store';
   styleUrl: './profile-menu.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DecimalPipe, RouterLink, NgIcon, ...HlmDropdownMenuImports],
-  providers: [provideIcons({ lucideSettings, lucideLogOut, lucidePlus })],
+  providers: [provideIcons({ lucideSettings, lucideLogOut, lucidePlus, lucideCompass })],
 })
 export class ProfileMenu {
   private readonly auth = inject(AuthService);
@@ -27,13 +27,17 @@ export class ProfileMenu {
   readonly email = this.auth.userEmail;
   readonly displayName = this.profileStore.displayName;
   readonly initial = computed(() => (this.email().charAt(0) || '?').toUpperCase());
-  readonly balanceUsd = this.ledger.balanceUsd;
+  readonly totalCredits = this.ledger.totalCredits;
   readonly isOwner = this.profileStore.isOwner;
 
-  /** Studio/Pro tier badge next to the display name. Pro isn't a real
-   * subscribable tier yet — flip this once it is. */
-  readonly tierLabel = computed(() => (this.profileStore.studioActive() ? 'Studio' : 'Inactive'));
+  /** Tier badge next to the display name. Owner shows as Pro (hidden tier). */
+  readonly tierLabel = computed(() => {
+    const plan = this.profileStore.plan();
+    if (!plan) return 'Inactive';
+    return plan === 'studio' ? 'Studio' : 'Pro';
+  });
 
   readonly topUp = output<void>();
+  readonly startTour = output<void>();
   readonly signOut = output<void>();
 }

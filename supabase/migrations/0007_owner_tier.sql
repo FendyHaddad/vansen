@@ -157,18 +157,18 @@ select jsonb_build_object(
             from (select generate_series(current_date - 29, current_date, interval '1 day')::date as day) d
             left join (select created_at::date as day, count(*) c from generations
                        where created_at > current_date - 29 group by 1) g using (day)),
-  'recent', (select coalesce(jsonb_agg(jsonb_build_object('type', t, 'title', title, 'at', at) order by at desc), '[]'::jsonb)
+  'recent', (select coalesce(jsonb_agg(jsonb_build_object('type', t, 'title', title, 'at', at, 'userId', uid) order by at desc), '[]'::jsonb)
              from (
-               (select 'signup' as t, coalesce(display_name, 'New user') as title, created_at as at
+               (select 'signup' as t, coalesce(display_name, 'New user') as title, created_at as at, id as uid
                   from profiles order by created_at desc limit 5)
                union all
-               (select 'generation', coalesce(family_name, kind) || ' · ' || coalesce(op, 'create'), created_at
+               (select 'generation', coalesce(family_name, kind) || ' · ' || coalesce(op, 'create'), created_at, user_id
                   from generations order by created_at desc limit 5)
                union all
-               (select 'subscription', plan || ' — ' || status, coalesce(updated_at, created_at)
+               (select 'subscription', plan || ' — ' || status, coalesce(updated_at, created_at), user_id
                   from subscriptions order by coalesce(updated_at, created_at) desc limit 5)
                union all
-               (select 'error', coalesce(code, 'error') || ' · ' || coalesce(route, '?'), created_at
+               (select 'error', coalesce(code, 'error') || ' · ' || coalesce(route, '?'), created_at, user_id
                   from app_errors order by created_at desc limit 5)
              ) ev)
 );

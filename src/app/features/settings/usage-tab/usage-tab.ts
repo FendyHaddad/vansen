@@ -6,7 +6,7 @@ import { familyById } from '../../../core/catalog/model-families';
 interface UsageRow {
   label: string;
   count: number;
-  spendUsd: number;
+  spendCredits: number;
   pct: number;
 }
 
@@ -28,7 +28,7 @@ export class UsageTab {
     const now = new Date();
     return this.ledger
       .entries()
-      .filter((e) => e.amountUsd < 0 && e.type !== 'studio_fee')
+      .filter((e) => e.amountCredits < 0 && e.type !== 'pack_expiry' && e.type !== 'cycle_reset')
       .filter((e) => {
         const d = new Date(e.createdAt);
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
@@ -36,7 +36,7 @@ export class UsageTab {
   });
 
   readonly totalSpend = computed(() =>
-    this.monthDebits().reduce((sum, e) => sum + Math.abs(e.amountUsd), 0),
+    this.monthDebits().reduce((sum, e) => sum + Math.abs(e.amountCredits), 0),
   );
   readonly totalOps = computed(() => this.monthDebits().length);
 
@@ -51,14 +51,14 @@ export class UsageTab {
   );
 
   private rowsBy(
-    keyOf: (e: { type: string; familyId?: string | null; amountUsd: number }) => string,
+    keyOf: (e: { type: string; familyId?: string | null; amountCredits: number }) => string,
   ): UsageRow[] {
     const groups = new Map<string, { count: number; spend: number }>();
     for (const e of this.monthDebits()) {
       const key = keyOf(e);
       const g = groups.get(key) ?? { count: 0, spend: 0 };
       g.count += 1;
-      g.spend += Math.abs(e.amountUsd);
+      g.spend += Math.abs(e.amountCredits);
       groups.set(key, g);
     }
     const total = this.totalSpend() || 1;
@@ -66,9 +66,9 @@ export class UsageTab {
       .map(([label, g]) => ({
         label,
         count: g.count,
-        spendUsd: g.spend,
+        spendCredits: g.spend,
         pct: Math.round((g.spend / total) * 100),
       }))
-      .sort((a, b) => b.spendUsd - a.spendUsd);
+      .sort((a, b) => b.spendCredits - a.spendCredits);
   }
 }

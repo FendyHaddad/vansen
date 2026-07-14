@@ -14,7 +14,7 @@
       class="mode-btn"
       [class.mode-active]="mode() === 'video'"
       [class.mode-locked]="videoLocked"
-      [attr.title]="videoLocked ? 'Video — coming with Pro' : null"
+      [attr.title]="videoLocked ? 'Video — Pro plan, coming soon' : null"
       (click)="setMode('video')"
     >
       <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="13"/>
@@ -191,7 +191,7 @@
   <div class="gen-btn">
     @if (insufficient()) {
       <p class="insufficient">
-        Balance too low for this configuration — top up from the profile menu.
+        Not enough credits for this configuration — add a pack from Billing.
       </p>
     }
     <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
@@ -200,7 +200,7 @@
       @if (batch() > 1) {
         <span class="num">×{{ batch() }}</span>
       }
-      · <span class="num">${{ priceUsd() | number: '1.2-2' }}</span>
+      · <span class="num">{{ priceCredits() }} cr</span>
     </button>
   </div>
 </div>

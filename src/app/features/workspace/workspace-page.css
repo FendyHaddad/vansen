@@ -156,6 +156,35 @@ app-right-panel {
   display: none;
 }
 
+/* Thin rule separating the upload button from the credit balance. */
+.topbar-div {
+  width: 1px;
+  height: 22px;
+  background: color-mix(in oklch, var(--border) 80%, transparent);
+  flex-shrink: 0;
+}
+
+/* Credit balance chip — squared border matching the upload button, not a pill. */
+.credit-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in oklch, var(--card) 60%, var(--background));
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.credit-chip-low {
+  color: var(--warn);
+  border-color: color-mix(in oklch, var(--warn) 45%, var(--border));
+}
+
 .btn-spinner {
   width: 13px;
   height: 13px;

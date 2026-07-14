@@ -1,9 +1,13 @@
-// Stripe webhook consumer — the ONLY writer of `topup` ledger entries.
+// Stripe webhook consumer — the ONLY writer of grant ledger entries
+// (cycle_reset on invoice.paid, pack_purchase on paid pack checkouts).
 // Trust anchor: Stripe signature (no JWT). Integrity: webhook_events dedupe
-// (event id pk) + ledger_entries.stripe_ref UNIQUE (one session, one credit).
+// (event id pk) + ledger_entries.stripe_ref UNIQUE (one session, one grant).
 // 200 is returned only after DB writes commit; failures 500 so Stripe retries.
 import Stripe from 'npm:stripe@17';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+// NOTE: deployed via MCP with _shared/ nested inside the function bundle;
+// keep this specifier matching the deploy layout (same convention as api).
+import { PLAN_CREDITS } from './_shared/model-families.ts';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
   apiVersion: '2024-06-20' as Stripe.LatestApiVersion,
@@ -15,6 +19,20 @@ const admin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
+
+const STUDIO_PRICE_ID = Deno.env.get('STRIPE_STUDIO_PRICE_ID');
+const PRO_PRICE_ID = Deno.env.get('STRIPE_PRO_PRICE_ID');
+
+function planFor(sub: Stripe.Subscription): 'studio' | 'pro' {
+  const priceId = sub.items.data[0]?.price?.id;
+  if (priceId === PRO_PRICE_ID) return 'pro';
+  if (priceId === STUDIO_PRICE_ID) return 'studio';
+  // metadata fallback (set at checkout); default studio, loud log
+  const meta = sub.metadata?.plan;
+  if (meta === 'pro' || meta === 'studio') return meta;
+  console.error('unknown price id on subscription', sub.id, priceId);
+  return 'studio';
+}
 
 Deno.serve(async (req) => {
   const signature = req.headers.get('stripe-signature');
@@ -49,28 +67,24 @@ Deno.serve(async (req) => {
         const userId = session.metadata?.user_id;
         if (!userId) break;
 
-        const credits = Number(session.metadata?.credits_usd ?? 0);
-        if (credits > 0) {
+        if (session.mode === 'payment') {
+          const credits = Number(session.metadata?.pack_credits ?? 0);
+          const usd = Number(session.metadata?.pack_usd ?? 0);
           // Integrity: server-set metadata must match Stripe's own subtotal.
-          // Subtotal = credits*100 (+500 when the cart carried the Studio sub).
-          const expected = credits * 100 + (session.mode === 'subscription' ? 500 : 0);
-          if (session.amount_subtotal !== expected) {
-            console.error('amount mismatch', session.id, session.amount_subtotal, expected);
-            break; // no credit on mismatch; loud log
+          if (credits > 0 && session.amount_subtotal === usd * 100) {
+            const { error } = await admin.rpc('fn_grant_pack', {
+              p_user: userId, p_credits: credits, p_stripe_ref: session.id,
+            });
+            if (error) throw error;
+          } else if (credits > 0) {
+            console.error('pack amount mismatch', session.id, session.amount_subtotal, usd * 100);
           }
-          const { error } = await admin.from('ledger_entries').insert({
-            user_id: userId,
-            type: 'topup',
-            amount_usd: credits,
-            note: 'Top-up',
-            stripe_ref: session.id,
-          });
-          if (error && !error.message.includes('duplicate')) throw error;
         }
 
         if (session.mode === 'subscription' && session.subscription) {
           const sub = await stripe.subscriptions.retrieve(String(session.subscription));
           await upsertSubscription(userId, sub);
+          // Grant happens on invoice.paid (fires for the first invoice too).
         }
         break;
       }
@@ -80,7 +94,17 @@ Deno.serve(async (req) => {
         if (subId) {
           const sub = await stripe.subscriptions.retrieve(subId);
           const userId = sub.metadata?.user_id;
-          if (userId) await upsertSubscription(userId, sub);
+          if (userId) {
+            await upsertSubscription(userId, sub);
+            const plan = planFor(sub);
+            const alive = sub.status === 'active' || sub.status === 'trialing' || sub.status === 'past_due';
+            if (alive) {
+              const { error } = await admin.rpc('fn_cycle_reset', {
+                p_user: userId, p_grant: PLAN_CREDITS[plan],
+              });
+              if (error) throw error;
+            }
+          }
         }
         break;
       }
@@ -117,7 +141,7 @@ async function upsertSubscription(userId: string, sub: Stripe.Subscription): Pro
   const { error } = await admin.from('subscriptions').upsert(
     {
       user_id: userId,
-      plan: 'studio',
+      plan: planFor(sub),
       status,
       current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
       stripe_subscription_id: sub.id,

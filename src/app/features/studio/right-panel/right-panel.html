@@ -32,11 +32,11 @@
         </li>
         <li>
           <ng-icon name="lucideCheck" size="13" />
-          <span>AI remove, fill &amp; expand from $0.05</span>
+          <span>AI remove, fill &amp; expand from 5 credits</span>
         </li>
         <li>
           <ng-icon name="lucideCheck" size="13" />
-          <span>Balance never expires</span>
+          <span>1,500 credits included every month</span>
         </li>
         <li>
           <ng-icon name="lucideCheck" size="13" />
@@ -44,9 +44,9 @@
         </li>
       </ul>
       <button hlmBtn size="sm" class="lock-cta" type="button" (click)="subscribeRequested.emit()">
-        Subscribe to Studio · $5/mo
+        Subscribe to Studio · $15/mo
       </button>
-      <p class="lock-note">Cancel anytime — your library stays.</p>
+      <p class="lock-note">Launch offer: $10/mo for your first 60 days. Cancel anytime.</p>
     </div>
   } @else {
     @if (!editing()) {
@@ -106,7 +106,7 @@
         @if (proLocked()) {
           <span class="ai-note">· Pro</span>
         } @else {
-          <span class="ai-note">· uses balance</span>
+          <span class="ai-note">· uses credits</span>
         }
       </h3>
       @for (tool of aiTools; track tool.id) {
@@ -114,13 +114,13 @@
           <button
             type="button"
             class="ai-run"
-            [disabled]="!editing() || proLocked() || !affordable(tool.userPriceUsd)"
+            [disabled]="!editing() || proLocked() || !affordable(tool.creditCost)"
             [title]="proLocked() ? 'Pro tool — upgrade to unlock' : tool.blurb"
             (click)="runAiTool(tool.id)"
           >
             <ng-icon [name]="proLocked() ? 'lucideLock' : 'lucideSparkles'" size="14" />
             <span>{{ tool.name }}</span>
-            <span class="price-chip">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
+            <span class="price-chip">{{ tool.creditCost }} cr</span>
           </button>
           @if (tool.needsPrompt && editing() && !proLocked()) {
             <input
@@ -133,8 +133,8 @@
           }
         </div>
       }
-      @if (editing() && !proLocked() && balanceUsd() < 0.05) {
-        <p class="ai-note">Balance too low — top up to use AI tools.</p>
+      @if (editing() && !proLocked() && totalCredits() < 5) {
+        <p class="ai-note">Not enough credits — add a pack from Billing to use AI tools.</p>
       }
     </section>
 

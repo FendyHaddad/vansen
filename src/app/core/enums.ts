@@ -5,14 +5,14 @@
  */
 
 export const LedgerType = {
-  Topup: 'topup',
   Generate: 'generate',
   Edit: 'edit',
   Upscale: 'upscale',
-  StudioFee: 'studio_fee',
-  TrialCredit: 'trial_credit',
-  Promo: 'promo',
   Refund: 'refund',
+  PackPurchase: 'pack_purchase',
+  CycleReset: 'cycle_reset',
+  PackExpiry: 'pack_expiry',
+  Promo: 'promo',
 } as const;
 export type LedgerType = (typeof LedgerType)[keyof typeof LedgerType];
 

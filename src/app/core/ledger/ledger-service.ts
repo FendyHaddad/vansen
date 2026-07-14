@@ -14,17 +14,19 @@ export type LedgerEntry = LedgerEntryDto;
 export class LedgerService {
   private readonly api = inject(ApiService);
 
-  private readonly balanceSig = signal(0);
+  private readonly creditsSig = signal<{ plan: number; pack: number }>({ plan: 0, pack: 0 });
   private readonly entriesSig = signal<LedgerEntryDto[]>([]);
   private readonly entriesLoadedSig = signal(false);
 
-  readonly balanceUsd = computed(() => this.balanceSig());
+  readonly planCredits = computed(() => this.creditsSig().plan);
+  readonly packCredits = computed(() => this.creditsSig().pack);
+  readonly totalCredits = computed(() => this.creditsSig().plan + this.creditsSig().pack);
   readonly entries = this.entriesSig.asReadonly();
   readonly entriesLoaded = this.entriesLoadedSig.asReadonly();
 
-  /** Server responses (profile load, generation create) push balance here. */
-  setBalance(balanceUsd: number): void {
-    this.balanceSig.set(balanceUsd);
+  /** Server responses (profile load, generation create) push balances here. */
+  setCredits(credits: { plan: number; pack: number }): void {
+    this.creditsSig.set(credits);
   }
 
   async loadEntries(): Promise<void> {
@@ -34,7 +36,7 @@ export class LedgerService {
   }
 
   reset(): void {
-    this.balanceSig.set(0);
+    this.creditsSig.set({ plan: 0, pack: 0 });
     this.entriesSig.set([]);
     this.entriesLoadedSig.set(false);
   }

@@ -23,17 +23,17 @@ describe('BillingService', () => {
     navMock.mockReset();
   });
 
-  it('checkout posts the amount and redirects to the session url', async () => {
+  it('subscribes via /billing/subscribe and redirects to the session url', async () => {
     apiMock.post.mockResolvedValue({ url: 'https://checkout.stripe.com/x' });
-    await make().checkout(20);
-    expect(apiMock.post).toHaveBeenCalledWith('/billing/checkout', { creditsUsd: 20 });
+    await make().subscribe('pro');
+    expect(apiMock.post).toHaveBeenCalledWith('/billing/subscribe', { plan: 'pro' });
     expect(navMock).toHaveBeenCalledWith('https://checkout.stripe.com/x');
   });
 
-  it('reactivateStudio posts studioOnly', async () => {
+  it('buys packs via /billing/pack', async () => {
     apiMock.post.mockResolvedValue({ url: 'https://checkout.stripe.com/y' });
-    await make().reactivateStudio();
-    expect(apiMock.post).toHaveBeenCalledWith('/billing/checkout', { studioOnly: true });
+    await make().buyPack(50);
+    expect(apiMock.post).toHaveBeenCalledWith('/billing/pack', { usd: 50 });
     expect(navMock).toHaveBeenCalledWith('https://checkout.stripe.com/y');
   });
 
@@ -45,7 +45,7 @@ describe('BillingService', () => {
   });
 
   it('reconcile returns the credited count', async () => {
-    apiMock.post.mockResolvedValue({ credited: 2, balanceUsd: 30 });
+    apiMock.post.mockResolvedValue({ credited: 2, credits: { plan: 1500, pack: 1000 } });
     await expect(make().reconcile()).resolves.toBe(2);
     expect(apiMock.post).toHaveBeenCalledWith('/billing/reconcile', {});
   });

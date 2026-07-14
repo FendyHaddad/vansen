@@ -18,7 +18,7 @@
       <a routerLink="/app" class="ws-brand">Vansen</a>
     </div>
 
-    <div class="side-scroll">
+    <div class="side-scroll" data-tour="left-panel">
       <app-left-panel
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
@@ -26,7 +26,12 @@
     </div>
 
     <div class="side-foot">
-      <app-profile-menu variant="bar" (topUp)="topUp()" (signOut)="signOut()" />
+      <app-profile-menu
+        variant="bar"
+        (topUp)="topUp()"
+        (signOut)="signOut()"
+        (startTour)="onStartTour()"
+      />
     </div>
   </aside>
 
@@ -44,6 +49,7 @@
         }
       </div>
       <div class="topbar-right">
+        <app-notification-bell data-tour="bell" (open)="onOpened($event)" />
         @if (mode() === 'library' && studioActive()) {
           <label class="upload-btn" [class.is-uploading]="uploading()">
             @if (uploading()) {
@@ -61,6 +67,20 @@
               (change)="onUploadPick($event)"
             />
           </label>
+        }
+        @if (studioActive()) {
+          <span class="topbar-div" aria-hidden="true"></span>
+          <span
+            class="credit-chip"
+            data-tour="credits"
+            [class.credit-chip-low]="!isOwner() && totalCredits() < 100"
+          >
+            @if (isOwner()) {
+              Unlimited
+            } @else {
+              {{ totalCredits() | number }} cr
+            }
+          </span>
         }
       </div>
     </header>
@@ -124,7 +144,7 @@
       </div>
     }
 
-    <main class="content">
+    <main class="content" data-tour="library">
       @if (notice()) {
         <div class="notice-banner">
           {{ notice() }}
@@ -135,10 +155,10 @@
       }
       @if (graceDaysLeft(); as days) {
         <div class="notice-banner">
-          Studio lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
+          Subscription lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
           left before your library is deleted. Download what you need or
           <button type="button" class="linkish" (click)="reactivateStudio()">
-            reactivate for <span class="num">$5</span>
+            resubscribe from <span class="num">$15</span>/mo
           </button>
         </div>
       }
@@ -189,6 +209,7 @@
   </div>
 
   <app-right-panel
+    data-tour="right-panel"
     [editing]="mode() === 'edit'"
     (saveRequested)="onSaveEdit()"
     (aiToolRequested)="onAiTool($event)"
@@ -207,5 +228,11 @@
       (deleted)="onDeleted($event)"
       (openParent)="onOpened($event)"
     />
+  }
+
+  <app-notification-toast (open)="onOpened($event)" />
+
+  @if (tour.active()) {
+    <app-tour-overlay />
   }
 </div>

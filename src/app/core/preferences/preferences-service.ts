@@ -8,6 +8,8 @@ export interface Prefs {
   defaultAspect: string;
   /** Generations priced above this ask for confirmation first. */
   confirmOverUsd: number;
+  /** True once the onboarding tour was finished or skipped. */
+  tourSeen: boolean;
 }
 
 const DEFAULTS: Prefs = {
@@ -16,6 +18,7 @@ const DEFAULTS: Prefs = {
   defaultVideoFamily: 'veo',
   defaultAspect: '1:1',
   confirmOverUsd: 2,
+  tourSeen: false,
 };
 
 const CACHE_KEY = 'vansen.prefs';

@@ -154,13 +154,9 @@ export class ToolOptions {
   readonly selPrompt = signal('');
   /** AI edit scoped to the selection mask — the workspace runs the job. */
   readonly aiSelection = output<{ toolId: string; prompt: string; maskPngBase64: string }>();
-  /** Retail prices for the AI-on-selection buttons, pre-formatted. */
-  readonly aiRemovePrice = (
-    EDIT_TOOLS.find((t) => t.id === 'edit-remove')?.userPriceUsd ?? 0
-  ).toFixed(2);
-  readonly aiFillPrice = (EDIT_TOOLS.find((t) => t.id === 'edit-fill')?.userPriceUsd ?? 0).toFixed(
-    2,
-  );
+  /** Credit prices for the AI-on-selection buttons. */
+  readonly aiRemovePrice = EDIT_TOOLS.find((t) => t.id === 'edit-remove')?.creditCost ?? 0;
+  readonly aiFillPrice = EDIT_TOOLS.find((t) => t.id === 'edit-fill')?.creditCost ?? 0;
   /** True while an engine (ONNX) call runs from this strip. */
   readonly engineBusy = signal(false);
   readonly engineError = signal('');

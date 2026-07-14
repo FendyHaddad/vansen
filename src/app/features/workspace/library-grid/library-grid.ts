@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideCheck,
@@ -21,7 +20,7 @@ export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
   templateUrl: './library-grid.html',
   styleUrl: './library-grid.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon, CachedSrc],
+  imports: [NgIcon, CachedSrc],
   providers: [
     provideIcons({
       lucideCheck,

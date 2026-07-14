@@ -21,6 +21,21 @@ export class ProfileStore {
   readonly loaded = this.loadedSig.asReadonly();
 
   readonly displayName = computed(() => this.profileSig()?.displayName ?? '');
+
+  /** Active plan id, or null (expired / never subscribed). */
+  readonly plan = computed<SubscriptionPlan | null>(() => {
+    const sub = this.subscriptionSig();
+    if (!sub) return null;
+    if (sub.status === SubscriptionStatus.Expired) return null;
+    if (
+      sub.status === SubscriptionStatus.Canceled &&
+      sub.currentPeriodEnd && new Date(sub.currentPeriodEnd).getTime() < Date.now()
+    ) {
+      return null;
+    }
+    return sub.plan;
+  });
+
   readonly studioActive = computed(() => {
     const sub = this.subscriptionSig();
     if (!sub) return false;
@@ -70,7 +85,7 @@ export class ProfileStore {
   private apply(response: ProfileResponse): void {
     this.profileSig.set(response.profile);
     this.subscriptionSig.set(response.subscription);
-    this.ledger.setBalance(response.balanceUsd);
+    this.ledger.setCredits(response.credits);
     this.prefsService.applyServerPrefs(response.profile.prefs);
     this.loadedSig.set(true);
   }

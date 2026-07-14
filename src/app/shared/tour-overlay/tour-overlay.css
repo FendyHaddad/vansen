@@ -1,0 +1,220 @@
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  animation: tour-fade-in 0.25s ease;
+}
+
+/* Full dim for the centered welcome step. */
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  background: rgb(6 8 12 / 0.72);
+}
+
+/* Spotlight: transparent cutout, giant shadow dims everything else.
+   top/left/width/height come from [style] (computed target rect). */
+.tour-spot {
+  position: absolute;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgb(6 8 12 / 0.72);
+  transition:
+    top 0.25s ease,
+    left 0.25s ease,
+    width 0.25s ease,
+    height 0.25s ease;
+}
+
+.tour-spot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 2px solid color-mix(in oklch, var(--primary) 80%, transparent);
+  border-radius: 14px;
+  animation: tour-pulse 1.8s ease-out infinite;
+}
+
+.tour-card {
+  position: absolute;
+  width: 336px;
+  padding: 18px 18px 14px;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--card) 94%, var(--background));
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.35);
+  outline: none;
+  transition:
+    top 0.25s ease,
+    left 0.25s ease;
+}
+
+.tour-card-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.tour-kicker {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.tour-art {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+  padding: 10px 0;
+  border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--muted) 30%, transparent);
+}
+
+.tour-art svg {
+  width: 220px;
+  height: 90px;
+  animation: tour-art-in 0.3s ease;
+}
+
+.art-line {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+  opacity: 0.55;
+}
+
+.art-accent {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+}
+
+.art-fill {
+  fill: var(--primary);
+  stroke: none;
+}
+
+.tour-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.tour-body {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.tour-dots {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  transition: background-color 0.2s ease;
+}
+
+.tour-dot-on {
+  background: var(--primary);
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-spacer {
+  flex: 1;
+}
+
+.tour-skip,
+.tour-back {
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.tour-skip:hover,
+.tour-back:hover {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--muted) 55%, transparent);
+}
+
+.tour-next {
+  border: 0;
+  padding: 7px 16px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tour-next:hover {
+  filter: brightness(1.12);
+}
+
+@keyframes tour-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tour-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  70% {
+    transform: scale(1.035);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes tour-art-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-root,
+  .tour-art svg {
+    animation: none;
+  }
+  .tour-spot::after {
+    animation: none;
+    opacity: 0.9;
+  }
+  .tour-spot,
+  .tour-card,
+  .tour-dot {
+    transition: none;
+  }
+}

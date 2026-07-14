@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
@@ -16,35 +16,30 @@ import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmCardImports } from '@spartan-ng/helm/card';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
-import {
-  EDIT_TOOLS,
-  familyById,
-  upscaleUserPriceUsd,
-  userPriceUsd,
-} from '../../core/catalog/model-families';
+import { CREDIT_PACKS, PLAN_CREDITS, packCredits } from '../../core/catalog/model-families';
 
-interface TopUpOption {
-  amount: number;
-  popular: boolean;
-}
-
-interface StudioPerk {
-  icon: string;
-  text: string;
-}
-
-interface ExamplePrice {
+interface PlanCard {
+  id: 'studio' | 'pro';
   name: string;
-  kind: 'image' | 'video';
-  price: number;
+  priceUsd: number;
+  promoUsd: number;
+  credits: number;
+  tagline: string;
+  perks: string[];
+  featured: boolean;
+}
+
+interface PackRow {
+  usd: number;
+  bonusPct: number;
+  studioCredits: number;
+  proCredits: number;
 }
 
 interface PlanFaq {
   question: string;
   answer: string;
 }
-
-const STUDIO_PRICE = 5;
 
 @Component({
   selector: 'app-plans-page',
@@ -74,137 +69,78 @@ const STUDIO_PRICE = 5;
   ],
 })
 export class PlansPage {
-  readonly studioPrice = STUDIO_PRICE;
-
-  readonly topUpOptions: TopUpOption[] = [
-    { amount: 15, popular: true },
-    { amount: 25, popular: false },
-    { amount: 55, popular: false },
-    { amount: 105, popular: false },
-  ];
-
-  readonly selectedAmount = signal(15);
-
-  /** First top-up: $5 covers the first month of Studio, rest is generation balance. */
-  readonly usableBalance = computed(() => this.selectedAmount() - STUDIO_PRICE);
-
-  readonly imageEstimate = computed(() =>
-    Math.floor(this.usableBalance() / this.examplePrices[0].price),
-  );
-  readonly clipEstimate = computed(() =>
-    Math.floor(this.usableBalance() / this.examplePrices[4].price),
-  );
-
-  readonly studioPerks: StudioPerk[] = [
-    { icon: 'lucideInfinity', text: 'Your balance never expires while Studio is active' },
-    { icon: 'lucideFolderLock', text: 'Private library — every output in full resolution' },
-    { icon: 'lucideHistory', text: 'Prompt and settings saved with every asset, remix any time' },
-    { icon: 'lucideDownload', text: 'Unlimited downloads, no watermarks' },
-    { icon: 'lucideShieldCheck', text: 'Full editing suite — 19 on-canvas tools, free and unlimited' },
-  ];
-
-  readonly examplePrices: ExamplePrice[] = [
+  readonly plans: PlanCard[] = [
     {
-      name: 'Nano Banana image (1K)',
-      kind: 'image',
-      price: userPriceUsd(familyById('nano-banana')!, { version: 'standard', aspectRatio: '1:1', resolution: '1K' }),
+      id: 'studio',
+      name: 'Studio',
+      priceUsd: 15,
+      promoUsd: 10,
+      credits: PLAN_CREDITS.studio,
+      tagline: 'Every image model plus the full editing suite.',
+      perks: [
+        `${PLAN_CREDITS.studio.toLocaleString()} credits every month`,
+        'All image models — Nano Banana, GPT Image, FLUX, Seedream',
+        'Full on-device editing suite, free and unlimited',
+        'AI edit tools from 5 credits per run',
+        'Private full-resolution library, no watermarks',
+      ],
+      featured: false,
     },
     {
-      name: 'GPT Image 2 (medium, 1K)',
-      kind: 'image',
-      price: userPriceUsd(familyById('gpt-image')!, { version: '2', aspectRatio: '1:1', quality: 'medium', resolution: '1K' }),
-    },
-    {
-      name: 'Seedream image (1K)',
-      kind: 'image',
-      price: userPriceUsd(familyById('seedream')!, { aspectRatio: '1:1', resolution: '1K' }),
-    },
-    {
-      name: 'FLUX.2 [pro] image (1MP)',
-      kind: 'image',
-      price: userPriceUsd(familyById('flux')!, { aspectRatio: '1:1', resolution: '1MP' }),
-    },
-    {
-      name: 'Kling clip (5s)',
-      kind: 'video',
-      price: userPriceUsd(familyById('kling')!, { aspectRatio: '16:9', durationS: 5 }),
-    },
-    {
-      name: 'Sora 2 clip (4s)',
-      kind: 'video',
-      price: userPriceUsd(familyById('sora')!, { version: 'standard', aspectRatio: '16:9', resolution: '720p', durationS: 4 }),
-    },
-    {
-      name: 'Runway Gen-4.5 clip (5s)',
-      kind: 'video',
-      price: userPriceUsd(familyById('runway')!, { version: 'gen45', aspectRatio: '16:9', durationS: 5 }),
-    },
-    {
-      name: 'Veo 3.1 clip (4s, audio)',
-      kind: 'video',
-      price: userPriceUsd(familyById('veo')!, { version: 'standard', aspectRatio: '16:9', resolution: '1080p', durationS: 4 }),
+      id: 'pro',
+      name: 'Pro',
+      priceUsd: 30,
+      promoUsd: 25,
+      credits: PLAN_CREDITS.pro,
+      tagline: 'Everything in Studio, plus video and the cheapest credits.',
+      perks: [
+        'Everything in Studio, plus:',
+        `${PLAN_CREDITS.pro.toLocaleString()} credits every month — 25% more per dollar`,
+        'Video models — Veo, Sora, Kling, Runway, Seedance',
+        'Same jobs cost 20% less than on Studio',
+        'Biggest add-on packs: up to 13,750 credits for $100',
+      ],
+      featured: true,
     },
   ];
 
-  /** Generative edit tools with live retail prices from the shared catalog. */
-  readonly editTools = EDIT_TOOLS;
-
-  readonly upscalePrice = upscaleUserPriceUsd();
-
-  /** On-canvas tools included with Studio — mirrors the workspace right panel. */
-  readonly freeToolChips = [
-    'Crop',
-    'Adjust',
-    '17 Filters',
-    'Sharpen',
-    'Smooth',
-    'Spot Heal',
-    'Magic Erase',
-    'Smart Select',
-    'AI Upscale',
-    'Cut Out',
-    'Bokeh',
-    'Enhance',
-    'Levels',
-    'Clone',
-    'Retouch',
-    'Perspective',
-    'Liquify',
-    'Dehaze',
-    'Portrait Smooth',
-  ];
+  readonly packs: PackRow[] = CREDIT_PACKS.map((p) => ({
+    usd: p.usd,
+    bonusPct: p.bonusPct,
+    studioCredits: packCredits(p.usd, 'studio'),
+    proCredits: packCredits(p.usd, 'pro'),
+  }));
 
   readonly faqs: PlanFaq[] = [
     {
-      question: 'What does a generation cost?',
+      question: 'How do credits work?',
       answer:
-        'Every model has a fixed price shown before you generate — most images cost a few cents, video clips run from about fifty cents to a few dollars. No tiers, no gating: any model, any time your balance covers it.',
+        'Every generation has a fixed credit price shown before you run it — most images cost 5–25 credits, AI edits 5–10. Your plan grants a fresh batch every billing cycle: 1,500 on Studio, 3,750 on Pro.',
     },
     {
-      question: 'Does my balance expire?',
+      question: 'Do credits roll over?',
       answer:
-        'Never, while your Studio is active. Top up $50 today and spend it over a year if you like — unlike subscription credits, it does not reset every month.',
+        'Plan credits reset at each renewal — use them within the cycle. Add-on pack credits are different: they roll over month to month for as long as your subscription is active.',
     },
     {
-      question: 'What exactly is Studio?',
+      question: 'What if I run out mid-month?',
       answer:
-        'Studio is your $5/month workspace: it keeps your library online in full resolution, stores the prompt and settings with every asset, and keeps your balance alive indefinitely. Your first top-up includes the first month.',
-    },
-    {
-      question: 'What happens if I let Studio lapse?',
-      answer:
-        'You keep access until the end of the paid month, then a 30-day grace period to download everything. After that your library is permanently deleted. Any remaining generation balance stays yours and works again the moment you reactivate.',
+        'Add a one-time credit pack ($10–$100) from Billing. Bigger packs carry a bonus, Pro subscribers get 25% more credits per dollar, and pack credits never reset while you stay subscribed.',
     },
     {
       question: 'What does editing cost?',
       answer:
-        'The on-canvas suite — crop, filters, heal, cut out, bokeh, upscale and more — is included with Studio and runs on your own device, so it is free and unlimited. Generative edits (remove, fill, expand, background) are flat-priced from $0.05 per run, and saving an edited version costs nothing.',
+        'The on-canvas suite — crop, filters, heal, cut out, bokeh, upscale and more — runs on your own device, so it is free and unlimited on every plan. Generative AI edits (remove, fill, expand, background) cost 5–10 credits per run, and saving an edited version costs nothing.',
     },
     {
-      question: 'Why not a subscription?',
+      question: 'Why is video Pro-only?',
       answer:
-        'Subscriptions charge you the same whether you create or not, and take back unused credits every month. Here generation is pay-as-you-go and the only recurring part is $5 to keep your studio open.',
+        'Video generations cost many times more to run than images, so they live on the plan with the bigger grant and cheaper credits. Pro also makes every image cheaper — the same job costs 20% less than on Studio.',
+    },
+    {
+      question: 'What happens if I cancel?',
+      answer:
+        'You keep access until the end of the paid period. Pack credits expire 30 days after your subscription ends, and after the same 30-day grace your library is permanently deleted — download anything you want to keep.',
     },
   ];
-
 }

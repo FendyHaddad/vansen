@@ -15,13 +15,6 @@
       </span>
       <span class="bar-email">{{ email() }}</span>
     </span>
-    @if (isOwner()) {
-      <span class="bar-balance">Unlimited</span>
-    } @else {
-      <span class="bar-balance" [class.bar-balance-low]="balanceUsd() < 1">
-        ${{ balanceUsd() | number: '1.2-2' }}
-      </span>
-    }
   </button>
 } @else {
   <button
@@ -42,18 +35,22 @@
       @if (isOwner()) {
         <span class="menu-balance">Unlimited</span>
       } @else {
-        <span class="menu-balance">${{ balanceUsd() | number: '1.2-2' }}</span>
+        <span class="menu-balance">{{ totalCredits() | number }} cr</span>
       }
     </div>
     <hlm-dropdown-menu-separator />
     <button hlmDropdownMenuItem (triggered)="topUp.emit()">
       <ng-icon name="lucidePlus" size="15" />
-      Top up <span class="num">$20</span>
+      Buy credits
     </button>
     <a hlmDropdownMenuItem routerLink="/app/settings">
       <ng-icon name="lucideSettings" size="15" />
       Settings
     </a>
+    <button hlmDropdownMenuItem (triggered)="startTour.emit()">
+      <ng-icon name="lucideCompass" size="15" />
+      Take the tour
+    </button>
     <hlm-dropdown-menu-separator />
     <button hlmDropdownMenuItem (triggered)="signOut.emit()">
       <ng-icon name="lucideLogOut" size="15" />

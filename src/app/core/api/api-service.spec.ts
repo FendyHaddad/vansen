@@ -20,7 +20,7 @@ describe('ApiService', () => {
 
   it('maps error body to ApiError with status and attaches bearer token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: { code: 'insufficient_balance', message: 'Top up' } }), {
+      new Response(JSON.stringify({ error: { code: 'insufficient_credits', message: 'Top up' } }), {
         status: 402,
       }),
     );
@@ -28,7 +28,7 @@ describe('ApiService', () => {
 
     const api = makeApi('tok');
     await expect(api.post('/generations', {})).rejects.toMatchObject({
-      code: 'insufficient_balance',
+      code: 'insufficient_credits',
       status: 402,
       message: 'Top up',
     });

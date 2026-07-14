@@ -1,6 +1,6 @@
 import { Injectable, InjectionToken, inject } from '@angular/core';
 import { ApiService } from '../api/api-service';
-import { CheckoutRequest, CheckoutResponse, ReconcileResponse } from '../api/dtos';
+import { CheckoutResponse, PackRequest, ReconcileResponse, SubscribeRequest } from '../api/dtos';
 import { LedgerService } from '../ledger/ledger-service';
 
 /** Overridable in tests; defaults to a full-page redirect (Stripe-hosted pages). */
@@ -15,17 +15,17 @@ export class BillingService {
   private readonly ledger = inject(LedgerService);
   private readonly navigate = inject(BILLING_NAVIGATE);
 
-  /** Redirects to Stripe Checkout for a credits top-up (server adds Studio when needed). */
-  async checkout(creditsUsd: number): Promise<void> {
-    const body: CheckoutRequest = { creditsUsd };
-    const { url } = await this.api.post<CheckoutResponse>('/billing/checkout', body);
+  /** Redirects to Stripe Checkout for a Studio or Pro subscription. */
+  async subscribe(plan: 'studio' | 'pro'): Promise<void> {
+    const body: SubscribeRequest = { plan };
+    const { url } = await this.api.post<CheckoutResponse>('/billing/subscribe', body);
     this.navigate(url);
   }
 
-  /** Studio-only $5 checkout for lapsed accounts. */
-  async reactivateStudio(): Promise<void> {
-    const body: CheckoutRequest = { studioOnly: true };
-    const { url } = await this.api.post<CheckoutResponse>('/billing/checkout', body);
+  /** Redirects to Stripe Checkout for an add-on credit pack (subscribers only). */
+  async buyPack(usd: number): Promise<void> {
+    const body: PackRequest = { usd };
+    const { url } = await this.api.post<CheckoutResponse>('/billing/pack', body);
     this.navigate(url);
   }
 
@@ -35,10 +35,10 @@ export class BillingService {
     this.navigate(url);
   }
 
-  /** Self-heal: credits any paid session missing from the ledger. Returns count. */
+  /** Self-heal: credits any paid pack session missing from the ledger. Returns count. */
   async reconcile(): Promise<number> {
     const response = await this.api.post<ReconcileResponse>('/billing/reconcile', {});
-    this.ledger.setBalance(response.balanceUsd);
+    this.ledger.setCredits(response.credits);
     return response.credited;
   }
 }

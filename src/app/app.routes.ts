@@ -32,13 +32,5 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage),
   },
-  {
-    path: 'admin/pricing',
-    loadComponent: () => import('./features/pricing/pricing-page').then((m) => m.PricingPage),
-  },
-  {
-    path: 'admin/compare',
-    loadComponent: () => import('./features/compare/compare-page').then((m) => m.ComparePage),
-  },
   { path: '**', redirectTo: '' },
 ];

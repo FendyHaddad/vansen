@@ -11,7 +11,16 @@ import {
 describe('domain enums', () => {
   it('mirror DB check constraints exactly', () => {
     expect(Object.values(LedgerType).sort()).toEqual(
-      ['edit', 'generate', 'promo', 'refund', 'studio_fee', 'topup', 'trial_credit', 'upscale'].sort(),
+      [
+        'cycle_reset',
+        'edit',
+        'generate',
+        'pack_expiry',
+        'pack_purchase',
+        'promo',
+        'refund',
+        'upscale',
+      ].sort(),
     );
     expect(Object.values(GenerationOp).sort()).toEqual(
       ['edit', 'generate', 'upscale', 'variation'].sort(),

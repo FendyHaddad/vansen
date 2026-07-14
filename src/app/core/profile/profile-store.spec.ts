@@ -15,14 +15,14 @@ function response(subscription: SubscriptionDto | null): ProfileResponse {
       prefs: {},
       createdAt: '2026-01-01T00:00:00Z',
     },
-    balanceUsd: 0,
+    credits: { plan: 0, pack: 0 },
     subscription,
   };
 }
 
 describe('ProfileStore plan computeds', () => {
   const apiMock = { get: vi.fn(), patch: vi.fn(), delete: vi.fn() };
-  const ledgerMock = { setBalance: vi.fn() };
+  const ledgerMock = { setCredits: vi.fn() };
   const prefsMock = { applyServerPrefs: vi.fn() };
 
   function make(): ProfileStore {
@@ -39,8 +39,49 @@ describe('ProfileStore plan computeds', () => {
 
   beforeEach(() => {
     apiMock.get.mockReset();
-    ledgerMock.setBalance.mockReset();
+    ledgerMock.setCredits.mockReset();
     prefsMock.applyServerPrefs.mockReset();
+  });
+
+  it('plan() resolves the active plan and nulls expired ones', async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'pro', status: 'active', currentPeriodEnd: future }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.plan()).toBe('pro');
+  });
+
+  it('plan() is null with no subscription or an expired one', async () => {
+    apiMock.get.mockResolvedValue(response(null));
+    const store = make();
+    await store.load();
+    expect(store.plan()).toBeNull();
+
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'expired', currentPeriodEnd: past }),
+    );
+    await store.load();
+    expect(store.plan()).toBeNull();
+  });
+
+  it('plan() keeps a canceled subscription until its period end', async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'canceled', currentPeriodEnd: future }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.plan()).toBe('studio');
+
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'canceled', currentPeriodEnd: past }),
+    );
+    await store.load();
+    expect(store.plan()).toBeNull();
   });
 
   it('owner subscription: isOwner, proActive, studioActive all true', async () => {

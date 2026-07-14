@@ -24,16 +24,23 @@ export interface SubscriptionDto {
   currentPeriodEnd: string | null;
 }
 
+/** Two-bucket credit balance: plan resets each cycle, pack rolls over. */
+export interface CreditsDto {
+  plan: number;
+  pack: number;
+}
+
 export interface ProfileResponse {
   profile: ProfileDto;
-  balanceUsd: number;
+  credits: CreditsDto;
   subscription: SubscriptionDto | null;
 }
 
 export interface LedgerEntryDto {
   id: string;
   type: LedgerType;
-  amountUsd: number;
+  amountCredits: number;
+  bucket: 'plan' | 'pack';
   familyId: string | null;
   note: string | null;
   createdAt: string;
@@ -51,7 +58,7 @@ export interface GenerationDto {
   op: GenerationOp;
   prompt: string;
   settings: GenerationSettings;
-  priceUsd: number;
+  priceCredits: number;
   status: GenerationStatus;
   mediaUrl: string;
   parentId: string | null;
@@ -75,7 +82,7 @@ export interface CreateGenerationRequest {
 
 export interface CreateGenerationResponse {
   items: GenerationDto[];
-  balanceUsd: number;
+  credits: CreditsDto;
 }
 
 export interface JobsResponse {
@@ -95,9 +102,12 @@ export interface SaveEditResponse {
   item: GenerationDto;
 }
 
-export interface CheckoutRequest {
-  creditsUsd?: number;
-  studioOnly?: boolean;
+export interface SubscribeRequest {
+  plan: 'studio' | 'pro';
+}
+
+export interface PackRequest {
+  usd: number;
 }
 
 export interface CheckoutResponse {
@@ -106,5 +116,5 @@ export interface CheckoutResponse {
 
 export interface ReconcileResponse {
   credited: number;
-  balanceUsd: number;
+  credits: CreditsDto;
 }

@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CREDIT_PACKS,
   EDIT_TOOLS,
   MODEL_FAMILIES,
+  PLAN_CREDITS,
+  STUDIO_MARGIN,
+  creditCost,
   defaultSettings,
   editToolById,
   familyById,
-  upscaleUserPriceUsd,
-  userPriceUsd,
+  packCredits,
+  upscaleCreditCost,
 } from './model-families';
 
 describe('model families', () => {
@@ -71,12 +75,6 @@ describe('model families', () => {
     expect(s.aspectRatio).toBe(gpt.capabilities.aspectRatios[0]);
   });
 
-  it('user price applies 33% margin', () => {
-    const nb = familyById('nano-banana')!;
-    expect(userPriceUsd(nb, { version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039 / 0.67);
-    expect(upscaleUserPriceUsd()).toBeCloseTo(0.04 / 0.67);
-  });
-
   it('EDIT_TOOLS carries the four fixed-price studio AI tools', () => {
     expect(EDIT_TOOLS.map((t) => t.id)).toEqual([
       'edit-remove',
@@ -84,13 +82,6 @@ describe('model families', () => {
       'edit-expand',
       'edit-bg',
     ]);
-  });
-
-  it('edit tools use fixed retail prices, not the margin formula', () => {
-    expect(editToolById('edit-remove')?.userPriceUsd).toBe(0.1);
-    expect(editToolById('edit-fill')?.userPriceUsd).toBe(0.1);
-    expect(editToolById('edit-expand')?.userPriceUsd).toBe(0.1);
-    expect(editToolById('edit-bg')?.userPriceUsd).toBe(0.05);
   });
 
   it('edit tools mark mask and prompt requirements', () => {
@@ -112,5 +103,48 @@ describe('model families', () => {
         for (const o of opts ?? []) expect(o.tooltip.length).toBeGreaterThan(10);
       }
     }
+  });
+});
+
+describe('credit pricing', () => {
+  it('uses a 40% studio margin and 1500/3750 grants', () => {
+    expect(STUDIO_MARGIN).toBe(0.4);
+    expect(PLAN_CREDITS.studio).toBe(1500);
+    expect(PLAN_CREDITS.pro).toBe(3750);
+  });
+
+  it('computes credit cost as ceil(providerCost / 0.6 * 100)', () => {
+    const seedream = familyById('seedream')!;
+    // provider $0.03 → $0.05 retail → 5 credits
+    expect(creditCost(seedream, defaultSettings(seedream))).toBe(5);
+    const flux = familyById('flux')!;
+    // provider $0.03 (1MP) → 5 credits
+    expect(creditCost(flux, defaultSettings(flux))).toBe(5);
+  });
+
+  it('always yields a positive integer for every family/default', () => {
+    for (const family of MODEL_FAMILIES) {
+      const credits = creditCost(family, defaultSettings(family));
+      expect(Number.isInteger(credits)).toBe(true);
+      expect(credits).toBeGreaterThan(0);
+    }
+  });
+
+  it('prices AI edit tools at fixed credit costs', () => {
+    const byId = Object.fromEntries(EDIT_TOOLS.map((t) => [t.id, t.creditCost]));
+    expect(byId).toEqual({ 'edit-remove': 10, 'edit-fill': 10, 'edit-expand': 10, 'edit-bg': 5 });
+    expect(upscaleCreditCost()).toBe(7);
+  });
+
+  it('computes pack credits with tier rate and size bonus', () => {
+    expect(CREDIT_PACKS.map((p) => p.usd)).toEqual([10, 25, 50, 100]);
+    expect(packCredits(10, 'studio')).toBe(1000);
+    expect(packCredits(25, 'studio')).toBe(2625);
+    expect(packCredits(50, 'studio')).toBe(5400);
+    expect(packCredits(100, 'studio')).toBe(11000);
+    expect(packCredits(10, 'pro')).toBe(1250);
+    expect(packCredits(25, 'pro')).toBe(3281);
+    expect(packCredits(50, 'pro')).toBe(6750);
+    expect(packCredits(100, 'pro')).toBe(13750);
   });
 });

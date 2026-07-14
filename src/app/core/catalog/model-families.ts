@@ -1,5 +1,3 @@
-import { PAYG_MARGIN } from '../../features/pricing/model-catalog';
-
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration';
 
@@ -63,6 +61,30 @@ const GPT_COST: Record<string, Record<string, number>> = {
   '1.5': { low: 0.009, medium: 0.034, high: 0.133 },
   '1': { low: 0.011, medium: 0.042, high: 0.167 },
 };
+
+/** Margin baked into the credit charge table. 1 credit = $0.01 of Studio retail. */
+export const STUDIO_MARGIN = 0.4;
+
+/** Monthly credit grant per subscription plan (owner is unlimited, never granted). */
+export const PLAN_CREDITS = { studio: 1500, pro: 3750 } as const;
+
+/** Pro buyers get 25% more credits per dollar — same jobs cost 20% less. */
+export const PRO_PURCHASE_RATE = 1.25;
+
+/** Add-on packs: one-time purchases, tier rate × size bonus. Subscriber-only. */
+export const CREDIT_PACKS: { usd: number; bonusPct: number }[] = [
+  { usd: 10, bonusPct: 0 },
+  { usd: 25, bonusPct: 5 },
+  { usd: 50, bonusPct: 8 },
+  { usd: 100, bonusPct: 10 },
+];
+
+export function packCredits(usd: number, plan: 'studio' | 'pro'): number {
+  const pack = CREDIT_PACKS.find((p) => p.usd === usd);
+  if (!pack) return 0;
+  const rate = plan === 'pro' ? PRO_PURCHASE_RATE : 1;
+  return Math.floor(usd * 100 * rate * (1 + pack.bonusPct / 100));
+}
 
 export const MODEL_FAMILIES: ModelFamily[] = [
   {
@@ -308,8 +330,8 @@ export const UPSCALER = {
 export interface EditTool {
   id: string;
   name: string;
-  /** What the user pays per use — fixed retail. */
-  userPriceUsd: number;
+  /** Fixed credit price per use — NOT the margin formula. */
+  creditCost: number;
   /** Our provider cost, for margin bookkeeping only. */
   providerCost: number;
   /** Tool needs a painted mask before it can run. */
@@ -323,7 +345,7 @@ export const EDIT_TOOLS: EditTool[] = [
   {
     id: 'edit-remove',
     name: 'Remove Object',
-    userPriceUsd: 0.1,
+    creditCost: 10,
     providerCost: 0.05,
     needsMask: true,
     needsPrompt: false,
@@ -332,7 +354,7 @@ export const EDIT_TOOLS: EditTool[] = [
   {
     id: 'edit-fill',
     name: 'Generative Fill',
-    userPriceUsd: 0.1,
+    creditCost: 10,
     providerCost: 0.05,
     needsMask: true,
     needsPrompt: true,
@@ -341,7 +363,7 @@ export const EDIT_TOOLS: EditTool[] = [
   {
     id: 'edit-expand',
     name: 'Expand',
-    userPriceUsd: 0.1,
+    creditCost: 10,
     providerCost: 0.05,
     needsMask: false,
     needsPrompt: false,
@@ -350,7 +372,7 @@ export const EDIT_TOOLS: EditTool[] = [
   {
     id: 'edit-bg',
     name: 'Remove Background',
-    userPriceUsd: 0.05,
+    creditCost: 5,
     providerCost: 0.002,
     needsMask: false,
     needsPrompt: false,
@@ -379,10 +401,11 @@ export function defaultSettings(family: ModelFamily): GenerationSettings {
   };
 }
 
-export function userPriceUsd(family: ModelFamily, s: GenerationSettings): number {
-  return family.providerCost(s) / (1 - PAYG_MARGIN);
+/** Integer credits for one output: ceil(providerCost / (1 − margin) × 100). */
+export function creditCost(family: ModelFamily, s: GenerationSettings): number {
+  return Math.ceil((family.providerCost(s) / (1 - STUDIO_MARGIN)) * 100);
 }
 
-export function upscaleUserPriceUsd(): number {
-  return UPSCALER.providerCost / (1 - PAYG_MARGIN);
+export function upscaleCreditCost(): number {
+  return Math.ceil((UPSCALER.providerCost / (1 - STUDIO_MARGIN)) * 100);
 }

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, HostListener, input, output } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideDownload,
@@ -9,7 +9,7 @@ import {
   lucideX,
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
-import { upscaleUserPriceUsd } from '../../../core/catalog/model-families';
+import { upscaleCreditCost } from '../../../core/catalog/model-families';
 import { CachedSrc } from '../../../core/media/cached-src';
 
 /**
@@ -21,7 +21,7 @@ import { CachedSrc } from '../../../core/media/cached-src';
   templateUrl: './detail-overlay.html',
   styleUrl: './detail-overlay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, NgIcon, CachedSrc],
+  imports: [DatePipe, NgIcon, CachedSrc],
   providers: [
     provideIcons({ lucideDownload, lucideSparkles, lucidePencil, lucideTrash2, lucideX }),
   ],
@@ -38,7 +38,7 @@ export class DetailOverlay {
   readonly deleted = output<string>();
   readonly openParent = output<string>();
 
-  readonly upscalePrice = upscaleUserPriceUsd();
+  readonly upscaleCredits = upscaleCreditCost();
 
   @HostListener('document:keydown.escape')
   onEscape(): void {

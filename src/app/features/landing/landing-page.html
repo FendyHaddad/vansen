@@ -11,12 +11,12 @@
       </span>
       <h1 class="hero-title">
         Create with the best AI models.<br />
-        <span class="hero-title-dim">Pay only for what you make.</span>
+        <span class="hero-title-dim">One plan. Every frontier model.</span>
       </h1>
       <p class="hero-sub">
         Vansen puts Google, OpenAI, Black Forest Labs and ByteDance behind one prompt box —
-        then hands you a full editor to finish the job. No subscriptions for generating,
-        no watermarks, no expiring credits.
+        then hands you a full editor to finish the job. Your subscription comes back as
+        monthly credits: $15 buys 1,500, $30 buys 3,750 plus video.
       </p>
       <div class="hero-ctas">
         <a routerLink="/login" hlmBtn size="lg">
@@ -34,7 +34,6 @@
               <span class="prompt-mock-line" [style.animation-delay.s]="i * 4">{{ p }}</span>
             }
           </span>
-          <span class="prompt-mock-price num">$0.05</span>
           <span class="prompt-mock-btn">Generate</span>
         </div>
         <p class="prompt-mock-note">The exact price of every run, shown before you press it.</p>
@@ -54,8 +53,8 @@
           <dd><span class="num">$0.04</span></dd>
         </div>
         <div class="hero-stat">
-          <dt>Keep it all for</dt>
-          <dd><span class="num">$5</span>/mo</dd>
+          <dt>Plans from</dt>
+          <dd><span class="num">$15</span>/mo</dd>
         </div>
       </dl>
     </div>
@@ -89,22 +88,19 @@
     <p class="eyebrow">The catalog</p>
     <h2 class="section-heading">Pick the model that fits the job.</h2>
     <p class="section-sub">
-      Each family has its own look, strengths and price. Switch per prompt — your balance
-      works across all of them.
+      Each family has its own look, strengths and price. Switch per prompt — your credits
+      work across all of them.
     </p>
 
     <div class="family-grid mt-10">
-      @for (card of imageFamilies; track card.family.id) {
+      @for (family of imageFamilies; track family.id) {
         <div class="family-card" data-reveal>
           <div class="family-card-top">
-            <img [src]="card.family.logo" [alt]="card.family.provider" class="family-card-logo" />
-            <span class="family-card-provider">{{ card.family.provider }}</span>
+            <img [src]="family.logo" [alt]="family.provider" class="family-card-logo" />
+            <span class="family-card-provider">{{ family.provider }}</span>
           </div>
-          <h3 class="family-card-name">{{ card.family.name }}</h3>
-          <p class="family-card-blurb">{{ card.family.blurb }}</p>
-          <p class="family-card-price">
-            typical <span class="num">${{ card.fromPrice | number: '1.2-2' }}</span> / image
-          </p>
+          <h3 class="family-card-name">{{ family.name }}</h3>
+          <p class="family-card-blurb">{{ family.blurb }}</p>
         </div>
       }
     </div>
@@ -113,7 +109,7 @@
       <div class="video-teaser-head">
         <ng-icon name="lucideVideo" size="16" />
         <h3>Video is next</h3>
-        <span hlmBadge variant="secondary">Coming with Pro</span>
+        <span hlmBadge variant="secondary">Pro plan</span>
       </div>
       <p class="video-teaser-body">
         @for (f of videoFamilies; track f.id; let last = $last) {
@@ -121,8 +117,8 @@
         }
       </p>
       <p class="video-teaser-note">
-        The same pay-per-clip pricing, the same private library — cinematic clips with
-        native audio, arriving with the Pro tier.
+        The same per-clip credit pricing, the same private library — cinematic clips with
+        native audio, exclusive to the Pro plan.
       </p>
     </div>
   </section>
@@ -134,7 +130,7 @@
       <h2 class="section-heading">Generating is half the work.<br />The editor is the other half.</h2>
       <p class="section-sub">
         Every image opens on a canvas with a full editing suite — the kind you'd otherwise
-        pay a photo app for, included with Studio.
+        pay a photo app for, included with every plan.
       </p>
 
       <div class="chip-cloud mt-10" data-reveal>
@@ -156,21 +152,6 @@
         }
       </div>
 
-      <div class="ai-price-strip mt-12" data-reveal>
-        <p class="ai-price-label">Generative edits</p>
-        <div class="ai-price-row">
-          @for (tool of editTools; track tool.id) {
-            <div class="ai-price-item" [title]="tool.blurb">
-              <span class="ai-price-name">{{ tool.name }}</span>
-              <span class="ai-price-tag num">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
-            </div>
-          }
-          <div class="ai-price-item" title="Saving an edited version costs nothing.">
-            <span class="ai-price-name">Save a version</span>
-            <span class="ai-price-tag ai-price-free">Free</span>
-          </div>
-        </div>
-      </div>
     </div>
   </section>
 
@@ -195,11 +176,11 @@
       <div class="pricing-teaser">
         <div class="pricing-teaser-copy">
           <p class="eyebrow">Pricing</p>
-          <h2 class="section-heading">No subscription for generating.<br />Just $5 to keep the lights on.</h2>
+          <h2 class="section-heading">Two plans.<br />Full value back in credits.</h2>
           <p class="section-sub">
-            Generation is pay-as-you-go from a balance that never expires. Studio — your
-            private library, versions and editing suite — is $5 a month, first month
-            included with your first top-up.
+            Studio is $15/mo for 1,500 credits and every image model. Pro is $30/mo for
+            3,750 credits — 25% more per dollar — plus video. Run low? Add a one-time
+            credit pack that rolls over while you stay subscribed.
           </p>
           <a routerLink="/pricing" hlmBtn variant="outline" class="mt-6">
             See full pricing
@@ -208,16 +189,12 @@
         </div>
         <ul class="pricing-teaser-perks">
           <li>
-            <ng-icon name="lucideZap" size="15" />
-            <span>Start at <span class="num">$15</span> — <span class="num">$10</span> balance + first Studio month</span>
-          </li>
-          <li>
             <ng-icon name="lucideInfinity" size="15" />
-            <span>Balance never expires while Studio is active</span>
+            <span>Add-on pack credits roll over while you're subscribed</span>
           </li>
           <li>
             <ng-icon name="lucideImage" size="15" />
-            <span>Fixed price per output — most images cost cents</span>
+            <span>Every model's exact price shown before you run it</span>
           </li>
           <li>
             <ng-icon name="lucideFolderLock" size="15" />
@@ -232,8 +209,7 @@
   <section class="cta-final mx-auto max-w-4xl px-6 py-24 text-center" data-reveal>
     <h2 class="cta-title">Your next image is a prompt away.</h2>
     <p class="section-sub mx-auto">
-      Top up once, try every model, keep everything. If it's not for you, your balance
-      waits — it never expires.
+      Pick a plan, try every model, keep everything.
     </p>
     <div class="hero-ctas justify-center">
       <a routerLink="/login" hlmBtn size="lg">

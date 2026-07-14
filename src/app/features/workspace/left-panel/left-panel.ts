@@ -6,7 +6,6 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideChevronDown,
@@ -25,10 +24,11 @@ import {
   MODEL_FAMILIES,
   ModelFamily,
   ModelKind,
+  creditCost,
   defaultSettings,
-  userPriceUsd,
 } from '../../../core/catalog/model-families';
 import { LedgerService } from '../../../core/ledger/ledger-service';
+import { ProfileStore } from '../../../core/profile/profile-store';
 import { PreferencesService } from '../../../core/preferences/preferences-service';
 import { ApiService } from '../../../core/api/api-service';
 import { UploadResponse } from '../../../core/api/dtos';
@@ -48,8 +48,8 @@ export interface GenerateRequest {
   referenceUrl: string | null;
   /** Outputs requested in this run. */
   batch: number;
-  /** Total price for the whole batch. */
-  priceUsd: number;
+  /** Total credit price for the whole batch (display/confirm only — server prices). */
+  priceCredits: number;
 }
 
 export interface ReferenceSelection {
@@ -73,7 +73,7 @@ const AXIS_TOOLTIPS = {
   templateUrl: './left-panel.html',
   styleUrl: './left-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon, HlmButton, OptionGroup, Hint, CachedSrc, ...HlmDropdownMenuImports],
+  imports: [NgIcon, HlmButton, OptionGroup, Hint, CachedSrc, ...HlmDropdownMenuImports],
   providers: [
     provideIcons({
       lucideImage,
@@ -88,6 +88,7 @@ const AXIS_TOOLTIPS = {
 })
 export class LeftPanel {
   private readonly ledger = inject(LedgerService);
+  private readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
   private readonly api = inject(ApiService);
   private readonly availability = inject(ModelAvailability);
@@ -186,10 +187,15 @@ export class LeftPanel {
         : `${n} different takes on the same prompt in one run — ${n}× the price.`,
   }));
 
+  /** Owner accounts have unlimited credits — the price is shown, never a blocker. */
+  readonly isOwner = this.profileStore.isOwner;
+
   readonly batch = computed(() => this.settings().batch ?? 1);
-  readonly unitPriceUsd = computed(() => userPriceUsd(this.family(), this.settings()));
-  readonly priceUsd = computed(() => this.unitPriceUsd() * this.batch());
-  readonly insufficient = computed(() => this.priceUsd() > this.ledger.balanceUsd());
+  readonly unitCredits = computed(() => creditCost(this.family(), this.settings()));
+  readonly priceCredits = computed(() => this.unitCredits() * this.batch());
+  readonly insufficient = computed(
+    () => !this.isOwner() && this.priceCredits() > this.ledger.totalCredits(),
+  );
   readonly canGenerate = computed(
     () => this.prompt().trim().length > 0 && !this.insufficient(),
   );
@@ -268,7 +274,7 @@ export class LeftPanel {
       referenceUploadId: this.reference()?.uploadId ?? null,
       referenceUrl: this.reference()?.url ?? null,
       batch: this.batch(),
-      priceUsd: this.priceUsd(),
+      priceCredits: this.priceCredits(),
     });
     this.prompt.set('');
   }

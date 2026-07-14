@@ -116,6 +116,17 @@
   color: var(--muted-foreground);
 }
 
+.hero-promo {
+  display: inline-block;
+  margin-top: 1.25rem;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in oklch, var(--primary) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary) 8%, var(--background));
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .hero-ctas {
   display: flex;
   align-items: center;

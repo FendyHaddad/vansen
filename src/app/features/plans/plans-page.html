@@ -4,155 +4,80 @@
   <section class="mx-auto max-w-4xl px-6 pb-4 pt-12 text-center">
     <span hlmBadge variant="secondary" class="mb-4">Pricing</span>
     <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">
-      Pay for what you create.
+      One subscription. Every model.
     </h1>
     <p class="muted mx-auto mt-4 max-w-xl text-lg">
-      No subscription for generating. Start from $15 — $10 balance plus your first month
-      of Studio. Spend on any model at the price shown.
+      Studio $15/mo or Pro $30/mo, with the full price back in monthly credits.
+      Spend them on any model at the price shown.
+    </p>
+    <p class="promo-strip mx-auto mt-4">
+      Launch offer — first-time subscribers pay <span class="num">$10</span> /
+      <span class="num">$25</span> for their first 60 days, full credit grant included.
     </p>
   </section>
 
   <section class="mx-auto max-w-5xl px-6 py-10">
-    <div class="grid gap-5 lg:grid-cols-5">
-      <div hlmCard class="lg:col-span-3">
-        <div hlmCardHeader>
-          <h2 hlmCardTitle>Top up credits</h2>
-          <p hlmCardDescription>
-            One-time payment, from $15. Your balance never expires while Studio is
-            active. Later top-ups from $10.
-          </p>
-        </div>
-        <div hlmCardContent>
-          <div class="chip-row" role="radiogroup" aria-label="Top-up amount">
-            @for (option of topUpOptions; track option.amount) {
-              <button
-                type="button"
-                class="chip"
-                role="radio"
-                [class.chip-active]="selectedAmount() === option.amount"
-                [attr.aria-checked]="selectedAmount() === option.amount"
-                (click)="selectedAmount.set(option.amount)"
-              >
-                ${{ option.amount }}
-                @if (option.popular) {
-                  <span class="chip-tag">Popular</span>
-                }
-              </button>
-            }
-          </div>
-
-          <div class="breakdown">
-            <div class="breakdown-row">
-              <span class="muted">Due today</span>
-              <span class="breakdown-value">${{ selectedAmount() | number: '1.0-0' }}</span>
+    <div class="grid gap-5 lg:grid-cols-2">
+      @for (plan of plans; track plan.id) {
+        <div hlmCard [class.studio-card]="plan.featured">
+          <div hlmCardHeader>
+            <div class="flex items-center justify-between">
+              <h2 hlmCardTitle>{{ plan.name }}</h2>
+              <span hlmBadge variant="secondary">
+                ${{ plan.priceUsd }} / month
+              </span>
             </div>
-            <div class="breakdown-row">
-              <span class="muted">Generation balance</span>
-              <span class="breakdown-value">${{ usableBalance() | number: '1.0-0' }}</span>
-            </div>
-            <div class="breakdown-row">
-              <span class="muted">First month of Studio</span>
-              <span class="breakdown-value">Included</span>
-            </div>
-            <p class="muted breakdown-note">
-              <span class="num">${{ usableBalance() | number: '1.0-0' }}</span> goes roughly
-              <span class="num">{{ imageEstimate() }}</span> images or
-              <span class="num">{{ clipEstimate() }}</span> video clips — mix freely.
+            <p hlmCardDescription>{{ plan.tagline }}</p>
+            <p class="plan-promo">
+              ${{ plan.promoUsd }}/mo for your first 60 days
             </p>
           </div>
-        </div>
-        <div hlmCardFooter>
-          <a routerLink="/login" hlmBtn class="w-full">
-            Top up ${{ selectedAmount() }}
-            <ng-icon name="lucideArrowRight" size="16" />
-          </a>
-        </div>
-      </div>
-
-      <div hlmCard class="studio-card lg:col-span-2">
-        <div hlmCardHeader>
-          <div class="flex items-center justify-between">
-            <h2 hlmCardTitle>Studio</h2>
-            <span hlmBadge variant="secondary">$5 / month</span>
+          <div hlmCardContent>
+            <ul class="space-y-3 text-sm">
+              @for (perk of plan.perks; track perk) {
+                <li class="flex items-start gap-2.5">
+                  <ng-icon name="lucideCheck" class="perk-icon text-primary" size="16" />
+                  {{ perk }}
+                </li>
+              }
+            </ul>
           </div>
-          <p hlmCardDescription>
-            Your workspace. Keeps your library online and your balance alive.
-          </p>
-        </div>
-        <div hlmCardContent>
-          <ul class="space-y-3 text-sm">
-            @for (perk of studioPerks; track perk.text) {
-              <li class="flex items-start gap-2.5">
-                <ng-icon [name]="perk.icon" class="perk-icon text-primary" size="16" />
-                {{ perk.text }}
-              </li>
-            }
-          </ul>
-        </div>
-        <div hlmCardFooter>
-          <p class="muted text-xs">
-            First month included with your first top-up. Cancel anytime — 30-day grace
-            to download everything.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="mx-auto max-w-4xl px-6 py-12">
-    <h2 class="text-center text-2xl font-semibold tracking-tight">
-      What generations cost
-    </h2>
-    <p class="muted mx-auto mt-3 max-w-xl text-center">
-      Fixed price per output, always shown before you generate. A few examples:
-    </p>
-    <div class="price-grid mt-8">
-      @for (example of examplePrices; track example.name) {
-        <div class="price-cell">
-          <span class="price-kind" [class.price-kind-video]="example.kind === 'video'">
-            {{ example.kind }}
-          </span>
-          <span class="price-name">{{ example.name }}</span>
-          <span class="price-value">${{ example.price | number: '1.2-2' }}</span>
+          <div hlmCardFooter>
+            <a routerLink="/login" hlmBtn class="w-full">
+              Get {{ plan.name }}
+              <ng-icon name="lucideArrowRight" size="16" />
+            </a>
+          </div>
         </div>
       }
     </div>
+    <p class="muted mt-4 text-center text-xs">
+      Included credits reset each billing cycle. Add-on pack credits roll over while your
+      subscription is active.
+    </p>
   </section>
 
   <section class="mx-auto max-w-4xl px-6 py-12">
-    <h2 class="text-center text-2xl font-semibold tracking-tight">What editing costs</h2>
+    <h2 class="text-center text-2xl font-semibold tracking-tight">Add-on credit packs</h2>
     <p class="muted mx-auto mt-3 max-w-xl text-center">
-      Every image opens in a full editor. The on-canvas suite is included with Studio and
-      runs on your device — free and unlimited.
+      One-time top-ups for heavy months. Bigger packs carry a bonus; Pro gets 25% more
+      credits per dollar. Pack credits roll over while you stay subscribed.
     </p>
-
-    <div class="free-tools mt-8">
-      <p class="free-tools-label">Included with Studio</p>
-      <div class="free-tools-chips">
-        @for (chip of freeToolChips; track chip) {
-          <span class="free-tool-chip">{{ chip }}</span>
-        }
+    <div class="pack-table mt-8">
+      <div class="pack-row pack-head">
+        <span>Pack</span>
+        <span>Bonus</span>
+        <span>Studio credits</span>
+        <span>Pro credits</span>
       </div>
-    </div>
-
-    <div class="price-grid mt-6">
-      @for (tool of editTools; track tool.id) {
-        <div class="price-cell" [title]="tool.blurb">
-          <span class="price-kind price-kind-edit">AI edit</span>
-          <span class="price-name">{{ tool.name }}</span>
-          <span class="price-value">${{ tool.userPriceUsd | number: '1.2-2' }}</span>
+      @for (pack of packs; track pack.usd) {
+        <div class="pack-row">
+          <span class="num">${{ pack.usd }}</span>
+          <span>{{ pack.bonusPct ? '+' + pack.bonusPct + '%' : '—' }}</span>
+          <span class="num">{{ pack.studioCredits | number }}</span>
+          <span class="num">{{ pack.proCredits | number }}</span>
         </div>
       }
-      <div class="price-cell" title="A hidden utility model sharpens and enlarges your image.">
-        <span class="price-kind price-kind-edit">AI edit</span>
-        <span class="price-name">Precision Upscale</span>
-        <span class="price-value">${{ upscalePrice | number: '1.2-2' }}</span>
-      </div>
-      <div class="price-cell" title="Saving an edited version costs nothing.">
-        <span class="price-kind">Always</span>
-        <span class="price-name">Save a version</span>
-        <span class="price-value price-value-free">Free</span>
-      </div>
     </div>
   </section>
 

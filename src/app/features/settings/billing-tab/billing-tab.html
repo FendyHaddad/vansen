@@ -1,7 +1,7 @@
 <div class="tab">
   <header class="tab-head">
     <h2 class="tab-title">Billing</h2>
-    <p class="muted">Balance, Studio membership, and every transaction.</p>
+    <p class="muted">Credits, your plan, and every transaction.</p>
   </header>
 
   @if (error()) {
@@ -10,29 +10,47 @@
 
   <div class="card-row">
     <div class="panel balance-panel">
-      <span class="eyebrow">Generation balance</span>
+      <span class="eyebrow">Credits</span>
       @if (isOwner()) {
         <span class="balance-big">Unlimited</span>
         <p class="muted small">Usage is tracked in Transactions below.</p>
       } @else {
-        <span class="balance-big">${{ balanceUsd() | number: '1.2-2' }}</span>
-        <p class="muted small">
-          @if (needsStudio()) {
-            First purchase includes your first month of Studio (+<span class="num">$5</span>).
-          } @else {
-            Never expires while Studio is active.
-          }
-        </p>
-        <div class="topup-row">
-          @for (credits of presets; track credits) {
-            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="topUp(credits)">
-              <span class="num">+${{ credits }}</span>
-              @if (needsStudio()) {
-                <span class="due-hint">due <span class="num">${{ dueFor(credits) }}</span></span>
-              }
-            </button>
-          }
+        <span class="balance-big">{{ totalCredits() | number }}</span>
+        <div class="bucket-rows">
+          <p class="muted small">
+            Plan credits — <span class="num">{{ planCredits() | number }}</span>
+            @if (subscription()?.currentPeriodEnd; as end) {
+              · reset {{ end | date: 'mediumDate' }}
+            } @else {
+              · reset each billing cycle
+            }
+          </p>
+          <p class="muted small">
+            Pack credits — <span class="num">{{ packCreditsBal() | number }}</span> · roll over
+            while subscribed
+          </p>
         </div>
+        @if (!needsPlan()) {
+          <span class="eyebrow pack-eyebrow">Add-on packs</span>
+          <div class="topup-row">
+            @for (pack of packs; track pack.usd) {
+              <button
+                hlmBtn
+                size="sm"
+                variant="outline"
+                [disabled]="busy()"
+                (click)="buyPack(pack.usd)"
+              >
+                <span class="num">${{ pack.usd }}</span>
+                <span class="due-hint">→ <span class="num">{{ creditsFor(pack.usd) | number }}</span> cr</span>
+              </button>
+            }
+          </div>
+          <p class="muted small">
+            Pack credits roll over month to month and expire 30 days after your subscription
+            ends.
+          </p>
+        }
         <button type="button" class="reconcile-link" [disabled]="busy()" (click)="reconcile()">
           Didn’t receive your credits?
         </button>
@@ -44,41 +62,53 @@
 
     <div class="panel studio-panel">
       <div class="studio-head">
-        <span class="eyebrow">Studio</span>
+        <span class="eyebrow">Plan</span>
         @if (profileLoaded()) {
-          <span hlmBadge [variant]="studioActive() ? 'secondary' : 'destructive'">
-            {{ studioActive() ? (canceledPending() ? 'Ending' : 'Active') : 'Inactive' }}
+          <span hlmBadge [variant]="plan() ? 'secondary' : 'destructive'">
+            {{ plan() ? (canceledPending() ? 'Ending' : planLabel()) : 'Inactive' }}
           </span>
         }
       </div>
-      <p class="small">
-        <span class="num">$5</span>/month — keeps your library online, prompts saved, and
-        your balance alive.
-      </p>
+      @if (plan() && planPriceUsd(); as price) {
+        <p class="small">
+          <span class="num">${{ price }}</span>/month —
+          <span class="num">{{ planGrant() | number }}</span> credits every cycle, full
+          editing suite included.
+        </p>
+      } @else if (!isOwner()) {
+        <p class="small">
+          Pick a plan to start creating — Studio <span class="num">$15</span>/mo
+          (1,500 cr) or Pro <span class="num">$30</span>/mo (3,750 cr + video).
+        </p>
+        <p class="muted small">Launch offer: $10 / $25 for your first 60 days.</p>
+      }
 
       @if (subscription(); as sub) {
         @if (canceledPending()) {
           <p class="warn-text small">
-            Studio ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — your library is
-            deleted 30 days after unless you reactivate.
+            Your plan ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — pack credits
+            expire 30 days after, and your library is deleted after the same grace period.
           </p>
-        } @else if (studioActive() && sub.currentPeriodEnd) {
+        } @else if (plan() && sub.currentPeriodEnd) {
           <p class="muted small">Renews {{ sub.currentPeriodEnd | date: 'mediumDate' }}</p>
         }
         @if (graceDaysLeft(); as days) {
           <p class="warn-text small">
-            Studio lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
-            left to download your library or reactivate before deletion.
+            Subscription lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
+            left to download your library or resubscribe before deletion.
           </p>
         }
         <div class="studio-actions">
-          @if (studioActive()) {
+          @if (plan() && !isOwner()) {
             <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="portal()">
-              Manage Studio
+              Manage plan
             </button>
-          } @else {
-            <button hlmBtn size="sm" [disabled]="busy()" (click)="reactivate()">
-              Reactivate · <span class="num">$5</span>
+          } @else if (!isOwner()) {
+            <button hlmBtn size="sm" [disabled]="busy()" (click)="subscribe('studio')">
+              Get Studio · <span class="num">$15</span>
+            </button>
+            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="subscribe('pro')">
+              Get Pro · <span class="num">$30</span>
             </button>
             <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
               Billing history
@@ -86,9 +116,15 @@
           }
         </div>
       } @else {
-        <p class="muted small">
-          No membership yet — your first top-up includes the first month.
-        </p>
+        <p class="muted small">No subscription yet.</p>
+        <div class="studio-actions">
+          <button hlmBtn size="sm" [disabled]="busy()" (click)="subscribe('studio')">
+            Get Studio · <span class="num">$15</span>
+          </button>
+          <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="subscribe('pro')">
+            Get Pro · <span class="num">$30</span>
+          </button>
+        </div>
       }
     </div>
   </div>
@@ -103,7 +139,7 @@
         <span>Date</span>
         <span>Type</span>
         <span>Detail</span>
-        <span class="ledger-amount-col">Amount</span>
+        <span class="ledger-amount-col">Credits</span>
       </div>
       @for (entry of entries(); track entry.id) {
         <div class="ledger-row">
@@ -112,14 +148,17 @@
             <span class="type-badge" [class]="'type-' + entry.type">
               {{ typeLabel(entry.type) }}
             </span>
+            <span class="bucket-tag" [class.bucket-tag-pack]="entry.bucket === 'pack'">
+              {{ entry.bucket }}
+            </span>
           </span>
           <span class="ledger-family muted">{{ entry.note ?? familyName(entry.familyId) }}</span>
-          <span class="ledger-amount" [class.credit]="entry.amountUsd > 0">
-            {{ entry.amountUsd > 0 ? '+' : '−' }}${{ abs(entry.amountUsd) | number: '1.2-2' }}
+          <span class="ledger-amount" [class.credit]="entry.amountCredits > 0">
+            {{ entry.amountCredits > 0 ? '+' : '−' }}{{ abs(entry.amountCredits) | number }} cr
           </span>
         </div>
       } @empty {
-        <p class="muted small">No transactions yet — your first top-up lands here.</p>
+        <p class="muted small">No transactions yet — your first monthly grant lands here.</p>
       }
     </div>
   </div>

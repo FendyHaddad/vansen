@@ -7,7 +7,7 @@
   <div class="stat-row">
     <div class="panel stat">
       <span class="eyebrow">Total spend</span>
-      <span class="stat-big">${{ totalSpend() | number: '1.2-2' }}</span>
+      <span class="stat-big">{{ totalSpend() | number }} cr</span>
     </div>
     <div class="panel stat">
       <span class="eyebrow">Operations</span>
@@ -16,7 +16,7 @@
     <div class="panel stat">
       <span class="eyebrow">Avg per operation</span>
       <span class="stat-big">
-        ${{ (totalOps() ? totalSpend() / totalOps() : 0) | number: '1.2-2' }}
+        {{ (totalOps() ? totalSpend() / totalOps() : 0) | number: "1.0-0" }} cr
       </span>
     </div>
   </div>
@@ -31,7 +31,7 @@
           <!-- data-driven width; a stylesheet class cannot express per-row percentages -->
           <div class="bar-fill" [style.width.%]="row.pct"></div>
         </div>
-        <span class="usage-amount">${{ row.spendUsd | number: '1.2-2' }}</span>
+        <span class="usage-amount">{{ row.spendCredits | number }} cr</span>
       </div>
     } @empty {
       <p class="muted small">Nothing yet this month.</p>
@@ -47,7 +47,7 @@
         <div class="bar-track">
           <div class="bar-fill" [style.width.%]="row.pct"></div>
         </div>
-        <span class="usage-amount">${{ row.spendUsd | number: '1.2-2' }}</span>
+        <span class="usage-amount">{{ row.spendCredits | number }} cr</span>
       </div>
     } @empty {
       <p class="muted small">Nothing yet this month.</p>

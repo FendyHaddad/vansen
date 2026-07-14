@@ -7,20 +7,25 @@ import { ProfileStore } from '../../../core/profile/profile-store';
 import { BillingService } from '../../../core/billing/billing-service';
 import { ApiError } from '../../../core/api/api-service';
 import { SubscriptionStatus } from '../../../core/enums';
-import { familyById } from '../../../core/catalog/model-families';
+import {
+  CREDIT_PACKS,
+  PLAN_CREDITS,
+  familyById,
+  packCredits,
+} from '../../../core/catalog/model-families';
 
 const TYPE_LABELS: Record<LedgerEntry['type'], string> = {
-  topup: 'Top-up',
   generate: 'Generate',
   edit: 'Edit',
   upscale: 'Upscale',
-  studio_fee: 'Studio',
-  trial_credit: 'Trial',
-  promo: 'Promo',
   refund: 'Refund',
+  pack_purchase: 'Credit pack',
+  cycle_reset: 'Monthly grant',
+  pack_expiry: 'Pack expiry',
+  promo: 'Promo',
 };
 
-const TOPUP_PRESETS = [10, 20, 50, 100];
+const PLAN_PRICES: Record<'studio' | 'pro', number> = { studio: 15, pro: 30 };
 
 @Component({
   selector: 'app-billing-tab',
@@ -34,41 +39,63 @@ export class BillingTab {
   private readonly profileStore = inject(ProfileStore);
   private readonly billing = inject(BillingService);
 
-  readonly balanceUsd = this.ledger.balanceUsd;
+  readonly planCredits = this.ledger.planCredits;
+  readonly packCreditsBal = this.ledger.packCredits;
+  readonly totalCredits = this.ledger.totalCredits;
   readonly entries = this.ledger.entries;
-  readonly studioActive = this.profileStore.studioActive;
+  readonly plan = this.profileStore.plan;
   readonly isOwner = this.profileStore.isOwner;
   readonly profileLoaded = this.profileStore.loaded;
   readonly subscription = this.profileStore.subscription;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
 
-  readonly presets = TOPUP_PRESETS;
+  readonly packs = CREDIT_PACKS;
   readonly busy = signal(false);
   readonly error = signal('');
   readonly reconcileResult = signal<string | null>(null);
 
-  /** No active Studio → first purchase carries the $5 Studio line. Waits for
-   * the profile load so an in-flight /profile never flashes "Inactive". */
-  readonly needsStudio = computed(() => this.profileLoaded() && !this.studioActive());
+  /** No active plan → show subscribe cards. Waits for the profile load so an
+   * in-flight /profile never flashes "Inactive". */
+  readonly needsPlan = computed(() => this.profileLoaded() && !this.plan());
   readonly canceledPending = computed(
-    () => this.subscription()?.status === SubscriptionStatus.Canceled && this.studioActive(),
+    () => this.subscription()?.status === SubscriptionStatus.Canceled && !!this.plan(),
   );
+
+  /** Subscriber-facing plan name; owner rides the hidden top tier. */
+  readonly planLabel = computed(() => {
+    const plan = this.plan();
+    if (!plan) return 'Inactive';
+    return plan === 'studio' ? 'Studio' : 'Pro';
+  });
+
+  readonly planPriceUsd = computed(() => {
+    const plan = this.plan();
+    return plan === 'studio' || plan === 'pro' ? PLAN_PRICES[plan] : null;
+  });
+
+  readonly planGrant = computed(() => {
+    const plan = this.plan();
+    return plan === 'studio' || plan === 'pro' ? PLAN_CREDITS[plan] : null;
+  });
+
+  /** Packs are priced by the buyer's tier (owner never buys). */
+  readonly packRate = computed<'studio' | 'pro'>(() => (this.plan() === 'pro' ? 'pro' : 'studio'));
 
   constructor() {
     void this.ledger.loadEntries();
     if (!this.profileStore.loaded()) void this.profileStore.load();
   }
 
-  dueFor(credits: number): number {
-    return this.needsStudio() ? credits + 5 : credits;
+  creditsFor(usd: number): number {
+    return packCredits(usd, this.packRate());
   }
 
-  async topUp(credits: number): Promise<void> {
-    await this.run(() => this.billing.checkout(credits));
+  async subscribe(plan: 'studio' | 'pro'): Promise<void> {
+    await this.run(() => this.billing.subscribe(plan));
   }
 
-  async reactivate(): Promise<void> {
-    await this.run(() => this.billing.reactivateStudio());
+  async buyPack(usd: number): Promise<void> {
+    await this.run(() => this.billing.buyPack(usd));
   }
 
   async portal(): Promise<void> {
@@ -81,7 +108,7 @@ export class BillingTab {
       const credited = await this.billing.reconcile();
       await this.ledger.loadEntries();
       this.reconcileResult.set(
-        credited > 0 ? `Restored ${credited} missing top-up(s).` : 'Everything already credited.',
+        credited > 0 ? `Restored ${credited} missing pack(s).` : 'Everything already credited.',
       );
     });
   }

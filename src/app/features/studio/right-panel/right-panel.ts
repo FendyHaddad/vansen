@@ -7,7 +7,6 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideAperture,
@@ -96,7 +95,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
   templateUrl: './right-panel.html',
   styleUrl: './right-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon, HlmButton, ToolOptions],
+  imports: [NgIcon, HlmButton, ToolOptions],
   providers: [
     provideIcons({
       lucideAperture,
@@ -145,7 +144,7 @@ export class RightPanel {
   readonly proTools = PRO_TOOLS;
   readonly aiTools = EDIT_TOOLS;
   readonly studioActive = this.profileStore.studioActive;
-  readonly balanceUsd = this.ledger.balanceUsd;
+  readonly totalCredits = this.ledger.totalCredits;
 
   /** Studio | Pro tier switch — Pro is a locked teaser in this phase. */
   readonly tier = signal<'studio' | 'pro'>('studio');
@@ -180,8 +179,8 @@ export class RightPanel {
     this.activeTool.set(this.activeTool() === id ? null : id);
   }
 
-  affordable(priceUsd: number): boolean {
-    return this.balanceUsd() >= priceUsd;
+  affordable(priceCredits: number): boolean {
+    return this.totalCredits() >= priceCredits;
   }
 
   /** Client-side download of the current canvas in the chosen format. */
@@ -201,7 +200,7 @@ export class RightPanel {
   runAiTool(toolId: string): void {
     if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === toolId);
-    if (!tool || !this.affordable(tool.userPriceUsd)) return;
+    if (!tool || !this.affordable(tool.creditCost)) return;
     if (tool.needsPrompt && !this.fillPrompt().trim()) return;
     this.aiToolRequested.emit({ toolId, prompt: this.fillPrompt().trim() });
   }
@@ -210,7 +209,7 @@ export class RightPanel {
   onAiSelection(req: { toolId: string; prompt: string; maskPngBase64: string }): void {
     if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === req.toolId);
-    if (!tool || !this.affordable(tool.userPriceUsd)) return;
+    if (!tool || !this.affordable(tool.creditCost)) return;
     this.aiToolRequested.emit(req);
   }
 }

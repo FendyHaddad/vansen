@@ -11,7 +11,6 @@ import {
 } from '@ng-icons/lucide';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
-import { BillingService } from '../../core/billing/billing-service';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { ProfileTab } from './profile-tab/profile-tab';
@@ -49,17 +48,16 @@ type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
 export class SettingsPage {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
-  private readonly billing = inject(BillingService);
   private readonly router = inject(Router);
   private readonly profileStore = inject(ProfileStore);
 
-  readonly balanceUsd = this.ledger.balanceUsd;
+  readonly totalCredits = this.ledger.totalCredits;
   readonly isOwner = this.profileStore.isOwner;
 
   readonly active = signal<SettingsTab>('profile');
   readonly tabs: { id: SettingsTab; label: string; icon: string; hint: string }[] = [
     { id: 'profile', label: 'Profile', icon: 'lucideUser', hint: 'Identity and account' },
-    { id: 'billing', label: 'Billing', icon: 'lucideCreditCard', hint: 'Balance, Studio, history' },
+    { id: 'billing', label: 'Billing', icon: 'lucideCreditCard', hint: 'Credits, plan, history' },
     { id: 'usage', label: 'Usage', icon: 'lucideActivity', hint: 'This month at a glance' },
     {
       id: 'preferences',
@@ -69,8 +67,9 @@ export class SettingsPage {
     },
   ];
 
+  /** Profile-menu "Buy credits" — packs live on the Billing tab. */
   topUp(): void {
-    void this.billing.checkout(20);
+    this.active.set('billing');
   }
 
   async signOut(): Promise<void> {

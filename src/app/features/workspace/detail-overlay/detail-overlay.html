@@ -22,7 +22,7 @@
         <dl class="meta-facts">
           <div>
             <dt>Price paid</dt>
-            <dd>${{ item().priceUsd | number: '1.2-2' }}</dd>
+            <dd>{{ item().priceCredits }} cr</dd>
           </div>
           <div>
             <dt>Created</dt>
@@ -52,11 +52,11 @@
           @if (item().kind === 'image') {
             <button type="button" class="action" (click)="upscale.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
-              Upscale · <span class="num">${{ upscalePrice | number: '1.2-2' }}</span>
+              Upscale · <span class="num">{{ upscaleCredits }} cr</span>
             </button>
             <button type="button" class="action" (click)="variation.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
-              Variation · <span class="num">${{ item().priceUsd | number: '1.2-2' }}</span>
+              Variation · <span class="num">{{ item().priceCredits }} cr</span>
             </button>
             <button type="button" class="action" (click)="edit.emit(item().id)">
               <ng-icon name="lucidePencil" size="15" />

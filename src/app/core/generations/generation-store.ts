@@ -11,6 +11,8 @@ import { GenerationOp } from '../enums';
 import { LedgerService } from '../ledger/ledger-service';
 import { currentUid, readCache, writeCache } from '../api/local-cache';
 import { MediaCache } from '../media/media-cache';
+import { NotificationInput, NotificationStore } from '../notifications/notification-store';
+import { ProfileStore } from '../profile/profile-store';
 
 export type { GenerationOp };
 export type GenerationItem = GenerationDto;
@@ -21,6 +23,8 @@ export class GenerationStore {
   private readonly api = inject(ApiService);
   private readonly ledger = inject(LedgerService);
   private readonly media = inject(MediaCache);
+  private readonly notifications = inject(NotificationStore);
+  private readonly profile = inject(ProfileStore);
 
   private readonly itemsSig = signal<GenerationDto[]>([]);
   private readonly loadedSig = signal(false);
@@ -76,7 +80,7 @@ export class GenerationStore {
   async create(request: CreateGenerationRequest): Promise<GenerationDto[]> {
     const response = await this.api.post<CreateGenerationResponse>('/generations', request);
     this.itemsSig.update((list) => [...response.items, ...list]);
-    this.ledger.setBalance(response.balanceUsd);
+    this.ledger.setCredits(response.credits);
     void this.persist();
     return response.items;
   }
@@ -119,8 +123,34 @@ export class GenerationStore {
   /** Merge poll results (status flips, media urls) into the store. */
   applyJobUpdates(updates: GenerationDto[]): void {
     if (updates.length === 0) return;
+    const previous = new Map(this.itemsSig().map((i) => [i.id, i]));
+    const events: NotificationInput[] = [];
+    let refunded = false;
+    for (const update of updates) {
+      // Only a pending→terminal flip is news; terminal items never change again.
+      if (previous.get(update.id)?.status !== 'pending') continue;
+      if (update.status === 'done') {
+        events.push({
+          kind: 'ready',
+          title: update.kind === 'video' ? 'Video ready' : 'Image ready',
+          detail: `${update.familyName} · ${update.op}`,
+          genId: update.id,
+        });
+      } else if (update.status === 'failed') {
+        refunded = true;
+        events.push({
+          kind: 'refund',
+          title: `Refunded ${update.priceCredits} credits`,
+          detail: `${update.familyName} · ${update.op} failed — credits returned`,
+          genId: update.id,
+        });
+      }
+    }
     const byId = new Map(updates.map((u) => [u.id, u]));
     this.itemsSig.update((list) => list.map((i) => byId.get(i.id) ?? i));
+    if (events.length > 0) this.notifications.addMany(events);
+    // The server already refunded (fn_fail_job); re-read the authoritative balance.
+    if (refunded) void this.profile.load();
     void this.persist();
   }
 

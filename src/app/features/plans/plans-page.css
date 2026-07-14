@@ -80,6 +80,53 @@
   border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
 }
 
+.promo-strip {
+  display: inline-block;
+  max-width: 34rem;
+  padding: 8px 16px;
+  border: 1px solid color-mix(in oklch, var(--primary) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--primary) 8%, var(--background));
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.plan-promo {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.pack-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.pack-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr 1.4fr;
+  gap: 8px;
+  padding: 12px 18px;
+  font-size: 0.875rem;
+  border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+}
+
+.pack-row:first-child {
+  border-top: none;
+}
+
+.pack-head {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+
 .price-grid {
   display: grid;
   gap: 12px;
