@@ -70,6 +70,13 @@
         }
         @if (studioActive()) {
           <span class="topbar-div" aria-hidden="true"></span>
+          @if (!isOwner()) {
+            <button type="button" class="credit-add-btn" (click)="packsOpen.set(true)">
+              <ng-icon name="lucidePlus" size="14" />
+              Add credits
+            </button>
+            <span class="topbar-div" aria-hidden="true"></span>
+          }
           <span
             class="credit-chip"
             data-tour="credits"
@@ -157,7 +164,7 @@
         <div class="notice-banner">
           Subscription lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
           left before your library is deleted. Download what you need or
-          <button type="button" class="linkish" (click)="reactivateStudio()">
+          <button type="button" class="linkish" (click)="subscribeTo('studio')">
             resubscribe from <span class="num">$15</span>/mo
           </button>
         </div>
@@ -213,8 +220,29 @@
     [editing]="mode() === 'edit'"
     (saveRequested)="onSaveEdit()"
     (aiToolRequested)="onAiTool($event)"
-    (subscribeRequested)="reactivateStudio()"
+    [checkoutBusy]="checkoutBusy()"
+    (subscribeRequested)="subscribeTo($event)"
+    (upgradeRequested)="upgradePlan()"
+    (downgradeRequested)="downgradePlan()"
   />
+
+  @if (packsOpen()) {
+    <app-credit-packs-dialog (dismissed)="packsOpen.set(false)" />
+  }
+
+  @if (planChange(); as target) {
+    <app-plan-change-dialog
+      [target]="target"
+      [current]="currentPlan()"
+      [periodEnd]="profileStore.subscription()?.currentPeriodEnd ?? null"
+      [planCredits]="planCredits()"
+      [busy]="planChangeBusy()"
+      [pendingPlan]="profileStore.subscription()?.pendingPlan ?? null"
+      [error]="planChangeError()"
+      (confirmed)="confirmPlanChange($event)"
+      (dismissed)="planChange.set(null)"
+    />
+  }
 
   @if (openedItem(); as opened) {
     <app-detail-overlay

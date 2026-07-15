@@ -38,44 +38,46 @@
   background: color-mix(in oklch, var(--border) 55%, transparent);
 }
 
+/* Fixed control column, not space-between: intrinsic widths made every row's
+   field start and end at a different x. The label side takes what's left. */
 .pref-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
   align-items: center;
-  justify-content: space-between;
   gap: 24px;
   padding: 16px 0;
-  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .pref-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .pref-text {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  min-width: 220px;
-  flex: 1;
+  min-width: 0;
 }
 
-.pref-select {
+/* Every control fills the column, so all five line up on both edges. */
+.pref-field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
   background: var(--background);
   color: var(--foreground);
-  padding: 8px 10px;
   font-size: 0.875rem;
-  min-width: 180px;
+}
+
+.pref-select {
+  padding: 0 10px;
 }
 
 .pref-select:focus {
   outline: 2px solid color-mix(in oklch, var(--ring) 60%, transparent);
   outline-offset: 1px;
-}
-
-.threshold-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.threshold-input {
-  min-width: 110px;
 }

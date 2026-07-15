@@ -34,10 +34,4 @@ export class PreferencesTab {
     this.prefsService.update({ defaultAspect: value });
   }
 
-  setThreshold(value: string): void {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      this.prefsService.update({ confirmOverUsd: parsed });
-    }
-  }
 }

@@ -22,6 +22,21 @@ export interface SubscriptionDto {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   currentPeriodEnd: string | null;
+  /** Plan booked to take effect at pendingAt; null when nothing is scheduled. */
+  pendingPlan: 'studio' | 'pro' | null;
+  pendingAt: string | null;
+}
+
+/** Studio <-> Pro. 'now' restarts the cycle; 'period_end' books it for renewal. */
+export interface ChangePlanRequest {
+  plan: 'studio' | 'pro';
+  when: 'now' | 'period_end';
+}
+
+export interface ChangePlanResponse {
+  plan: 'studio' | 'pro';
+  /** ISO date the change lands, or null when it already has. */
+  effectiveAt: string | null;
 }
 
 /** Two-bucket credit balance: plan resets each cycle, pack rolls over. */
@@ -117,4 +132,20 @@ export interface CheckoutResponse {
 export interface ReconcileResponse {
   credited: number;
   credits: CreditsDto;
+}
+
+/** Live-from-Stripe details for the Subscription tab (mirror covers the rest). */
+export interface BillingOverviewDto {
+  cancelAtPeriodEnd: boolean;
+  upcoming: { amountUsd: number; date: string | null } | null;
+  paymentMethod: { brand: string; last4: string } | null;
+}
+
+export interface CancelSubscriptionRequest {
+  /** Survey answer from the cancel flow — stored on the Stripe subscription. */
+  reason: string;
+}
+
+export interface CancelStateResponse {
+  cancelAtPeriodEnd: boolean;
 }

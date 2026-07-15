@@ -164,6 +164,32 @@ app-right-panel {
   flex-shrink: 0;
 }
 
+/* Add-on packs button — quieter than the upload CTA, same height and shape. */
+.credit-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background-color 0.12s ease;
+}
+
+.credit-add-btn:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
 /* Credit balance chip — squared border matching the upload button, not a pill. */
 .credit-chip {
   display: inline-flex;

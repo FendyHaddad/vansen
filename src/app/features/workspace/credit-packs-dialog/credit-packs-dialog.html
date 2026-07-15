@@ -1,0 +1,47 @@
+<div class="cp-backdrop" (click)="close()"></div>
+
+<div
+  class="cp-dialog"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="cp-title"
+  (click)="$event.stopPropagation()"
+>
+  <button type="button" class="cp-close" aria-label="Close" (click)="close()">
+    <ng-icon name="lucideX" size="15" />
+  </button>
+
+  <h2 class="cp-title" id="cp-title">Add-on credits</h2>
+  <p class="cp-sub">
+    One-time packs on top of your monthly grant. Pack credits roll over month to month while
+    you're subscribed.
+  </p>
+
+  <div class="cp-grid">
+    @for (pack of packs; track pack.usd) {
+      <button
+        type="button"
+        class="cp-pack"
+        [disabled]="busy() !== null"
+        (click)="buy(pack.usd)"
+      >
+        @if (busy() === pack.usd) {
+          <span class="cp-spinner" aria-hidden="true"></span>
+          <span class="cp-opening">Opening Stripe…</span>
+        } @else {
+          <span class="cp-usd num">${{ pack.usd }}</span>
+          <span class="cp-credits num">{{ creditsFor(pack.usd) | number }} credits</span>
+          @if (pack.bonusPct > 0) {
+            <span class="cp-bonus">+{{ pack.bonusPct }}% bonus</span>
+          }
+        }
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <p class="cp-error" role="alert">{{ error() }}</p>
+  }
+
+  <p class="cp-note">Checkout opens in Stripe — you're back here right after paying.</p>
+</div>

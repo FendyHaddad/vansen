@@ -1,0 +1,140 @@
+<div class="cf-backdrop" (click)="close()"></div>
+
+<div
+  class="cf-dialog"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="cf-title"
+  (click)="$event.stopPropagation()"
+>
+  <button type="button" class="cf-close" aria-label="Close" (click)="close()">
+    <ng-icon name="lucideX" size="15" />
+  </button>
+
+  @if (done()) {
+    <p class="cf-eyebrow">Cancellation confirmed</p>
+    <h2 class="cf-title" id="cf-title">You won't be billed again</h2>
+    <p class="cf-sub">
+      {{ planLabel() }} keeps working
+      @if (periodEnd()) {
+        until {{ periodEnd() | date: 'MMMM d, yyyy' }}
+      } @else {
+        until the end of your billing period
+      }
+      — your credits stay usable the whole time. Changed your mind? Resume any time before
+      then from this page.
+    </p>
+    <div class="cf-actions">
+      <button hlmBtn size="sm" type="button" (click)="close()">Done</button>
+    </div>
+  } @else if (step() === 'value') {
+    <p class="cf-eyebrow">You've already paid for this</p>
+    <h2 class="cf-title" id="cf-title">Save the goodbye for later</h2>
+    @if (daysLeft(); as days) {
+      <p class="cf-sub">
+        You still have <strong class="num">{{ days }}</strong>
+        day{{ days === 1 ? '' : 's' }} of {{ planLabel() }} that's already paid for.
+      </p>
+    } @else {
+      <p class="cf-sub">Your current {{ planLabel() }} period is already paid for.</p>
+    }
+
+    <ul class="cf-facts">
+      <li>
+        <ng-icon name="lucideSparkles" size="14" />
+        <span>
+          <strong class="num">{{ totalCredits() | number }}</strong> credits stay usable until
+          @if (periodEnd()) {
+            {{ periodEnd() | date: 'MMMM d' }}.
+          } @else {
+            your period ends.
+          }
+          After that they're gone — pack credits included, 30 days later.
+        </span>
+      </li>
+      <li>
+        <ng-icon name="lucideCalendarClock" size="14" />
+        <span>
+          Your library survives 30 days past the end, then it's deleted. Download anything you
+          want to keep.
+        </span>
+      </li>
+    </ul>
+
+    @if (periodEnd()) {
+      <div class="cf-timeline" aria-hidden="true">
+        <div class="cf-tl-point">
+          <span class="cf-tl-chip cf-tl-now">Today</span>
+          <span class="cf-tl-label">you keep everything</span>
+        </div>
+        <div class="cf-tl-track"></div>
+        <div class="cf-tl-point">
+          <span class="cf-tl-chip">{{ periodEnd() | date: 'MMM d' }}</span>
+          <span class="cf-tl-label">plan ends</span>
+        </div>
+      </div>
+    }
+
+    <div class="cf-actions">
+      <button hlmBtn variant="outline" size="sm" type="button" (click)="step.set('reason')">
+        Continue to cancel
+      </button>
+      <button hlmBtn size="sm" type="button" (click)="close()">Keep my plan</button>
+    </div>
+  } @else {
+    <p class="cf-eyebrow">Before you go</p>
+    <h2 class="cf-title" id="cf-title">Why are you leaving?</h2>
+    <p class="cf-sub">One answer helps us fix what pushed you out.</p>
+
+    <div class="cf-reasons" role="radiogroup" aria-label="Reason for cancelling">
+      @for (option of reasons; track option.code) {
+        <button
+          type="button"
+          class="cf-reason"
+          role="radio"
+          [attr.aria-checked]="reason() === option.code"
+          [class.cf-reason-active]="reason() === option.code"
+          [disabled]="busy()"
+          (click)="choose(option.code)"
+        >
+          @if (reason() === option.code) {
+            <ng-icon name="lucideCheck" size="14" />
+          }
+          <span>{{ option.label }}</span>
+        </button>
+      }
+    </div>
+
+    @if (error()) {
+      <p class="cf-error" role="alert">{{ error() }}</p>
+    }
+
+    <div class="cf-actions">
+      <button
+        hlmBtn
+        variant="outline"
+        size="sm"
+        type="button"
+        [disabled]="busy()"
+        (click)="step.set('value')"
+      >
+        Back
+      </button>
+      <button
+        hlmBtn
+        variant="destructive"
+        size="sm"
+        type="button"
+        [disabled]="busy() || !reason()"
+        (click)="confirm()"
+      >
+        @if (busy()) {
+          <span class="cf-spinner" aria-hidden="true"></span>
+          Cancelling…
+        } @else {
+          Cancel subscription
+        }
+      </button>
+    </div>
+  }
+</div>

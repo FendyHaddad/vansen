@@ -1,0 +1,143 @@
+.cp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.cp-dialog {
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(430px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 14px;
+  background: var(--background, #101013);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.5);
+}
+
+.cp-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  padding: 5px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.cp-close:hover {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.cp-title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.cp-sub {
+  margin: 5px 0 0;
+  font-size: 0.76rem;
+  opacity: 0.65;
+}
+
+.cp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.cp-pack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-height: 74px;
+  padding: 11px 12px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.cp-pack:hover:not(:disabled) {
+  border-color: var(--primary, #825aff);
+  background: color-mix(in oklch, var(--primary, #825aff) 9%, transparent);
+}
+
+.cp-pack:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cp-usd {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.cp-credits {
+  font-size: 0.74rem;
+  opacity: 0.7;
+}
+
+.cp-bonus {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--primary, #825aff);
+}
+
+.cp-opening {
+  font-size: 0.74rem;
+  opacity: 0.7;
+}
+
+.cp-error {
+  margin: 12px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--destructive, #f31260);
+}
+
+.cp-note {
+  margin: 14px 0 0;
+  font-size: 0.67rem;
+  opacity: 0.45;
+}
+
+.cp-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: cp-spin 0.7s linear infinite;
+}
+
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-spinner {
+    animation-duration: 2.4s;
+  }
+}

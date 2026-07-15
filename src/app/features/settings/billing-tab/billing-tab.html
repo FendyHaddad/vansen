@@ -1,7 +1,7 @@
 <div class="tab">
   <header class="tab-head">
-    <h2 class="tab-title">Billing</h2>
-    <p class="muted">Credits, your plan, and every transaction.</p>
+    <h2 class="tab-title">Subscription</h2>
+    <p class="muted">Your plan, credits, invoices, and every transaction.</p>
   </header>
 
   @if (error()) {
@@ -84,6 +84,13 @@
       }
 
       @if (subscription(); as sub) {
+        @if (sub.pendingPlan; as pending) {
+          <p class="muted small">
+            {{ pending === 'pro' ? 'Pro' : 'Studio' }} starts
+            {{ (sub.pendingAt ?? sub.currentPeriodEnd) | date: 'mediumDate' }} — you keep
+            {{ planLabel() }} until then.
+          </p>
+        }
         @if (canceledPending()) {
           <p class="warn-text small">
             Your plan ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — pack credits
@@ -99,9 +106,24 @@
           </p>
         }
         <div class="studio-actions">
-          @if (plan() && !isOwner()) {
-            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="portal()">
-              Manage plan
+          @if (canceledPending()) {
+            <button hlmBtn size="sm" [disabled]="busy()" (click)="resume()">
+              Resume subscription
+            </button>
+          } @else if (plan() && !isOwner()) {
+            @if (switchTarget(); as target) {
+              <button
+                hlmBtn
+                size="sm"
+                [variant]="target === 'pro' ? 'default' : 'outline'"
+                [disabled]="busy()"
+                (click)="openPlanChange(target)"
+              >
+                {{ target === 'pro' ? 'Upgrade to Pro' : 'Switch to Studio' }}
+              </button>
+            }
+            <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
+              Invoices & card
             </button>
           } @else if (!isOwner()) {
             <button hlmBtn size="sm" [disabled]="busy()" (click)="subscribe('studio')">
@@ -110,11 +132,13 @@
             <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="subscribe('pro')">
               Get Pro · <span class="num">$30</span>
             </button>
-            <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
-              Billing history
-            </button>
           }
         </div>
+        @if (plan() && !canceledPending() && !isOwner()) {
+          <button type="button" class="cancel-link" [disabled]="busy()" (click)="openCancel()">
+            Cancel subscription
+          </button>
+        }
       } @else {
         <p class="muted small">No subscription yet.</p>
         <div class="studio-actions">
@@ -128,6 +152,77 @@
       }
     </div>
   </div>
+
+  @if (plan() && !isOwner()) {
+    <div class="card-row">
+      <div class="panel">
+        <span class="eyebrow">Next invoice</span>
+        @if (overview(); as ov) {
+          @if (ov.upcoming; as up) {
+            <span class="invoice-big num">${{ up.amountUsd | number: '1.2-2' }}</span>
+            <p class="muted small">
+              @if (up.date) {
+                Charged {{ up.date | date: 'mediumDate' }}
+              } @else {
+                Charged at your next renewal
+              }
+              @if (subscription()?.pendingPlan; as pending) {
+                · switches you to {{ pending === 'pro' ? 'Pro' : 'Studio' }}
+              }
+            </p>
+          } @else if (ov.cancelAtPeriodEnd) {
+            <span class="invoice-big">—</span>
+            <p class="muted small">Nothing — your subscription ends instead of renewing.</p>
+          } @else {
+            <span class="invoice-big">—</span>
+            <p class="muted small">No upcoming invoice found.</p>
+          }
+        } @else {
+          <p class="muted small">Loading from Stripe…</p>
+        }
+      </div>
+
+      <div class="panel">
+        <span class="eyebrow">Payment method</span>
+        @if (overview(); as ov) {
+          @if (ov.paymentMethod; as pm) {
+            <span class="invoice-big">{{ pm.brand | titlecase }} ·· {{ pm.last4 }}</span>
+            <p class="muted small">Charged automatically each cycle.</p>
+          } @else {
+            <span class="invoice-big">—</span>
+            <p class="muted small">No card on file yet.</p>
+          }
+          <div class="studio-actions">
+            <button hlmBtn size="sm" variant="outline" [disabled]="busy()" (click)="portal()">
+              Change card
+            </button>
+          </div>
+        } @else {
+          <p class="muted small">Loading from Stripe…</p>
+        }
+      </div>
+    </div>
+  }
+
+  @if (topFamilies().length > 0) {
+    <div class="panel">
+      <div class="panel-head">
+        <h3 class="panel-title">Most used this month</h3>
+        <span class="muted small">Full breakdown lives in Usage</span>
+      </div>
+      @for (row of topFamilies(); track row.label) {
+        <div class="usage-row">
+          <span class="usage-label">{{ row.label }}</span>
+          <span class="muted small usage-count">{{ row.count }}×</span>
+          <div class="bar-track">
+            <!-- data-driven width; a stylesheet class cannot express per-row percentages -->
+            <div class="bar-fill" [style.width.%]="row.pct"></div>
+          </div>
+          <span class="usage-amount">{{ row.spendCredits | number }} cr</span>
+        </div>
+      }
+    </div>
+  }
 
   <div class="panel ledger-panel">
     <div class="panel-head">
@@ -163,3 +258,30 @@
     </div>
   </div>
 </div>
+
+@if (planChange(); as target) {
+  <app-plan-change-dialog
+    [target]="target"
+    [current]="currentPlan()"
+    [periodEnd]="subscription()?.currentPeriodEnd ?? null"
+    [planCredits]="planCredits()"
+    [busy]="planChangeBusy()"
+    [pendingPlan]="subscription()?.pendingPlan ?? null"
+    [error]="planChangeError()"
+    (confirmed)="confirmPlanChange($event)"
+    (dismissed)="planChange.set(null)"
+  />
+}
+
+@if (cancelOpen()) {
+  <app-cancel-flow-dialog
+    [planLabel]="planLabel()"
+    [periodEnd]="subscription()?.currentPeriodEnd ?? null"
+    [totalCredits]="totalCredits()"
+    [busy]="cancelBusy()"
+    [error]="cancelError()"
+    [done]="cancelDone()"
+    (confirmed)="confirmCancel($event)"
+    (dismissed)="cancelOpen.set(false)"
+  />
+}

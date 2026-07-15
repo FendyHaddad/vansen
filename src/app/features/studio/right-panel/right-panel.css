@@ -47,11 +47,6 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
 }
 
-.tier-disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 .section-title {
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -306,6 +301,29 @@
 .lock-cta {
   width: 100%;
   margin-top: 4px;
+  gap: 8px;
+}
+
+/* Redirect to Stripe takes a beat — spin so the wait never reads as a dead click. */
+.cta-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: rail-spin 0.7s linear infinite;
+}
+
+@keyframes rail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 .lock-note {
@@ -317,4 +335,84 @@
 .teaser-hint {
   font-size: 0.8rem;
   opacity: 0.6;
+}
+
+/* Standing reminder for a plan change booked at renewal. */
+.pending-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--primary, #825aff) 28%, transparent);
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--primary, #825aff) 9%, transparent);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.pending-note ng-icon {
+  margin-top: 1px;
+  color: var(--primary, #825aff);
+  flex-shrink: 0;
+}
+
+/* Profile still loading — neither the tools nor the pitch is known to be right yet. */
+.rail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+
+.rail-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 20%, transparent);
+  border-top-color: var(--muted-foreground);
+  animation: rail-spin 0.7s linear infinite;
+}
+
+@keyframes rail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* Quiet downgrade offer for a Pro subscriber browsing the Studio tab — an
+   informational card, deliberately not styled like a sales pitch. */
+.downgrade-card {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 9px;
+}
+
+.downgrade-copy {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  opacity: 0.65;
+}
+
+.downgrade-cta {
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--primary, #825aff);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.downgrade-cta:hover {
+  text-decoration: underline;
 }

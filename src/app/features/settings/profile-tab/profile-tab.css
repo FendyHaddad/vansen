@@ -80,30 +80,38 @@
   background: color-mix(in oklch, var(--border) 60%, transparent);
 }
 
+/* Fixed control column, not space-between: intrinsic widths let each row's
+   control land on its own x. Both rows now end on the same edge. */
 .setting-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
   align-items: center;
-  justify-content: space-between;
   gap: 24px;
-  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .setting-text {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  min-width: 220px;
-  flex: 1;
+  min-width: 0;
 }
 
 .setting-control {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 .name-control input {
-  width: 220px;
+  flex: 1;
+  min-width: 0;
 }
 
 .danger-panel {

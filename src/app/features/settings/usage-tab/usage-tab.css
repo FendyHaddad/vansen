@@ -51,12 +51,14 @@
 .stat-row {
   display: grid;
   gap: 18px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
+/* minmax(0, …): a bare 1fr floors at min-content, so the widest stat would take
+   more than its third and the columns would stop being equal. */
 @media (min-width: 640px) {
   .stat-row {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

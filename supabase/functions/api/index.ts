@@ -40,7 +40,29 @@ const PLAN_PRICE_IDS: Record<string, string | undefined> = {
   pro: Deno.env.get('STRIPE_PRO_PRICE_ID'),
 };
 const LAUNCH_COUPON_ID = Deno.env.get('STRIPE_LAUNCH_COUPON_ID'); // $5 off, 2 months
-const APP_ORIGIN = 'http://localhost:4200';
+
+/** Deployed origins, comma-separated (e.g. "https://vansen.app"). Dev servers are
+ * matched by pattern instead — `ng serve` picks whatever port is free. */
+const APP_ORIGINS = (Deno.env.get('APP_ORIGIN') ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+const DEV_ORIGIN = /^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/;
+
+/** The single source of truth for "is this origin ours?" — used for both CORS and
+ * the Stripe return URL. Only ever returns an origin we recognise: echoing the
+ * caller's own value back would make checkout an open redirect. */
+function allowedOrigin(origin: string | undefined): string | null {
+  if (!origin) return null;
+  if (DEV_ORIGIN.test(origin)) return origin;
+  return APP_ORIGINS.includes(origin) ? origin : null;
+}
+
+/** Where Stripe sends the browser back. Prefer the caller's origin when we trust
+ * it, so any `ng serve` port works; fall back to the configured deployment. */
+function appOrigin(c: { req: { header: (k: string) => string | undefined } }): string {
+  return allowedOrigin(c.req.header('origin')) ?? APP_ORIGINS[0] ?? 'http://localhost:4200';
+}
 
 /** Detect image type from magic bytes; returns extension or null. */
 function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'webp' | null {
@@ -86,7 +108,6 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ['defaultImageFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
-  ['confirmOverUsd', (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000],
   ['tourSeen', (v) => typeof v === 'boolean'],
 ];
 
@@ -108,7 +129,7 @@ const app = new Hono<Vars>().basePath('/api');
 app.use(
   '*',
   cors({
-    origin: ['http://localhost:4200'],
+    origin: (origin) => allowedOrigin(origin) ?? undefined,
     allowHeaders: ['authorization', 'content-type'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   }),
@@ -333,6 +354,8 @@ app.get('/profile', async (c) => {
           plan: subscription.plan,
           status: subscription.status,
           currentPeriodEnd: subscription.current_period_end,
+          pendingPlan: subscription.pending_plan ?? null,
+          pendingAt: subscription.pending_at ?? null,
         }
       : null,
   });
@@ -645,20 +668,33 @@ app.post('/billing/subscribe', async (c) => {
   if (ownSub?.plan === 'owner' && ownSub.status === 'active') {
     return fail(c, 400, 'owner_plan', 'Owner accounts have unlimited credits');
   }
-  if (ownSub?.stripe_subscription_id && ownSub.status === 'active') {
-    return fail(c, 400, 'already_subscribed', 'Use the billing portal to change plans');
-  }
   try {
     const customer = await stripeCustomerFor(userId, c.get('email'));
-    // Launch promo: first-time subscribers only (never had a Stripe subscription).
-    const firstTime = !ownSub?.stripe_subscription_id;
+    // Ask Stripe, not our mirror. The `subscriptions` table is written only by the
+    // webhook, so it lags (or, if the webhook failed, never arrives) and it holds one
+    // row per user — a second subscription would overwrite the first and bill twice
+    // with nothing to show for it. Stripe Checkout does not dedupe subscriptions
+    // itself, so this is the only thing standing between a double click and a
+    // double charge.
+    const history = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    // "Billing" is wider than our 'active': past_due/unpaid are still in dunning, and
+    // a cancel_at_period_end sub is plain `active` here — it charges until it lapses.
+    const billing = history.data.filter((s) =>
+      s.status === 'active' || s.status === 'trialing' || s.status === 'past_due' || s.status === 'unpaid',
+    );
+    if (billing.length > 0) {
+      return fail(c, 400, 'already_subscribed', 'Use the billing portal to change plans');
+    }
+    // Launch promo: first-time subscribers only. Keyed off Stripe's full history
+    // rather than the mirror, so a missing row cannot hand out the coupon twice.
+    const firstTime = history.data.length === 0;
     const session = await stripe.checkout.sessions.create({
       customer,
       mode: 'subscription',
       line_items: [{ price: PLAN_PRICE_IDS[plan]!, quantity: 1 }],
       discounts: firstTime && LAUNCH_COUPON_ID ? [{ coupon: LAUNCH_COUPON_ID }] : undefined,
-      success_url: `${APP_ORIGIN}/app?checkout=success`,
-      cancel_url: `${APP_ORIGIN}/app?checkout=canceled`,
+      success_url: `${appOrigin(c)}/app?checkout=success`,
+      cancel_url: `${appOrigin(c)}/app?checkout=canceled`,
       metadata: { user_id: userId, plan },
       subscription_data: { metadata: { user_id: userId, plan } },
     });
@@ -693,8 +729,8 @@ app.post('/billing/pack', async (c) => {
         },
         quantity: 1,
       }],
-      success_url: `${APP_ORIGIN}/app?checkout=success`,
-      cancel_url: `${APP_ORIGIN}/app?checkout=canceled`,
+      success_url: `${appOrigin(c)}/app?checkout=success`,
+      cancel_url: `${appOrigin(c)}/app?checkout=canceled`,
       metadata: { user_id: userId, pack_usd: String(usd), pack_credits: String(credits) },
     });
     return c.json({ url: session.url });
@@ -704,12 +740,241 @@ app.post('/billing/pack', async (c) => {
   }
 });
 
+/**
+ * Studio <-> Pro. Swaps the price on the EXISTING subscription rather than
+ * cancelling and re-creating: one subscription per customer is what keeps the
+ * double-billing guard in /billing/subscribe meaningful.
+ *
+ * when='now' restarts the billing cycle today (unused time on the old plan is
+ * prorated back), so invoice.paid fires and fn_cycle_reset lands the new grant.
+ * when='period_end' books a Stripe Subscription Schedule; the swap happens at
+ * renewal and that cycle's invoice.paid carries the new grant.
+ *
+ * Downgrades are period_end only, and that is enforced HERE rather than in the
+ * dialog: an immediate downgrade makes fn_cycle_reset compute a negative delta
+ * (1500 - 3000 = -1500) and silently delete credits the user paid Pro prices for.
+ */
+app.post('/billing/change-plan', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const plan = body.plan === 'pro' ? 'pro' : body.plan === 'studio' ? 'studio' : null;
+  const when = body.when === 'now' ? 'now' : body.when === 'period_end' ? 'period_end' : null;
+  if (!plan) return fail(c, 400, 'invalid_plan', 'plan must be studio or pro');
+  if (!when) return fail(c, 400, 'invalid_when', 'when must be now or period_end');
+
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const list = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    const sub = list.data.find(
+      (s) => s.status === 'active' || s.status === 'trialing' || s.status === 'past_due',
+    );
+    if (!sub) return fail(c, 400, 'no_subscription', 'Start a subscription before changing plans');
+
+    const currentPlan = sub.items.data[0]?.price?.id === PLAN_PRICE_IDS.pro ? 'pro' : 'studio';
+    if (currentPlan === plan) return fail(c, 400, 'same_plan', `You are already on ${plan}`);
+    const downgrade = currentPlan === 'pro' && plan === 'studio';
+    if (downgrade && when === 'now') {
+      return fail(c, 400, 'downgrade_at_period_end', 'Downgrades take effect at your renewal date');
+    }
+    // A schedule cannot ride on a subscription that is already set to stop.
+    if (sub.cancel_at_period_end && when === 'period_end') {
+      return fail(c, 400, 'subscription_ending', 'Resume your subscription in Billing before scheduling a change');
+    }
+
+    const scheduleId = typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule?.id ?? null);
+    if (scheduleId && when === 'period_end') {
+      return fail(c, 400, 'already_scheduled', 'A plan change is already scheduled for your renewal');
+    }
+
+    const itemId = sub.items.data[0]!.id;
+    if (when === 'now') {
+      // "Start now" overrides a change booked earlier: a schedule-managed
+      // subscription rejects direct updates, so hand it back to normal billing
+      // before swapping the price.
+      if (scheduleId) await stripe.subscriptionSchedules.release(scheduleId);
+      const updated = await stripe.subscriptions.update(sub.id, {
+        items: [{ id: itemId, price: PLAN_PRICE_IDS[plan]! }],
+        proration_behavior: 'create_prorations',
+        billing_cycle_anchor: 'now',
+        cancel_at_period_end: false,
+        metadata: { user_id: userId, plan },
+      });
+      // Mirror the swap synchronously: the workspace reloads /profile the moment
+      // this returns, and waiting for the webhook leaves it showing the old plan
+      // (and its subscribe CTA) until a manual refresh. Credits still land via
+      // invoice.paid — only the plan/status mirror is written here.
+      const periodEndEpoch =
+        (updated as { current_period_end?: number }).current_period_end ??
+        (updated.items?.data?.[0] as { current_period_end?: number } | undefined)
+          ?.current_period_end;
+      await admin
+        .from('subscriptions')
+        .update({
+          plan,
+          status: 'active',
+          stripe_subscription_id: updated.id,
+          ...(periodEndEpoch
+            ? { current_period_end: new Date(periodEndEpoch * 1000).toISOString() }
+            : {}),
+          pending_plan: null,
+          pending_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+      return c.json({ plan, effectiveAt: null });
+    }
+
+    const schedule = await stripe.subscriptionSchedules.create({ from_subscription: sub.id });
+    const current = schedule.phases[0]!;
+    await stripe.subscriptionSchedules.update(schedule.id, {
+      // release hands the subscription back to normal billing once the new phase
+      // starts; without it the schedule would cancel the sub when it runs out.
+      end_behavior: 'release',
+      phases: [
+        {
+          items: [{ price: PLAN_PRICE_IDS[currentPlan]!, quantity: 1 }],
+          start_date: current.start_date,
+          end_date: current.end_date,
+        },
+        {
+          items: [{ price: PLAN_PRICE_IDS[plan]!, quantity: 1 }],
+          metadata: { user_id: userId, plan },
+        },
+      ],
+      metadata: { user_id: userId, plan },
+    });
+    const effectiveAt = new Date(current.end_date * 1000).toISOString();
+    await admin
+      .from('subscriptions')
+      .update({ pending_plan: plan, pending_at: effectiveAt })
+      .eq('user_id', userId);
+    return c.json({ plan, effectiveAt });
+  } catch (e) {
+    logError(c, 'change_plan_failed', e);
+    return fail(c, 400, 'billing_failed', 'Could not change your plan');
+  }
+});
+
+/**
+ * One call for everything the Subscription tab shows beyond our own mirror:
+ * next invoice, card on file, and whether the sub is set to stop. All read
+ * straight from Stripe — the mirror only knows plan/status/period-end.
+ */
+app.get('/billing/overview', async (c) => {
+  const userId = c.get('userId');
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const list = await stripe.subscriptions.list({
+      customer,
+      status: 'all',
+      limit: 100,
+      expand: ['data.default_payment_method'],
+    });
+    const sub = list.data.find(
+      (s) => s.status === 'active' || s.status === 'trialing' || s.status === 'past_due',
+    );
+    if (!sub) return c.json({ cancelAtPeriodEnd: false, upcoming: null, paymentMethod: null });
+
+    let upcoming: { amountUsd: number; date: string | null } | null = null;
+    if (!sub.cancel_at_period_end) {
+      try {
+        const invoice = await stripe.invoices.retrieveUpcoming({ customer });
+        const epoch = invoice.next_payment_attempt ?? invoice.period_end ?? null;
+        upcoming = {
+          amountUsd: Math.round(invoice.amount_due) / 100,
+          date: epoch ? new Date(epoch * 1000).toISOString() : null,
+        };
+      } catch {
+        // No upcoming invoice is a normal state, not an error.
+      }
+    }
+
+    const pm = sub.default_payment_method;
+    const card = pm && typeof pm !== 'string' ? pm.card : null;
+    return c.json({
+      cancelAtPeriodEnd: sub.cancel_at_period_end,
+      upcoming,
+      paymentMethod: card ? { brand: card.brand, last4: card.last4 } : null,
+    });
+  } catch (e) {
+    logError(c, 'overview_failed', e);
+    return fail(c, 400, 'billing_failed', 'Could not load billing details');
+  }
+});
+
+/**
+ * In-app cancellation (at period end, never immediate — the user keeps what
+ * they paid for). The reason is required by the UI and stored on the Stripe
+ * subscription's metadata, where the dashboard shows it next to the churn.
+ */
+app.post('/billing/cancel', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const reason = typeof body.reason === 'string' ? body.reason.slice(0, 120) : '';
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const list = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    const sub = list.data.find(
+      (s) => s.status === 'active' || s.status === 'trialing' || s.status === 'past_due',
+    );
+    if (!sub) return fail(c, 400, 'no_subscription', 'No active subscription to cancel');
+    if (sub.cancel_at_period_end) return c.json({ cancelAtPeriodEnd: true });
+
+    // A schedule-managed sub rejects direct updates; a booked plan change dies
+    // with the cancellation anyway, so release it (and its reminder) first.
+    const scheduleId = typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule?.id ?? null);
+    if (scheduleId) await stripe.subscriptionSchedules.release(scheduleId);
+    await stripe.subscriptions.update(sub.id, {
+      cancel_at_period_end: true,
+      metadata: { ...sub.metadata, cancel_reason: reason },
+    });
+    await admin
+      .from('subscriptions')
+      .update({
+        status: 'canceled',
+        cancel_reason: reason || null,
+        pending_plan: null,
+        pending_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+    return c.json({ cancelAtPeriodEnd: true });
+  } catch (e) {
+    logError(c, 'cancel_failed', e);
+    return fail(c, 400, 'billing_failed', 'Could not cancel your subscription');
+  }
+});
+
+/** Undo a pending cancellation — billing continues as if nothing happened. */
+app.post('/billing/resume', async (c) => {
+  const userId = c.get('userId');
+  try {
+    const customer = await stripeCustomerFor(userId, c.get('email'));
+    const list = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
+    const sub = list.data.find(
+      (s) => s.status === 'active' || s.status === 'trialing' || s.status === 'past_due',
+    );
+    if (!sub) return fail(c, 400, 'no_subscription', 'No subscription to resume');
+    if (sub.cancel_at_period_end) {
+      await stripe.subscriptions.update(sub.id, { cancel_at_period_end: false });
+    }
+    await admin
+      .from('subscriptions')
+      .update({ status: 'active', cancel_reason: null, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return c.json({ cancelAtPeriodEnd: false });
+  } catch (e) {
+    logError(c, 'resume_failed', e);
+    return fail(c, 400, 'billing_failed', 'Could not resume your subscription');
+  }
+});
+
 app.post('/billing/portal', async (c) => {
   try {
     const customer = await stripeCustomerFor(c.get('userId'), c.get('email'));
     const portal = await stripe.billingPortal.sessions.create({
       customer,
-      return_url: `${APP_ORIGIN}/app/settings`,
+      return_url: `${appOrigin(c)}/app/settings`,
     });
     return c.json({ url: portal.url });
   } catch (e) {

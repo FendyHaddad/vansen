@@ -43,14 +43,28 @@
             </ul>
           </div>
           <div hlmCardFooter>
-            <a routerLink="/login" hlmBtn class="w-full">
-              Get {{ plan.name }}
-              <ng-icon name="lucideArrowRight" size="16" />
-            </a>
+            <button
+              hlmBtn
+              type="button"
+              class="w-full"
+              [disabled]="busyPlan() !== null"
+              (click)="getPlan(plan.id)"
+            >
+              @if (busyPlan() === plan.id) {
+                <span class="cta-spinner" aria-hidden="true"></span>
+                Opening Stripe…
+              } @else {
+                Get {{ plan.name }}
+                <ng-icon name="lucideArrowRight" size="16" />
+              }
+            </button>
           </div>
         </div>
       }
     </div>
+    @if (error()) {
+      <p class="checkout-error mt-4 text-center text-sm">{{ error() }}</p>
+    }
     <p class="muted mt-4 text-center text-xs">
       Included credits reset each billing cycle. Add-on pack credits roll over while your
       subscription is active.

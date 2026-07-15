@@ -7,10 +7,12 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideAperture,
   lucideBrush,
+  lucideCalendarClock,
   lucideChartNoAxesColumn,
   lucideCheck,
   lucideCloudFog,
@@ -34,7 +36,12 @@ import {
   lucideWand,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
-import { EDIT_TOOLS } from '../../../core/catalog/model-families';
+import {
+  EDIT_TOOLS,
+  PLAN_CREDITS,
+  PLAN_PRICE_USD,
+  PLAN_PROMO_USD,
+} from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
 import { RetouchMode } from '../../../core/editing/ops/retouch';
@@ -75,6 +82,37 @@ const PRO_TOOLS: LocalToolDef[] = [
   { id: 'erase', label: 'Magic Erase', icon: 'lucideEraser' },
 ];
 
+interface PlanPitch {
+  title: string;
+  sub: string;
+  perks: string[];
+}
+
+/** Lock-card copy per tier. Prices/credits come from the catalog so this card,
+ * the plans page and the pricing page can never drift apart. */
+const PLAN_PITCH: Record<'studio' | 'pro', PlanPitch> = {
+  studio: {
+    title: 'Studio Editing',
+    sub: 'Unlock the full editing suite for every image you generate.',
+    perks: [
+      'Crop, adjust, filters, heal — free',
+      'AI remove, fill & expand from 5 credits',
+      `${PLAN_CREDITS.studio.toLocaleString()} credits included every month`,
+      'Every edit saved as a new version',
+    ],
+  },
+  pro: {
+    title: 'Vansen Pro',
+    sub: 'Everything in Studio, plus the Pro tools and video generation.',
+    perks: [
+      'Everything in Studio',
+      'Cut Out, Bokeh, Upscale, Magic Erase — free',
+      'Video models — Pro only',
+      `${PLAN_CREDITS.pro.toLocaleString()} credits every month — 25% more per dollar`,
+    ],
+  },
+};
+
 interface ExportFormat {
   type: 'image/png' | 'image/jpeg' | 'image/webp';
   label: string;
@@ -95,11 +133,12 @@ const EXPORT_FORMATS: ExportFormat[] = [
   templateUrl: './right-panel.html',
   styleUrl: './right-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, HlmButton, ToolOptions],
+  imports: [DatePipe, NgIcon, HlmButton, ToolOptions],
   providers: [
     provideIcons({
       lucideAperture,
       lucideBrush,
+      lucideCalendarClock,
       lucideChartNoAxesColumn,
       lucideCheck,
       lucideCloudFog,
@@ -132,8 +171,17 @@ export class RightPanel {
   /** True while the workspace is in edit mode (panel is a teaser otherwise). */
   readonly editing = input(false);
 
+  /** True while the workspace is redirecting to Stripe — drives the CTA spinner. */
+  readonly checkoutBusy = input(false);
+
   readonly saveRequested = output<void>();
-  readonly subscribeRequested = output<void>();
+  /** Emits the plan the visitor picked in the tier switch, not just "studio". */
+  readonly subscribeRequested = output<'studio' | 'pro'>();
+  /** Existing subscribers change plan in the Stripe portal — /billing/subscribe
+   * rejects them with `already_subscribed`, so an upgrade must not go there. */
+  readonly upgradeRequested = output<void>();
+  /** Pro → Studio, via the same confirm dialog (period-end only, server-enforced). */
+  readonly downgradeRequested = output<void>();
   readonly aiToolRequested = output<{
     toolId: string;
     prompt: string;
@@ -146,8 +194,12 @@ export class RightPanel {
   readonly studioActive = this.profileStore.studioActive;
   readonly totalCredits = this.ledger.totalCredits;
 
-  /** Studio | Pro tier switch — Pro is a locked teaser in this phase. */
+  /** Studio | Pro tier switch — drives the lock card and which plan gets bought. */
   readonly tier = signal<'studio' | 'pro'>('studio');
+  readonly pitch = computed(() => PLAN_PITCH[this.tier()]);
+  readonly planPriceUsd = computed(() => PLAN_PRICE_USD[this.tier()]);
+  readonly planPromoUsd = computed(() => PLAN_PROMO_USD[this.tier()]);
+  readonly planLabel = computed(() => (this.tier() === 'pro' ? 'Pro' : 'Studio'));
   readonly activeTool = signal<StudioTool | null>(null);
   /** Shared brush size for heal/liquify/mask — the viewport reads it too. */
   readonly brushSize = signal(40);
@@ -168,12 +220,49 @@ export class RightPanel {
   readonly exportOpen = signal(false);
   readonly exportFormats = EXPORT_FORMATS;
 
-  /** Only lock once the profile actually loaded — an in-flight /profile must
-   * not flash the "subscribe" overlay at subscribed users. */
+  /** Until /profile answers, the rail shows a spinner — rendering either branch
+   * early flashes the wrong one at somebody (tools at visitors, or the subscribe
+   * pitch at subscribers whose cache was cleared). */
+  readonly ready = this.profileStore.loaded;
+
   readonly locked = computed(() => this.profileStore.loaded() && !this.studioActive());
 
   /** Pro tools lock: pro/owner subscribers only. Waits for /profile like `locked`. */
   readonly proLocked = computed(() => this.profileStore.loaded() && !this.profileStore.proActive());
+
+  /** A Studio subscriber who switched to the Pro tab: sell the upgrade rather
+   * than the tools they already have. */
+  readonly upgrading = computed(() => !this.locked() && this.tier() === 'pro' && this.proLocked());
+
+  /** A plan change already booked for renewal — the standing reminder. */
+  readonly pendingPlan = computed(() => this.profileStore.subscription()?.pendingPlan ?? null);
+  readonly pendingAt = computed(() => this.profileStore.subscription()?.pendingAt ?? null);
+  readonly pendingLabel = computed(() => (this.pendingPlan() === 'pro' ? 'Pro' : 'Studio'));
+
+  /** Show the plan pitch instead of the tool rail. */
+  readonly showPitch = computed(() => this.locked() || this.upgrading());
+
+  /** A Pro subscriber browsing the Studio tab: they own every tool shown, so the
+   * rail stays — a compact downgrade offer rides above it instead. Hidden once
+   * the downgrade is booked (the pending note already covers that state). */
+  readonly downgradeOffer = computed(
+    () =>
+      !this.locked() &&
+      this.tier() === 'studio' &&
+      this.profileStore.subscription()?.plan === 'pro' &&
+      this.pendingPlan() !== 'studio',
+  );
+
+  /** The launch coupon is first-time-only (`firstTime` in /billing/subscribe keys
+   * off ever having had a Stripe subscription). Anyone with a subscription row —
+   * lapsed included — will not get it, so never promise it to them. */
+  readonly showPromo = computed(() => this.profileStore.subscription() === null);
+
+  readonly ctaLabel = computed(() =>
+    this.upgrading()
+      ? `Upgrade to Pro · $${PLAN_PRICE_USD.pro}/mo`
+      : `Subscribe to ${this.planLabel()} · $${this.planPriceUsd()}/mo`,
+  );
 
   selectTool(id: StudioTool): void {
     this.activeTool.set(this.activeTool() === id ? null : id);

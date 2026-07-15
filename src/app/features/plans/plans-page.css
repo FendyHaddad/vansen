@@ -212,3 +212,29 @@
   font-size: 0.78rem;
   font-weight: 500;
 }
+
+/* Redirect to Stripe takes a beat — spin so the wait never reads as a dead click. */
+.cta-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: plan-spin 0.7s linear infinite;
+}
+
+@keyframes plan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.checkout-error {
+  color: var(--destructive);
+}

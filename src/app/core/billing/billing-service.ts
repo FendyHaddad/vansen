@@ -1,6 +1,16 @@
 import { Injectable, InjectionToken, inject } from '@angular/core';
 import { ApiService } from '../api/api-service';
-import { CheckoutResponse, PackRequest, ReconcileResponse, SubscribeRequest } from '../api/dtos';
+import {
+  BillingOverviewDto,
+  CancelStateResponse,
+  CancelSubscriptionRequest,
+  ChangePlanRequest,
+  ChangePlanResponse,
+  CheckoutResponse,
+  PackRequest,
+  ReconcileResponse,
+  SubscribeRequest,
+} from '../api/dtos';
 import { LedgerService } from '../ledger/ledger-service';
 
 /** Overridable in tests; defaults to a full-page redirect (Stripe-hosted pages). */
@@ -29,7 +39,33 @@ export class BillingService {
     this.navigate(url);
   }
 
-  /** Stripe Billing Portal: cancel, card, invoices. */
+  /**
+   * Switch between Studio and Pro on the existing subscription. No redirect:
+   * Stripe already has the card, so the change applies in place and the caller
+   * just reloads the profile.
+   */
+  async changePlan(plan: 'studio' | 'pro', when: 'now' | 'period_end'): Promise<ChangePlanResponse> {
+    const body: ChangePlanRequest = { plan, when };
+    return await this.api.post<ChangePlanResponse>('/billing/change-plan', body);
+  }
+
+  /** Next invoice, card on file, cancellation state — straight from Stripe. */
+  async overview(): Promise<BillingOverviewDto> {
+    return await this.api.get<BillingOverviewDto>('/billing/overview');
+  }
+
+  /** Cancel at period end (never immediate) with the survey reason attached. */
+  async cancelSubscription(reason: string): Promise<void> {
+    const body: CancelSubscriptionRequest = { reason };
+    await this.api.post<CancelStateResponse>('/billing/cancel', body);
+  }
+
+  /** Undo a pending cancellation — billing continues untouched. */
+  async resumeSubscription(): Promise<void> {
+    await this.api.post<CancelStateResponse>('/billing/resume', {});
+  }
+
+  /** Stripe Billing Portal: card, invoices. */
   async openPortal(): Promise<void> {
     const { url } = await this.api.post<CheckoutResponse>('/billing/portal', {});
     this.navigate(url);

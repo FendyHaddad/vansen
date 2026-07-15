@@ -68,6 +68,11 @@ export const STUDIO_MARGIN = 0.4;
 /** Monthly credit grant per subscription plan (owner is unlimited, never granted). */
 export const PLAN_CREDITS = { studio: 1500, pro: 3750 } as const;
 
+/** Monthly list price per plan, and the launch price for a first-time customer's
+ * first 60 days (Stripe applies it as a $5/mo coupon — see STRIPE_LAUNCH_COUPON_ID). */
+export const PLAN_PRICE_USD = { studio: 15, pro: 30 } as const;
+export const PLAN_PROMO_USD = { studio: 10, pro: 25 } as const;
+
 /** Pro buyers get 25% more credits per dollar — same jobs cost 20% less. */
 export const PRO_PURCHASE_RATE = 1.25;
 

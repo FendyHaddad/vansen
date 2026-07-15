@@ -1,0 +1,208 @@
+.cf-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.cf-dialog {
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 14px;
+  background: var(--background, #101013);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.5);
+}
+
+.cf-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  padding: 5px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.cf-close:hover {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+.cf-eyebrow {
+  margin: 0 0 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+}
+
+.cf-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.cf-sub {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+
+.cf-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 10px;
+  list-style: none;
+}
+
+.cf-facts li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.cf-facts ng-icon {
+  margin-top: 2px;
+  color: var(--primary, #825aff);
+  flex-shrink: 0;
+}
+
+/* Today → plan-end strip: the wait costs nothing, cancelling early gains nothing. */
+.cf-timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 2px 0;
+}
+
+.cf-tl-point {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.cf-tl-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cf-tl-now {
+  border-color: color-mix(in oklch, var(--primary, #825aff) 45%, transparent);
+  background: color-mix(in oklch, var(--primary, #825aff) 12%, transparent);
+}
+
+.cf-tl-label {
+  font-size: 0.62rem;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+.cf-tl-track {
+  flex: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    color-mix(in oklch, var(--primary, #825aff) 55%, transparent),
+    color-mix(in oklch, var(--border, #26262a) 90%, transparent)
+  );
+}
+
+.cf-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 16px 0 0;
+}
+
+.cf-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #26262a);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.cf-reason:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+
+.cf-reason-active {
+  border-color: var(--primary, #825aff);
+  background: color-mix(in oklch, var(--primary, #825aff) 9%, transparent);
+}
+
+.cf-reason ng-icon {
+  color: var(--primary, #825aff);
+  flex-shrink: 0;
+}
+
+.cf-error {
+  margin: 12px 0 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--destructive, #f31260);
+}
+
+.cf-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.cf-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: cf-spin 0.7s linear infinite;
+}
+
+@keyframes cf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-spinner {
+    animation-duration: 2.4s;
+  }
+}

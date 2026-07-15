@@ -6,7 +6,11 @@ import { PreferencesService } from '../preferences/preferences-service';
 import { ProfileResponse, SubscriptionDto } from '../api/dtos';
 import { ProfileStore } from './profile-store';
 
-function response(subscription: SubscriptionDto | null): ProfileResponse {
+/** No scheduled change is the norm — cases that care pass pendingPlan/pendingAt. */
+type SubFixture = Omit<SubscriptionDto, 'pendingPlan' | 'pendingAt'> &
+  Partial<Pick<SubscriptionDto, 'pendingPlan' | 'pendingAt'>>;
+
+function response(subscription: SubFixture | null): ProfileResponse {
   return {
     profile: {
       id: 'u1',
@@ -16,7 +20,7 @@ function response(subscription: SubscriptionDto | null): ProfileResponse {
       createdAt: '2026-01-01T00:00:00Z',
     },
     credits: { plan: 0, pack: 0 },
-    subscription,
+    subscription: subscription ? { pendingPlan: null, pendingAt: null, ...subscription } : null,
   };
 }
 

@@ -12,7 +12,7 @@
       </div>
       <select
         id="prefMode"
-        class="pref-select"
+        class="pref-field pref-select"
         [value]="prefs().defaultMode"
         (change)="setMode($any($event.target).value)"
       >
@@ -30,7 +30,7 @@
       </div>
       <select
         id="prefImage"
-        class="pref-select"
+        class="pref-field pref-select"
         (change)="setImageFamily($any($event.target).value)"
       >
         @for (f of imageFamilies; track f.id) {
@@ -50,7 +50,7 @@
       </div>
       <select
         id="prefVideo"
-        class="pref-select"
+        class="pref-field pref-select"
         (change)="setVideoFamily($any($event.target).value)"
       >
         @for (f of videoFamilies; track f.id) {
@@ -70,36 +70,13 @@
       </div>
       <select
         id="prefAspect"
-        class="pref-select"
+        class="pref-field pref-select"
         (change)="setAspect($any($event.target).value)"
       >
         @for (ar of aspects; track ar) {
           <option [value]="ar" [selected]="prefs().defaultAspect === ar">{{ ar }}</option>
         }
       </select>
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="pref-item">
-      <div class="pref-text">
-        <label hlmLabel for="prefThreshold">Spending guard</label>
-        <p class="muted small">
-          Ask for confirmation before any run priced above this amount (100 credits = $1).
-        </p>
-      </div>
-      <div class="threshold-control">
-        <span class="muted">$</span>
-        <input
-          id="prefThreshold"
-          type="number"
-          min="0"
-          step="0.5"
-          class="pref-select threshold-input"
-          [value]="prefs().confirmOverUsd"
-          (input)="setThreshold($any($event.target).value)"
-        />
-      </div>
     </div>
   </div>
 </div>

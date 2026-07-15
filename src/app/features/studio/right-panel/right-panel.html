@@ -1,4 +1,9 @@
-<aside class="studio-rail" [class.rail-locked]="locked()">
+<aside class="studio-rail">
+  @if (!ready()) {
+    <div class="rail-loading" aria-busy="true">
+      <span class="rail-spinner" aria-hidden="true"></span>
+    </div>
+  } @else {
   <div class="tier-switch">
     <button
       type="button"
@@ -10,43 +15,79 @@
     </button>
     <button
       type="button"
-      class="tier-btn tier-disabled"
-      title="Pro — coming soon: video editing and more free tools"
+      class="tier-btn"
+      [class.tier-active]="tier() === 'pro'"
+      (click)="tier.set('pro')"
     >
-      <ng-icon name="lucideLock" size="13" />
       Pro
     </button>
   </div>
 
-  @if (locked()) {
+  @if (pendingPlan(); as pending) {
+    <p class="pending-note">
+      <ng-icon name="lucideCalendarClock" size="13" />
+      <span>
+        {{ pendingLabel() }} starts
+        @if (pendingAt()) {
+          {{ pendingAt() | date: 'MMM d' }}
+        } @else {
+          at renewal
+        }
+        — you keep your current plan until then.
+      </span>
+    </p>
+  }
+
+  @if (downgradeOffer()) {
+    <div class="downgrade-card">
+      <p class="downgrade-copy">
+        You're on Pro — every tool here is included. Prefer Studio at
+        <span class="num">${{ planPriceUsd() }}</span
+        >/mo?
+      </p>
+      <button type="button" class="downgrade-cta" (click)="downgradeRequested.emit()">
+        Switch to Studio
+      </button>
+    </div>
+  }
+
+  @if (showPitch()) {
     <div class="lock-card">
       <div class="lock-badge">
         <ng-icon name="lucideLock" size="17" />
       </div>
-      <h3 class="lock-title">Studio Editing</h3>
-      <p class="lock-sub">Unlock the full editing suite for every image you generate.</p>
+      <h3 class="lock-title">{{ pitch().title }}</h3>
+      <p class="lock-sub">{{ pitch().sub }}</p>
       <ul class="lock-perks">
-        <li>
-          <ng-icon name="lucideCheck" size="13" />
-          <span>Crop, adjust, filters, heal — free</span>
-        </li>
-        <li>
-          <ng-icon name="lucideCheck" size="13" />
-          <span>AI remove, fill &amp; expand from 5 credits</span>
-        </li>
-        <li>
-          <ng-icon name="lucideCheck" size="13" />
-          <span>1,500 credits included every month</span>
-        </li>
-        <li>
-          <ng-icon name="lucideCheck" size="13" />
-          <span>Every edit saved as a new version</span>
-        </li>
+        @for (perk of pitch().perks; track perk) {
+          <li>
+            <ng-icon name="lucideCheck" size="13" />
+            <span>{{ perk }}</span>
+          </li>
+        }
       </ul>
-      <button hlmBtn size="sm" class="lock-cta" type="button" (click)="subscribeRequested.emit()">
-        Subscribe to Studio · $15/mo
+      <button
+        hlmBtn
+        size="sm"
+        class="lock-cta"
+        type="button"
+        [disabled]="checkoutBusy()"
+        (click)="upgrading() ? upgradeRequested.emit() : subscribeRequested.emit(tier())"
+      >
+        @if (checkoutBusy()) {
+          <span class="cta-spinner" aria-hidden="true"></span>
+          Opening Stripe…
+        } @else {
+          {{ ctaLabel() }}
+        }
       </button>
-      <p class="lock-note">Launch offer: $10/mo for your first 60 days. Cancel anytime.</p>
+      @if (showPromo()) {
+        <p class="lock-note">
+          Launch offer: ${{ planPromoUsd() }}/mo for your first 60 days. Cancel anytime.
+        </p>
+      } @else if (upgrading()) {
+        <p class="lock-note">Switch plans in the billing portal — prorated by Stripe.</p>
+      }
     </div>
   } @else {
     @if (!editing()) {
@@ -134,7 +175,7 @@
         </div>
       }
       @if (editing() && !proLocked() && totalCredits() < 5) {
-        <p class="ai-note">Not enough credits — add a pack from Billing to use AI tools.</p>
+        <p class="ai-note">Not enough credits — top up with “Add credits” in the top bar.</p>
       }
     </section>
 
@@ -179,5 +220,6 @@
         </div>
       </div>
     }
+  }
   }
 </aside>

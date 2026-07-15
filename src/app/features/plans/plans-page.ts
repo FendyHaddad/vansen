@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideArrowRight,
@@ -16,6 +16,9 @@ import { HlmBadge } from '@spartan-ng/helm/badge';
 import { HlmCardImports } from '@spartan-ng/helm/card';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
+import { AuthService } from '../../core/auth/auth-service';
+import { BillingService } from '../../core/billing/billing-service';
+import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { CREDIT_PACKS, PLAN_CREDITS, packCredits } from '../../core/catalog/model-families';
 
 interface PlanCard {
@@ -48,7 +51,6 @@ interface PlanFaq {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DecimalPipe,
-    RouterLink,
     NgIcon,
     HlmButton,
     HlmBadge,
@@ -69,6 +71,39 @@ interface PlanFaq {
   ],
 })
 export class PlansPage {
+  private readonly auth = inject(AuthService);
+  private readonly billing = inject(BillingService);
+  private readonly intent = inject(CheckoutIntent);
+  private readonly router = inject(Router);
+
+  /** The plan whose CTA is mid-redirect — Stripe takes a beat to answer. */
+  readonly busyPlan = signal<'studio' | 'pro' | null>(null);
+  readonly error = signal('');
+
+  /**
+   * Signed in: straight to Stripe. Signed out: remember the plan and send them
+   * through login — the workspace picks the intent back up and opens checkout,
+   * so picking a plan here never dead-ends in the library.
+   */
+  async getPlan(plan: 'studio' | 'pro'): Promise<void> {
+    if (this.busyPlan()) return;
+    this.error.set('');
+    if (!this.auth.isAuthed()) {
+      this.intent.set(plan);
+      void this.router.navigate(['/login']);
+      return;
+    }
+    this.busyPlan.set(plan);
+    try {
+      await this.billing.subscribe(plan);
+    } catch {
+      // Success redirects away; only a failure lands back here. The likeliest
+      // cause is an existing subscription, which the portal — not checkout — owns.
+      this.busyPlan.set(null);
+      this.error.set('Could not start checkout. If you already subscribe, manage your plan under Settings → Subscription.');
+    }
+  }
+
   readonly plans: PlanCard[] = [
     {
       id: 'studio',
@@ -125,7 +160,7 @@ export class PlansPage {
     {
       question: 'What if I run out mid-month?',
       answer:
-        'Add a one-time credit pack ($10–$100) from Billing. Bigger packs carry a bonus, Pro subscribers get 25% more credits per dollar, and pack credits never reset while you stay subscribed.',
+        'Add a one-time credit pack ($10–$100) from the Subscription tab. Bigger packs carry a bonus, Pro subscribers get 25% more credits per dollar, and pack credits never reset while you stay subscribed.',
     },
     {
       question: 'What does editing cost?',

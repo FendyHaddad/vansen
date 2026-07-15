@@ -1,0 +1,128 @@
+<div class="pc-backdrop" (click)="close()"></div>
+
+<div
+  class="pc-dialog"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pc-title"
+  (click)="$event.stopPropagation()"
+>
+  <button type="button" class="pc-close" aria-label="Close" (click)="close()">
+    <ng-icon name="lucideX" size="15" />
+  </button>
+
+  <h2 class="pc-title" id="pc-title">
+    {{ upgrading() ? 'Upgrade to' : 'Switch to' }} {{ targetLabel() }}
+  </h2>
+  <p class="pc-sub">
+    {{ currentLabel() }} → {{ targetLabel() }} · <span class="num">${{ targetPrice() }}</span
+    >/mo · <span class="num">{{ targetCredits() | number }}</span> credits each cycle
+  </p>
+
+  <div class="pc-options">
+    @if (canSwitchNow()) {
+      <button
+        type="button"
+        class="pc-option"
+        [class.pc-option-active]="when() === 'now'"
+        (click)="choose('now')"
+      >
+        <ng-icon name="lucideZap" size="15" />
+        <span class="pc-option-text">
+          <span class="pc-option-name">Start now</span>
+          <span class="pc-option-hint">
+            A new {{ targetLabel() }} cycle begins today. Unused time on
+            {{ currentLabel() }} is credited against the charge, so you only pay the difference.
+            @if (alreadyScheduled()) {
+              This replaces the change booked for renewal.
+            }
+          </span>
+        </span>
+      </button>
+    }
+
+    @if (alreadyScheduled()) {
+      <div class="pc-option pc-option-done">
+        <ng-icon name="lucideCheck" size="15" />
+        <span class="pc-option-text">
+          <span class="pc-option-name">
+            Scheduled
+            @if (periodEnd()) {
+              · {{ periodEnd() | date: 'MMM d' }}
+            }
+          </span>
+          <span class="pc-option-hint">
+            {{ targetLabel() }} is already booked for
+            @if (periodEnd()) {
+              {{ periodEnd() | date: 'MMMM d' }}.
+            } @else {
+              your renewal date.
+            }
+            It takes over automatically — nothing more to do here.
+          </span>
+        </span>
+      </div>
+    } @else {
+      <button
+        type="button"
+        class="pc-option"
+        [class.pc-option-active]="when() === 'period_end'"
+        (click)="choose('period_end')"
+      >
+        <ng-icon name="lucideCalendarClock" size="15" />
+        <span class="pc-option-text">
+          <span class="pc-option-name">
+            At renewal
+            @if (periodEnd()) {
+              · {{ periodEnd() | date: 'MMM d' }}
+            }
+          </span>
+          <span class="pc-option-hint">
+            Keep {{ currentLabel() }} until then. On
+            @if (periodEnd()) {
+              {{ periodEnd() | date: 'MMMM d' }}
+            } @else {
+              your renewal date
+            }
+            you are charged <span class="num">${{ targetPrice() }}</span> and
+            {{ targetLabel() }} takes over automatically. Nothing is charged today.
+          </span>
+        </span>
+      </button>
+    }
+  </div>
+
+  @if (creditsLost()) {
+    <p class="pc-fresh">
+      <ng-icon name="lucideSparkles" size="14" />
+      <span>
+        You start fresh today with <span class="num">{{ targetCredits() | number }}</span>
+        {{ targetLabel() }} credits, and every add-on pack credit stays right where it is.
+        Your <span class="num">{{ creditsLost() | number }}</span> current plan credits close out
+        with the cycle rather than stacking on top.
+      </span>
+    </p>
+  }
+
+  @if (error()) {
+    <p class="pc-error" role="alert">{{ error() }}</p>
+  }
+
+  <div class="pc-actions">
+    <button hlmBtn variant="outline" size="sm" type="button" [disabled]="busy()" (click)="close()">
+      {{ scheduledOnly() ? 'Close' : 'Cancel' }}
+    </button>
+    @if (!scheduledOnly()) {
+      <button hlmBtn size="sm" type="button" [disabled]="busy()" (click)="confirm()">
+        @if (busy()) {
+          <span class="pc-spinner" aria-hidden="true"></span>
+          Working…
+        } @else if (when() === 'now') {
+          Start {{ targetLabel() }} now
+        } @else {
+          Schedule {{ targetLabel() }}
+        }
+      </button>
+    }
+  </div>
+</div>

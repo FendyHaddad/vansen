@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideActivity,
@@ -57,7 +57,12 @@ export class SettingsPage {
   readonly active = signal<SettingsTab>('profile');
   readonly tabs: { id: SettingsTab; label: string; icon: string; hint: string }[] = [
     { id: 'profile', label: 'Profile', icon: 'lucideUser', hint: 'Identity and account' },
-    { id: 'billing', label: 'Billing', icon: 'lucideCreditCard', hint: 'Credits, plan, history' },
+    {
+      id: 'billing',
+      label: 'Subscription',
+      icon: 'lucideCreditCard',
+      hint: 'Plan, credits, invoices',
+    },
     { id: 'usage', label: 'Usage', icon: 'lucideActivity', hint: 'This month at a glance' },
     {
       id: 'preferences',
@@ -66,6 +71,14 @@ export class SettingsPage {
       hint: 'Defaults for the workspace',
     },
   ];
+
+  constructor() {
+    // Deep link: the workspace "Buy credits" entry points at ?tab=billing.
+    const tab = inject(ActivatedRoute).snapshot.queryParamMap.get('tab');
+    if (tab === 'billing' || tab === 'usage' || tab === 'preferences' || tab === 'profile') {
+      this.active.set(tab);
+    }
+  }
 
   /** Profile-menu "Buy credits" — packs live on the Billing tab. */
   topUp(): void {

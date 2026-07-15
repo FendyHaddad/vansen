@@ -191,7 +191,7 @@
   <div class="gen-btn">
     @if (insufficient()) {
       <p class="insufficient">
-        Not enough credits for this configuration — add a pack from Billing.
+        Not enough credits for this configuration — top up with “Add credits” in the top bar.
       </p>
     }
     <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">

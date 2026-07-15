@@ -12,6 +12,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideArrowLeft,
+  lucidePlus,
   lucideRedo2,
   lucideUndo2,
   lucideUpload,
@@ -25,6 +26,7 @@ import { GenerationStore } from '../../core/generations/generation-store';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
 import { BillingService } from '../../core/billing/billing-service';
+import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
 import { ApiError } from '../../core/api/api-service';
@@ -44,6 +46,8 @@ import { LibraryGrid } from './library-grid/library-grid';
 import { DetailOverlay } from './detail-overlay/detail-overlay';
 import { CanvasViewport } from '../studio/canvas-viewport/canvas-viewport';
 import { RightPanel } from '../studio/right-panel/right-panel';
+import { PlanChangeDialog } from '../studio/plan-change-dialog/plan-change-dialog';
+import { CreditPacksDialog } from './credit-packs-dialog/credit-packs-dialog';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
@@ -69,10 +73,13 @@ const SAMPLE_PROMPTS = [
     DetailOverlay,
     CanvasViewport,
     RightPanel,
+    PlanChangeDialog,
+    CreditPacksDialog,
   ],
   providers: [
     provideIcons({
       lucideArrowLeft,
+      lucidePlus,
       lucideRedo2,
       lucideUndo2,
       lucideUpload,
@@ -86,9 +93,11 @@ export class WorkspacePage {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
   private readonly store = inject(GenerationStore);
-  private readonly profileStore = inject(ProfileStore);
+  /** Public: the plan-change dialog reads subscription state straight from it. */
+  readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
   private readonly billing = inject(BillingService);
+  private readonly checkoutIntent = inject(CheckoutIntent);
   private readonly poller = inject(JobPoller);
   private readonly availability = inject(ModelAvailability);
   private readonly mediaCache = inject(MediaCache);
@@ -111,6 +120,8 @@ export class WorkspacePage {
   readonly userEmail = this.auth.userEmail;
   readonly displayName = this.profileStore.displayName;
   readonly totalCredits = this.ledger.totalCredits;
+  /** Plan bucket only — the credits a mid-cycle switch would replace. */
+  readonly planCredits = this.ledger.planCredits;
   readonly isOwner = this.profileStore.isOwner;
   readonly studioActive = this.profileStore.studioActive;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
@@ -143,6 +154,10 @@ export class WorkspacePage {
   /** Set when 2 strikes suspend the account — blocks the whole workspace. */
   readonly suspended = signal(false);
 
+  /** True while a Stripe redirect is in flight — the CTA must show progress and
+   * refuse repeat clicks, since the round trip is slow enough to look frozen. */
+  readonly checkoutBusy = signal(false);
+
   constructor() {
     // Deep link from the absorbed /app/edit/:id route.
     const editParam = this.route.snapshot.paramMap.get('id');
@@ -150,7 +165,7 @@ export class WorkspacePage {
       this.handleCheckoutReturn();
       this.poller.watch();
       if (editParam) void this.enterEdit(editParam);
-      else this.maybeStartTour();
+      else if (!this.resumeCheckoutIntent()) this.maybeStartTour();
     });
 
     // When an AI edit on the open session's chain completes, jump to the result.
@@ -178,6 +193,19 @@ export class WorkspacePage {
   /** Last AI-edit result auto-opened, so the effect fires once per result. */
   private aiOpened: string | null = null;
 
+  /**
+   * Resume a plan picked on the pricing page before signing in. Runs after
+   * refresh() so studioActive() is known: someone who subscribed in another tab
+   * must not be sent to checkout again. Returns true when checkout is opening,
+   * so the caller can skip the tour rather than start it under a redirect.
+   */
+  private resumeCheckoutIntent(): boolean {
+    const plan = this.checkoutIntent.take();
+    if (!plan || this.studioActive()) return false;
+    void this.subscribeTo(plan);
+    return true;
+  }
+
   /** Stripe redirects back with ?checkout=success|canceled; webhook may lag a second. */
   private handleCheckoutReturn(): void {
     const result = this.route.snapshot.queryParamMap.get('checkout');
@@ -199,7 +227,7 @@ export class WorkspacePage {
       } else if (attempts >= 6) {
         clearInterval(poll);
         this.notice.set(
-          'Payment received — credits are on the way. If they don’t appear, use “Didn’t receive your credits?” in Billing.',
+          'Payment received — credits are on the way. If they don’t appear, use “Didn’t receive your credits?” in Settings → Subscription.',
         );
       }
     }, 1000);
@@ -216,7 +244,7 @@ export class WorkspacePage {
   private showError(e: unknown, fallback: string): void {
     if (e instanceof ApiError) {
       if (e.code === 'insufficient_credits') {
-        this.notice.set('Not enough credits — add a pack from Billing to continue.');
+        this.notice.set('Not enough credits — top up with “Add credits” in the top bar.');
         return;
       }
       if (e.code === 'subscription_required') {
@@ -224,7 +252,7 @@ export class WorkspacePage {
         return;
       }
       if (e.code === 'pro_required') {
-        this.notice.set('That model needs the Pro plan — upgrade from Billing.');
+        this.notice.set('That model needs the Pro plan — upgrade from Settings → Subscription.');
         return;
       }
       if (e.code === 'account_suspended') {
@@ -253,14 +281,6 @@ export class WorkspacePage {
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
-    // confirmOverUsd is a USD threshold; 100 credits = $1 of Studio retail value.
-    const threshold = this.prefsService.prefs().confirmOverUsd;
-    if (
-      req.priceCredits / 100 > threshold &&
-      !confirm(`This generation costs ${req.priceCredits} credits. Continue?`)
-    ) {
-      return;
-    }
     const op = req.referenceId || req.referenceUploadId ? GenerationOp.Edit : GenerationOp.Generate;
     try {
       await this.store.create({
@@ -551,13 +571,103 @@ export class WorkspacePage {
     void this.router.navigate(['/app/settings'], { queryParams: { tab: 'billing' } });
   }
 
-  /** Grace banner / teaser CTA — restart a Studio subscription. */
-  async reactivateStudio(): Promise<void> {
+  /** Grace banner / teaser CTA — start a subscription on the plan the visitor picked. */
+  async subscribeTo(plan: 'studio' | 'pro'): Promise<void> {
+    if (this.checkoutBusy()) return;
+    this.checkoutBusy.set(true);
     try {
-      await this.billing.subscribe('studio');
+      await this.billing.subscribe(plan);
     } catch (e) {
+      // Only clear on failure: success navigates away, and flipping the button
+      // back to idle mid-redirect invites a second click and a second session.
+      this.checkoutBusy.set(false);
       this.showError(e, 'Could not start checkout');
     }
+  }
+
+  /**
+   * Studio → Pro. Confirm first: plan credits do not carry across a switch, so
+   * this must never fire straight from a button press.
+   */
+  upgradePlan(): void {
+    this.planChangeError.set('');
+    this.planChange.set('pro');
+  }
+
+  /** Pro → Studio, same dialog — the server holds it to period-end anyway. */
+  downgradePlan(): void {
+    this.planChangeError.set('');
+    this.planChange.set('studio');
+  }
+
+  /** Add-on packs popup, opened from the topbar next to the balance it feeds. */
+  readonly packsOpen = signal(false);
+
+  /** Target plan of the open confirm dialog, or null when closed. */
+  readonly planChange = signal<'studio' | 'pro' | null>(null);
+  readonly planChangeBusy = signal(false);
+  /** Rejection shown inside the dialog — the notice banner sits behind the
+   * backdrop, where an error reads as "the button did nothing". */
+  readonly planChangeError = signal('');
+
+  /** Plan the switch is measured against — the dialog needs both ends. */
+  readonly currentPlan = computed<'studio' | 'pro'>(() =>
+    this.profileStore.subscription()?.plan === 'pro' ? 'pro' : 'studio',
+  );
+
+  async confirmPlanChange(when: 'now' | 'period_end'): Promise<void> {
+    const plan = this.planChange();
+    if (!plan || this.planChangeBusy()) return;
+    this.planChangeBusy.set(true);
+    this.planChangeError.set('');
+    try {
+      const before = this.totalCredits();
+      const { effectiveAt } = await this.billing.changePlan(plan, when);
+      await this.profileStore.load();
+      const label = plan === 'pro' ? 'Pro' : 'Studio';
+      this.notice.set(
+        effectiveAt
+          ? `${label} starts ${new Date(effectiveAt).toLocaleDateString()} — you keep your current plan until then.`
+          : `You're on ${label} now — enjoy your fresh credits.`,
+      );
+      this.planChange.set(null);
+      // The plan mirror updates synchronously, but the fresh grant lands via the
+      // invoice.paid webhook a beat later — poll so the credit chip catches up
+      // without a manual refresh.
+      if (!effectiveAt) this.pollCreditsUntilChanged(before);
+    } catch (e) {
+      this.planChangeError.set(this.planChangeMessage(e));
+    } finally {
+      this.planChangeBusy.set(false);
+    }
+  }
+
+  private pollCreditsUntilChanged(before: number): void {
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts += 1;
+      await this.profileStore.load();
+      if (this.totalCredits() !== before || attempts >= 8) clearInterval(poll);
+    }, 1000);
+  }
+
+  private planChangeMessage(e: unknown): string {
+    if (e instanceof ApiError) {
+      switch (e.code) {
+        case 'subscription_ending':
+          return 'Your subscription is set to end at renewal — resume it from Settings → Subscription first, then change plans.';
+        case 'already_scheduled':
+          return 'This change is already scheduled — it happens automatically at renewal.';
+        case 'downgrade_at_period_end':
+          return 'Downgrades take effect at your renewal date, not immediately.';
+        case 'no_subscription':
+          return 'No active subscription found — pick a plan from the pricing page first.';
+        case 'same_plan':
+          return 'You are already on this plan.';
+      }
+      return e.message;
+    }
+    return 'Could not change your plan — check your connection and try again.';
   }
 
   /** First-load onboarding: only when the server-synced pref says unseen. */
