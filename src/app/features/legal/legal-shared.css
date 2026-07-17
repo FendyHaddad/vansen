@@ -1,0 +1,98 @@
+.legal-page {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+.legal-header {
+  margin-bottom: 2.5rem;
+}
+.legal-title {
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin-top: 1.5rem;
+}
+.legal-updated {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.legal-intro {
+  margin-top: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.legal-toc {
+  margin: 1.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  columns: 2;
+  column-gap: 2rem;
+  font-size: 0.875rem;
+}
+.legal-toc li {
+  break-inside: avoid;
+}
+.legal-toc a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  line-height: 1.9;
+}
+.legal-toc a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.legal-body section {
+  margin-top: 2.5rem;
+  scroll-margin-top: 2rem;
+}
+.legal-body h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.legal-body h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+}
+.legal-body p,
+.legal-body li {
+  margin-top: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.legal-body strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.legal-body ul {
+  padding-left: 1.25rem;
+  margin-top: 0.5rem;
+}
+.legal-body a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-footer-links {
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  font-size: 0.875rem;
+}
+.legal-footer-links a {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.legal-footer-links a:hover {
+  color: var(--foreground);
+}

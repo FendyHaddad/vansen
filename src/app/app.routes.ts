@@ -32,5 +32,21 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage),
   },
+  {
+    path: 'legal/terms',
+    title: 'Terms of Service — Vansen',
+    loadComponent: () => import('./features/legal/terms-page').then((m) => m.TermsPage),
+  },
+  {
+    path: 'legal/privacy',
+    title: 'Privacy Policy — Vansen',
+    loadComponent: () => import('./features/legal/privacy-page').then((m) => m.PrivacyPage),
+  },
+  {
+    path: 'legal/acceptable-use',
+    title: 'Acceptable Use Policy — Vansen',
+    loadComponent: () =>
+      import('./features/legal/acceptable-use-page').then((m) => m.AcceptableUsePage),
+  },
   { path: '**', redirectTo: '' },
 ];

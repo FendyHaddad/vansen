@@ -136,3 +136,19 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+.clickwrap {
+  margin-top: 1.5rem;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.clickwrap a {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.clickwrap a:hover {
+  color: var(--foreground);
+}
