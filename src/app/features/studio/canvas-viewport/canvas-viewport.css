@@ -12,6 +12,15 @@
   touch-action: none;
 }
 
+/* Stacked layout: parent has auto height, so 100% collapses — pin to viewport */
+
+@media (max-width: 860px) {
+  .viewport {
+    height: 60vh;
+    min-height: 280px;
+  }
+}
+
 .viewport.cropping,
 .viewport.picking {
   cursor: crosshair;

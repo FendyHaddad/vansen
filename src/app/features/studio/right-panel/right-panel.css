@@ -416,3 +416,20 @@
 .downgrade-cta:hover {
   text-decoration: underline;
 }
+
+/* Stacked layout: rail becomes a full-width section under the canvas */
+
+@media (max-width: 860px) {
+  .studio-rail {
+    width: 100%;
+    height: auto;
+    padding: 14px;
+    border-left: none;
+    border-top: 1px solid var(--border, #26262a);
+    overflow-y: visible;
+  }
+
+  .tool-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}

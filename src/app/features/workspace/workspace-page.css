@@ -383,7 +383,7 @@ app-right-panel {
   cursor: pointer;
 }
 
-/* Small screens: sidebar stacks on top */
+/* Small screens: sidebar stacks on top, editing rail stacks below */
 
 @media (max-width: 860px) {
   .shell {
@@ -404,6 +404,39 @@ app-right-panel {
 
   .content {
     overflow: visible;
+  }
+
+  app-right-panel {
+    height: auto;
+  }
+}
+
+/* Phones: topbar and edit toolbar wrap instead of clipping */
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .topbar-right {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .upload-btn {
+    padding: 0 12px;
+  }
+
+  .edit-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .content {
+    padding: 12px;
   }
 }
 
