@@ -195,6 +195,39 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+/** Warm-isolate memo of users who already passed the age gate (same pattern as
+ * signedUrlMemo). Safe to cache: birth_date only ever transitions unset → set,
+ * so a hit can never go stale. deleteAccount evicts on account deletion. */
+const ageOkMemo = new Set<string>();
+
+/** Routes reachable before the gate: read your profile, pass the gate, or
+ * delete the account. Everything else requires a confirmed 18+ DOB. */
+const AGE_EXEMPT = new Set([
+  'GET /api/profile',
+  'POST /api/profile/age',
+  'DELETE /api/profile',
+]);
+
+app.use('*', async (c, next) => {
+  const key = `${c.req.method} ${new URL(c.req.url).pathname}`;
+  if (!AGE_EXEMPT.has(key)) {
+    const userId = c.get('userId');
+    if (!ageOkMemo.has(userId)) {
+      const { data } = await admin
+        .from('profiles')
+        .select('birth_date')
+        .eq('id', userId)
+        .single();
+      if (!data?.birth_date) {
+        return fail(c, 403, 'age_unconfirmed', 'Confirm your date of birth to continue');
+      }
+      if (ageOkMemo.size > 10_000) ageOkMemo.clear();
+      ageOkMemo.add(userId);
+    }
+  }
+  await next();
+});
+
 /** Warm-isolate memo so list reloads don't re-sign every media path, and the
  * URL stays stable across requests (lets browser HTTP caching work too). */
 const signedUrlMemo = new Map<string, { url: string; expiresAt: number }>();
@@ -347,6 +380,7 @@ app.get('/profile', async (c) => {
       displayName: profile.display_name,
       prefs: profile.prefs,
       createdAt: profile.created_at,
+      ageConfirmed: !!profile.birth_date,
     },
     credits,
     subscription: subscription
@@ -375,9 +409,13 @@ app.patch('/profile', async (c) => {
   return c.json({ ok: true });
 });
 
-app.delete('/profile', async (c) => {
-  const userId = c.get('userId');
-  // Cancel any live Stripe subscription first — no charges to dead accounts
+/** Cancel any live Stripe sub, then hard-delete the account (data + auth row).
+ * Returns an error Response on failure, or null on success. Shared by
+ * DELETE /profile and the underage branch of POST /profile/age. */
+async function deleteAccount(
+  c: ErrCtx & { json: (b: unknown, s: number) => Response },
+  userId: string,
+): Promise<Response | null> {
   const { data: prof } = await admin
     .from('profiles')
     .select('stripe_customer_id')
@@ -399,6 +437,56 @@ app.delete('/profile', async (c) => {
   if (error) return fail(c, 400, 'delete_failed', error.message);
   const { error: authError } = await admin.auth.admin.deleteUser(userId);
   if (authError) return fail(c, 400, 'delete_failed', authError.message);
+  ageOkMemo.delete(userId); // hygiene — the auth row is gone anyway
+  return null;
+}
+
+app.delete('/profile', async (c) => {
+  const err = await deleteAccount(c, c.get('userId'));
+  return err ?? c.json({ ok: true });
+});
+
+/** Accept a strict, real, non-future, ≤120y-old YYYY-MM-DD string; else null. */
+function parseBirthDate(s: unknown): string | null {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null; // e.g. 2001-02-30 rolled over
+  }
+  const now = Date.now();
+  if (dt.getTime() > now) return null; // future
+  if (now - dt.getTime() > 120 * 365.25 * 864e5) return null; // >120 years
+  return s;
+}
+
+/** Whole years old today, UTC, with correct month/day rollover. */
+function ageFromBirthDate(s: string): number {
+  const [y, m, d] = s.split('-').map(Number);
+  const now = new Date();
+  let age = now.getUTCFullYear() - y;
+  const mo = now.getUTCMonth() + 1;
+  const day = now.getUTCDate();
+  if (mo < m || (mo === m && day < d)) age--;
+  return age;
+}
+
+app.post('/profile/age', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const birthDate = parseBirthDate(body?.birthDate);
+  if (!birthDate) return fail(c, 400, 'invalid_payload', 'A valid date of birth is required');
+
+  if (ageFromBirthDate(birthDate) < 18) {
+    const err = await deleteAccount(c, c.get('userId'));
+    if (err) return err;
+    return fail(c, 403, 'underage', 'You must be 18 or older to use Vansen');
+  }
+
+  const { error } = await admin
+    .from('profiles')
+    .update({ birth_date: birthDate, age_confirmed_at: new Date().toISOString() })
+    .eq('id', c.get('userId'));
+  if (error) return fail(c, 400, 'update_failed', 'Could not save your date of birth');
   return c.json({ ok: true });
 });
 

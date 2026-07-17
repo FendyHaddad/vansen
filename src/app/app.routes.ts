@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/auth/auth-guard';
+import { ageGuard, onboardingGuard } from './core/auth/age-guard';
 
 export const routes: Routes = [
   {
@@ -17,19 +18,25 @@ export const routes: Routes = [
     loadComponent: () => import('./features/auth/login-page').then((m) => m.LoginPage),
   },
   {
+    path: 'onboarding',
+    canActivate: [authGuard, onboardingGuard],
+    loadComponent: () =>
+      import('./features/onboarding/onboarding-page').then((m) => m.OnboardingPage),
+  },
+  {
     path: 'app',
-    canActivate: [authGuard],
+    canActivate: [authGuard, ageGuard],
     loadComponent: () => import('./features/workspace/workspace-page').then((m) => m.WorkspacePage),
   },
   {
     // Absorbed into the workspace edit mode — the id opens the canvas directly.
     path: 'app/edit/:id',
-    canActivate: [authGuard],
+    canActivate: [authGuard, ageGuard],
     loadComponent: () => import('./features/workspace/workspace-page').then((m) => m.WorkspacePage),
   },
   {
     path: 'app/settings',
-    canActivate: [authGuard],
+    canActivate: [authGuard, ageGuard],
     loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage),
   },
   {

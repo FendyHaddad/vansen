@@ -1,0 +1,75 @@
+<main class="onboarding">
+  <div class="card">
+    <a routerLink="/" class="brand">Vansen</a>
+
+    @if (step() === 'rejected') {
+      <h1 class="title">You must be 18 or older</h1>
+      <p class="muted mt-2">
+        Vansen is only available to adults. Your account has been removed.
+      </p>
+      <a routerLink="/" class="linkish mt-6">Back to home</a>
+    } @else {
+      <h1 class="title">Enter your date of birth</h1>
+      <p class="muted mt-2">We ask everyone this once, before you start.</p>
+
+      <div class="dob-row mt-6">
+        <div class="dob-field">
+          <label hlmLabel for="dob-day">Day</label>
+          <select id="dob-day" class="dob-select" [value]="day()"
+                  (change)="day.set($any($event.target).value)">
+            <option value="">–</option>
+            @for (d of days; track d) { <option [value]="d">{{ d }}</option> }
+          </select>
+        </div>
+        <div class="dob-field">
+          <label hlmLabel for="dob-month">Month</label>
+          <select id="dob-month" class="dob-select" [value]="month()"
+                  (change)="month.set($any($event.target).value)">
+            <option value="">–</option>
+            @for (m of months; track m.value) {
+              <option [value]="m.value">{{ m.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="dob-field">
+          <label hlmLabel for="dob-year">Year</label>
+          <select id="dob-year" class="dob-select" [value]="year()"
+                  (change)="year.set($any($event.target).value)">
+            <option value="">–</option>
+            @for (y of years; track y) { <option [value]="y">{{ y }}</option> }
+          </select>
+        </div>
+      </div>
+
+      @if (error()) { <p class="error-line mt-4">{{ error() }}</p> }
+
+      @if (step() === 'confirm') {
+        <div class="confirm-box mt-6">
+          <p class="confirm-title">The date you entered is under 18.</p>
+          <p class="muted mt-1">
+            Vansen is 18+. Continuing will permanently delete this account. This
+            can’t be undone.
+          </p>
+          <div class="confirm-actions mt-4">
+            <button hlmBtn variant="outline" type="button"
+                    (click)="cancelConfirm()" [disabled]="busy()">Go back</button>
+            <button hlmBtn variant="destructive" type="button"
+                    (click)="confirmDelete()" [disabled]="busy()">
+              {{ busy() ? 'One moment…' : 'Delete my account' }}
+            </button>
+          </div>
+        </div>
+      } @else {
+        <button hlmBtn class="w-full mt-6" type="button"
+                (click)="submit()" [disabled]="busy()">
+          {{ busy() ? 'One moment…' : 'Continue' }}
+        </button>
+        <p class="signout-row mt-6">
+          <button type="button" class="linkish" (click)="signOutInstead()">
+            Sign out instead
+          </button>
+        </p>
+      }
+    }
+  </div>
+</main>

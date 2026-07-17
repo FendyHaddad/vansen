@@ -18,6 +18,7 @@ function response(subscription: SubFixture | null): ProfileResponse {
       displayName: 'U',
       prefs: {},
       createdAt: '2026-01-01T00:00:00Z',
+      ageConfirmed: true,
     },
     credits: { plan: 0, pack: 0 },
     subscription: subscription ? { pendingPlan: null, pendingAt: null, ...subscription } : null,

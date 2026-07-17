@@ -16,6 +16,8 @@ export interface ProfileDto {
   displayName: string | null;
   prefs: Record<string, unknown>;
   createdAt: string;
+  /** Server-set: true once a valid 18+ date of birth is on file. */
+  ageConfirmed: boolean;
 }
 
 export interface SubscriptionDto {

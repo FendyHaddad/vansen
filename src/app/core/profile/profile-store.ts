@@ -22,6 +22,8 @@ export class ProfileStore {
 
   readonly displayName = computed(() => this.profileSig()?.displayName ?? '');
 
+  readonly ageConfirmed = computed(() => this.profileSig()?.ageConfirmed ?? false);
+
   /** Active plan id, or null (expired / never subscribed). */
   readonly plan = computed<SubscriptionPlan | null>(() => {
     const sub = this.subscriptionSig();
