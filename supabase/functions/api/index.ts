@@ -22,6 +22,8 @@ import { moderate } from './_shared/moderation.ts';
 import { safetyId } from './_shared/safety.ts';
 import { parseServiceAccount, sendGenerationPush, type PushEvent } from './_shared/push.ts';
 import { laneFor } from './_shared/billing-lanes.ts';
+import { appleVerifier } from './_shared/apple-verifier.ts';
+import { applyIapTransaction } from './_shared/iap-grants.ts';
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
@@ -1016,7 +1018,8 @@ app.post('/billing/change-plan', async (c) => {
 app.get('/billing/lane', (c) => {
   const platform = c.req.query('platform') === 'ios' ? 'ios' : 'android';
   const storefront = (c.req.query('storefront') ?? '').toUpperCase();
-  return c.json({ lane: laneFor(platform, storefront) });
+  const laneBEnabled = Deno.env.get('LANE_B') === 'on';
+  return c.json({ lane: laneFor(platform, storefront, laneBEnabled) });
 });
 
 /**
@@ -1180,6 +1183,34 @@ app.post('/billing/reconcile', async (c) => {
   } catch (e) {
     logError(c, 'reconcile_failed', e);
     return fail(c, 400, 'billing_failed', 'Reconcile failed');
+  }
+});
+
+// Reconcile fallback for a dropped App Store notification: the client submits
+// its own purchase JWS for server-side re-validation. The appAccountToken baked
+// into the transaction must be the caller — nobody redeems another user's
+// receipt. Grants are idempotent (iaptx marker + stripe_ref UNIQUE), so calling
+// this after every purchase is safe and doubles as the instant-grant path.
+app.post('/iap/verify', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => ({}));
+  const jws = typeof body.jws === 'string' ? body.jws : '';
+  if (!jws) return fail(c, 400, 'invalid_input', 'Missing jws');
+  try {
+    const tx = await appleVerifier().verifyAndDecodeTransaction(jws);
+    if (tx.appAccountToken !== userId) {
+      return fail(c, 403, 'forbidden', 'Receipt belongs to another account');
+    }
+    const granted = await applyIapTransaction(admin, userId, {
+      productId: tx.productId ?? '',
+      transactionId: tx.transactionId ?? '',
+      originalTransactionId: tx.originalTransactionId ?? '',
+      expiresDate: tx.expiresDate,
+    });
+    return c.json({ granted, credits: await creditsOf(userId) });
+  } catch (e) {
+    logError(c, 'iap_verify_failed', e);
+    return fail(c, 400, 'billing_failed', 'Receipt verification failed');
   }
 });
 

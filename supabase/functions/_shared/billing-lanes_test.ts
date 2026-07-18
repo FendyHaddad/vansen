@@ -20,3 +20,11 @@ Deno.test('other ios storefronts fall back to lane C', () => {
   assertEquals(laneFor('ios', 'JP'), 'C');
   assertEquals(laneFor('ios', ''), 'C');
 });
+
+Deno.test('lane B flag flips rest-of-world iOS from C to B', () => {
+  assertEquals(laneFor('ios', 'MY', true), 'B');
+  assertEquals(laneFor('ios', 'JP', true), 'B');
+  assertEquals(laneFor('ios', 'MY', false), 'C');
+  assertEquals(laneFor('ios', 'US', true), 'A');
+  assertEquals(laneFor('android', 'MY', true), 'A');
+});

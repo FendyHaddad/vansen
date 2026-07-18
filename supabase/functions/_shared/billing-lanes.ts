@@ -8,9 +8,13 @@ const EU_STOREFRONTS = new Set([
   'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
 ]);
 
-export function laneFor(platform: 'ios' | 'android', storefront: string): BillingLane {
+export function laneFor(
+  platform: 'ios' | 'android',
+  storefront: string,
+  laneBEnabled = false,
+): BillingLane {
   if (platform === 'android') return 'A';
   if (storefront === 'US') return 'A';
   if (EU_STOREFRONTS.has(storefront)) return 'A';
-  return 'C';
+  return laneBEnabled ? 'B' : 'C';
 }
