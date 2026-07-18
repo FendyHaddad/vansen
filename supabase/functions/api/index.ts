@@ -21,6 +21,7 @@ import type { CheckResult } from './_shared/providers/types.ts';
 import { moderate } from './_shared/moderation.ts';
 import { safetyId } from './_shared/safety.ts';
 import { parseServiceAccount, sendGenerationPush, type PushEvent } from './_shared/push.ts';
+import { laneFor } from './_shared/billing-lanes.ts';
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
@@ -988,6 +989,12 @@ app.post('/billing/change-plan', async (c) => {
     logError(c, 'change_plan_failed', e);
     return fail(c, 400, 'billing_failed', 'Could not change your plan');
   }
+});
+
+app.get('/billing/lane', (c) => {
+  const platform = c.req.query('platform') === 'ios' ? 'ios' : 'android';
+  const storefront = (c.req.query('storefront') ?? '').toUpperCase();
+  return c.json({ lane: laneFor(platform, storefront) });
 });
 
 /**
