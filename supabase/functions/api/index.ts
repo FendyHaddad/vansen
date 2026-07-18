@@ -20,9 +20,11 @@ import { adapterFor } from './_shared/providers/index.ts';
 import type { CheckResult } from './_shared/providers/types.ts';
 import { moderate } from './_shared/moderation.ts';
 import { safetyId } from './_shared/safety.ts';
+import { parseServiceAccount, sendGenerationPush, type PushEvent } from './_shared/push.ts';
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const fcmAccount = parseServiceAccount(Deno.env.get('FCM_SERVICE_ACCOUNT'));
 // NOTE: deployed via MCP with _shared/ nested inside the function bundle;
 // keep these specifiers matching the deploy layout.
 
@@ -297,6 +299,20 @@ async function recordStrike(
   await admin.rpc('fn_increment_strike', { p_user: userId });
 }
 
+/** Fire-and-forget push on job settle; never fails the request. */
+function notifySettled(userId: string, generationId: string, type: PushEvent['type']): void {
+  if (!fcmAccount) return;
+  pushToDevices(userId, generationId, type).catch((e) => console.error('push_notify_failed', e));
+}
+
+async function pushToDevices(userId: string, generationId: string, type: PushEvent['type']): Promise<void> {
+  const { data: devices } = await admin.from('devices').select('token').eq('user_id', userId);
+  if (!devices || devices.length === 0) return;
+  const stale = await sendGenerationPush(fcmAccount!, devices.map((d) => d.token), { type, generationId });
+  if (stale.length === 0) return;
+  await admin.from('devices').delete().eq('user_id', userId).in('token', stale);
+}
+
 /** Upload finished bytes to private storage, flip the generation done. */
 async function finishJob(
   job: { id: string; user_id: string; generation_id: string },
@@ -305,6 +321,7 @@ async function finishJob(
   if (result.state === 'running') return;
   if (result.state === 'failed') {
     await admin.rpc('fn_fail_job', { p_job: job.id, p_error: result.error });
+    notifySettled(job.user_id, job.generation_id, 'generation_failed');
     return;
   }
   const path = `${job.user_id}/${job.generation_id}.png`;
@@ -314,6 +331,7 @@ async function finishJob(
   });
   await admin.from('generations').update({ status: 'done', media_path: path }).eq('id', job.generation_id);
   await admin.from('jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
+  notifySettled(job.user_id, job.generation_id, 'generation_done');
 }
 
 function toLedgerDto(row: Record<string, unknown>) {
@@ -502,6 +520,33 @@ app.put('/prefs', async (c) => {
   return c.json({ ok: true });
 });
 
+app.post('/devices', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const token = typeof body?.token === 'string' ? body.token.trim() : '';
+  const platform = body?.platform;
+  if (!token || token.length > 512) return fail(c, 400, 'invalid_token', 'token required');
+  if (platform !== 'ios' && platform !== 'android') {
+    return fail(c, 400, 'invalid_platform', "platform must be 'ios' or 'android'");
+  }
+  const { error } = await admin.from('devices').upsert(
+    { user_id: c.get('userId'), token, platform, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id,token' },
+  );
+  if (error) {
+    logError(c, 'device_register_failed', new Error(error.message));
+    return fail(c, 500, 'internal', 'Could not register device');
+  }
+  return c.json({ ok: true });
+});
+
+app.delete('/devices', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const token = typeof body?.token === 'string' ? body.token.trim() : '';
+  if (!token) return fail(c, 400, 'invalid_token', 'token required');
+  await admin.from('devices').delete().eq('user_id', c.get('userId')).eq('token', token);
+  return c.json({ ok: true });
+});
+
 app.get('/ledger', async (c) => {
   const { data, error } = await admin
     .from('ledger_entries')
@@ -557,6 +602,7 @@ app.get('/jobs', async (c) => {
     } catch (e) {
       logError(c, 'provider_check_failed', e);
       await admin.rpc('fn_fail_job', { p_job: job.id, p_error: String(e).slice(0, 500) });
+      notifySettled(job.user_id, job.generation_id, 'generation_failed');
     }
   }
 
@@ -733,6 +779,7 @@ app.post('/generations', async (c) => {
     } catch (e) {
       logError(c, 'provider_submit_failed', e);
       await admin.rpc('fn_fail_job', { p_job: jobRow!.id, p_error: String(e).slice(0, 500) });
+      notifySettled(userId, genId, 'generation_failed');
     }
   }
 
