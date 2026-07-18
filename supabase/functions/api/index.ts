@@ -67,6 +67,26 @@ function appOrigin(c: { req: { header: (k: string) => string | undefined } }): s
   return allowedOrigin(c.req.header('origin')) ?? APP_ORIGINS[0] ?? 'http://localhost:4200';
 }
 
+type ReturnUrls = { success: string; cancel: string };
+
+/** Mobile checkouts bounce back into the app via its deep link; web callers
+ * keep the site URLs (param absent → unchanged behaviour). */
+function checkoutReturnUrls(
+  c: { req: { header: (k: string) => string | undefined } },
+  body: Record<string, unknown>,
+): ReturnUrls {
+  if (body.platform === 'mobile') {
+    return {
+      success: 'vansen://billing-return?status=success',
+      cancel: 'vansen://billing-return?status=cancel',
+    };
+  }
+  return {
+    success: `${appOrigin(c)}/app?checkout=success`,
+    cancel: `${appOrigin(c)}/app?checkout=canceled`,
+  };
+}
+
 /** Detect image type from magic bytes; returns extension or null. */
 function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'webp' | null {
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
@@ -824,13 +844,14 @@ app.post('/billing/subscribe', async (c) => {
     // Launch promo: first-time subscribers only. Keyed off Stripe's full history
     // rather than the mirror, so a missing row cannot hand out the coupon twice.
     const firstTime = history.data.length === 0;
+    const returns = checkoutReturnUrls(c, body);
     const session = await stripe.checkout.sessions.create({
       customer,
       mode: 'subscription',
       line_items: [{ price: PLAN_PRICE_IDS[plan]!, quantity: 1 }],
       discounts: firstTime && LAUNCH_COUPON_ID ? [{ coupon: LAUNCH_COUPON_ID }] : undefined,
-      success_url: `${appOrigin(c)}/app?checkout=success`,
-      cancel_url: `${appOrigin(c)}/app?checkout=canceled`,
+      success_url: returns.success,
+      cancel_url: returns.cancel,
       metadata: { user_id: userId, plan },
       subscription_data: { metadata: { user_id: userId, plan } },
     });
@@ -854,6 +875,7 @@ app.post('/billing/pack', async (c) => {
   const credits = packCredits(usd, plan);
   try {
     const customer = await stripeCustomerFor(userId, c.get('email'));
+    const returns = checkoutReturnUrls(c, body);
     const session = await stripe.checkout.sessions.create({
       customer,
       mode: 'payment',
@@ -865,8 +887,8 @@ app.post('/billing/pack', async (c) => {
         },
         quantity: 1,
       }],
-      success_url: `${appOrigin(c)}/app?checkout=success`,
-      cancel_url: `${appOrigin(c)}/app?checkout=canceled`,
+      success_url: returns.success,
+      cancel_url: returns.cancel,
       metadata: { user_id: userId, pack_usd: String(usd), pack_credits: String(credits) },
     });
     return c.json({ url: session.url });
@@ -1112,11 +1134,15 @@ app.post('/billing/resume', async (c) => {
 });
 
 app.post('/billing/portal', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
   try {
     const customer = await stripeCustomerFor(c.get('userId'), c.get('email'));
+    const returnUrl = body.platform === 'mobile'
+      ? 'vansen://billing-return?status=portal'
+      : `${appOrigin(c)}/app/settings`;
     const portal = await stripe.billingPortal.sessions.create({
       customer,
-      return_url: `${appOrigin(c)}/app/settings`,
+      return_url: returnUrl,
     });
     return c.json({ url: portal.url });
   } catch (e) {
