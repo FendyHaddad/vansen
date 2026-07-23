@@ -287,6 +287,7 @@ export class WorkspacePage {
         familyId: req.family.id,
         op,
         prompt: req.prompt,
+        style: req.style ?? undefined,
         settings: req.settings,
         batch: req.batch,
         parentId: req.referenceId ?? undefined,

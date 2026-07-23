@@ -15,6 +15,7 @@ import {
   upscaleCreditCost,
   type GenerationSettings,
 } from './_shared/model-families.ts';
+import { applyStyle, styleById } from './_shared/style-presets.ts';
 import { GenerationOp, LedgerType, MediaKind } from './_shared/enums.ts';
 import { adapterFor } from './_shared/providers/index.ts';
 import type { CheckResult } from './_shared/providers/types.ts';
@@ -133,6 +134,7 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ['defaultImageFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
+  ['defaultStyle', (v) => typeof v === 'string' && v.length <= 40],
   ['tourSeen', (v) => typeof v === 'boolean'],
 ];
 
@@ -647,6 +649,7 @@ app.post('/generations', async (c) => {
   const batch = Number.isInteger(body.batch) ? (body.batch as number) : 1;
   const settings = sanitizeSettings(body.settings);
   const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
+  const styleId = typeof body.style === 'string' && body.style ? body.style : null;
 
   if (!Object.values(GenerationOp).includes(op as never)) {
     return fail(c, 400, 'invalid_op', `op must be one of ${Object.values(GenerationOp).join(', ')}`);
@@ -656,6 +659,11 @@ app.post('/generations', async (c) => {
     return fail(c, 400, 'invalid_prompt', `Prompt too long (max ${MAX_PROMPT_LEN} characters)`);
   }
   if (batch < 1 || batch > 4) return fail(c, 400, 'invalid_batch', 'batch must be 1–4');
+  if (styleId && !styleById(styleId)) {
+    return fail(c, 400, 'invalid_style', 'Unknown style preset');
+  }
+  // Boosted prompt is what moderation and the provider see; the stored prompt stays the user's text.
+  const effectivePrompt = applyStyle(prompt, styleId);
   if ((op === GenerationOp.Edit || op === GenerationOp.Upscale) && !parentId) {
     return fail(c, 400, 'invalid_parent', `${op} requires parentId`);
   }
@@ -719,7 +727,7 @@ app.post('/generations', async (c) => {
   }
 
   // Moderation gate — BEFORE charge and BEFORE any provider call.
-  const mod = await moderate({ text: prompt });
+  const mod = await moderate({ text: effectivePrompt });
   if (mod.flagged) {
     await recordStrike(userId, 'prompt', prompt, mod.categories);
     return fail(c, 422, 'content_policy', 'This prompt violates our content policy.');
@@ -745,6 +753,8 @@ app.post('/generations', async (c) => {
   const total = unitCredits * batch;
   const ledgerType = op === GenerationOp.Variation ? LedgerType.Generate : (op as LedgerType);
   const note = batch > 1 ? `${familyName} ×${batch}` : familyName;
+
+  if (styleId) settings.style = styleId;
 
   const items = Array.from({ length: batch }, () => ({
     kind,
@@ -789,7 +799,7 @@ app.post('/generations', async (c) => {
       const submitted = await adapter.submit({
         familyId,
         op,
-        prompt,
+        prompt: effectivePrompt,
         settings: { ...settings },
         referenceUrl,
         maskPngBase64: typeof body.maskPngBase64 === 'string' ? body.maskPngBase64 : undefined,

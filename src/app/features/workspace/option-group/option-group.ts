@@ -9,10 +9,10 @@ const RATIO_PATTERN = /^(\d+):(\d+)$/;
 const RATIO_BOX = 16; // px, longest edge of the aspect preview icon
 
 /**
- * One settings axis (Version, Resolution, Quality, ...) as a custom dropdown.
- * Closed: just the selected label. Open: every option with its explanation.
+ * One settings axis (Version, Resolution, Quality, ...) as a settings row:
+ * label on the left, current value + chevron on the right, dropdown on click.
  * Aspect-ratio options render a small shape preview so non-technical users
- * can see what 1:1 vs 16:9 means. Unsupported axes grey out with a tooltip.
+ * can see what 1:1 vs 16:9 means. Axes the model doesn't support render nothing.
  */
 @Component({
   selector: 'app-option-group',
@@ -27,7 +27,6 @@ export class OptionGroup {
   readonly axisTooltip = input('');
   readonly options = input<FamilyOption[] | null>(null);
   readonly selected = input<string | undefined>(undefined);
-  readonly disabledReason = input('');
   readonly changed = output<string>();
 
   readonly selectedOption = computed(

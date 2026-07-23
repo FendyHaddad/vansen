@@ -17,6 +17,8 @@ export interface GenerationSettings {
   durationS?: number;
   /** Outputs per run (1–4). Price multiplies per output. */
   batch?: number;
+  /** Style preset id (style-presets.ts). Set server-side; free — no price impact. */
+  style?: string;
 }
 
 export interface ModelFamily {

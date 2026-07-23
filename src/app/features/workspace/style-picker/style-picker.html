@@ -1,0 +1,51 @@
+<div class="field">
+  <span class="field-label">
+    Style
+    <app-hint
+      text="Boosts your prompt toward a visual style. Applied at generation — your prompt text is untouched."
+    >
+      <span class="og-info">ⓘ</span>
+    </app-hint>
+  </span>
+  <button type="button" class="style-trigger" [hlmDropdownMenuTrigger]="styleMenu" align="start">
+    @if (current(); as style) {
+      <img [src]="style.thumb" [alt]="style.name" class="style-trigger-thumb"/>
+      <span class="style-trigger-name">{{ style.name }}</span>
+    } @else {
+      <ng-icon name="lucidePalette" size="14" class="style-trigger-none"/>
+      <span class="style-trigger-name">None</span>
+    }
+    <ng-icon name="lucideChevronDown" size="14" class="style-chevron"/>
+  </button>
+  <ng-template #styleMenu>
+    <div hlmDropdownMenu class="style-menu">
+      <button
+        type="button"
+        hlmDropdownMenuItem
+        class="style-tile style-tile-none"
+        [class.style-tile-active]="!selected()"
+        (triggered)="select(null)"
+      >
+        <span class="style-tile-blank"><ng-icon name="lucidePalette" size="18"/></span>
+        <span class="style-tile-name">None</span>
+      </button>
+      @for (group of groups; track group.category) {
+        <h4 class="style-group-title">{{ group.title }}</h4>
+        <div class="style-grid">
+          @for (style of group.presets; track style.id) {
+            <button
+              type="button"
+              hlmDropdownMenuItem
+              class="style-tile"
+              [class.style-tile-active]="selected() === style.id"
+              (triggered)="select(style.id)"
+            >
+              <img [src]="style.thumb" [alt]="style.name" loading="lazy"/>
+              <span class="style-tile-name">{{ style.name }}</span>
+            </button>
+          }
+        </div>
+      }
+    </div>
+  </ng-template>
+</div>

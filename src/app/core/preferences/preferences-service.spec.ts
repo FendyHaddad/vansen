@@ -37,4 +37,11 @@ describe('PreferencesService tourSeen', () => {
       expect.objectContaining({ tourSeen: true }),
     );
   });
+
+  it('defaults defaultStyle to none and round-trips updates', async () => {
+    const svc = make();
+    expect(svc.prefs().defaultStyle).toBe('');
+    await svc.update({ defaultStyle: 'oil-painting' });
+    expect(svc.prefs().defaultStyle).toBe('oil-painting');
+  });
 });

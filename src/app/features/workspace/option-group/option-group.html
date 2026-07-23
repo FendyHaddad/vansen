@@ -1,13 +1,13 @@
-<div class="og" [class.og-disabled]="!options()?.length">
-  <span class="og-label">
-    {{ label() }}
-    @if (axisTooltip()) {
-      <app-hint [text]="axisTooltip()"><span class="og-info">ⓘ</span></app-hint>
-    }
-  </span>
+@if (options()?.length) {
+  <div class="og">
+    <span class="og-label">
+      {{ label() }}
+      @if (axisTooltip()) {
+        <app-hint [text]="axisTooltip()"><span class="og-info">ⓘ</span></app-hint>
+      }
+    </span>
 
-  @if (options()?.length) {
-    <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="menu" align="start">
+    <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="menu" align="end">
       @if (selectedOption(); as sel) {
         @if (ratioBox(sel); as box) {
           <span class="ratio-icon-wrap">
@@ -56,12 +56,5 @@
         }
       </div>
     </ng-template>
-  } @else {
-    <app-hint class="og-na-hint" [text]="disabledReason()">
-      <button type="button" class="og-trigger og-trigger-disabled" disabled>
-        <span class="og-trigger-label og-na-label">Not available</span>
-        <ng-icon name="lucideChevronDown" size="13" class="og-chevron" />
-      </button>
-    </app-hint>
-  }
-</div>
+  </div>
+}

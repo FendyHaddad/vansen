@@ -90,6 +90,8 @@ export interface CreateGenerationRequest {
   familyId?: string;
   op: GenerationOp;
   prompt: string;
+  /** Style preset id — server validates and appends the modifier. */
+  style?: string;
   settings: GenerationSettings;
   batch: number;
   parentId?: string;

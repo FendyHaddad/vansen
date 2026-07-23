@@ -9,13 +9,23 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  gap: 16px;
+  gap: 14px;
 }
 
 .rail-section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+}
+
+/* Settings render as compact rows — rows carry their own height, so the
+ * section gap shrinks; the title keeps a little extra air below it. */
+.rail-settings {
+  gap: 4px;
+}
+
+.rail-settings .rail-title {
+  margin-bottom: 6px;
 }
 
 /* Mirrors the right panel's .section-title so both rails share one voice. */
@@ -87,10 +97,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.field-disabled {
-  opacity: 0.4;
 }
 
 /* Quiet supporting labels under the section titles; tooltip at the far end. */

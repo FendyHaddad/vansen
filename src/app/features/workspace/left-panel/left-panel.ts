@@ -36,11 +36,15 @@ import { ModelAvailability } from '../../../core/models/model-availability';
 import { OptionGroup } from '../option-group/option-group';
 import { Hint } from '../../../shared/hint/hint';
 import { CachedSrc } from '../../../core/media/cached-src';
+import { styleById } from '../../../core/catalog/style-presets';
+import { StylePicker } from '../style-picker/style-picker';
 
 export interface GenerateRequest {
   family: ModelFamily;
   settings: GenerationSettings;
   prompt: string;
+  /** Style preset id, null = none. Server appends the modifier. */
+  style: string | null;
   /** Library generation used as edit source. */
   referenceId: string | null;
   /** Uploaded image (storage path) used as edit source. */
@@ -73,7 +77,15 @@ const AXIS_TOOLTIPS = {
   templateUrl: './left-panel.html',
   styleUrl: './left-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, HlmButton, OptionGroup, Hint, CachedSrc, ...HlmDropdownMenuImports],
+  imports: [
+    NgIcon,
+    HlmButton,
+    OptionGroup,
+    Hint,
+    CachedSrc,
+    StylePicker,
+    ...HlmDropdownMenuImports,
+  ],
   providers: [
     provideIcons({
       lucideImage,
@@ -106,6 +118,7 @@ export class LeftPanel {
   readonly familyId = signal(firstFamilyOf('image').id);
   readonly settings = signal<GenerationSettings>(defaultSettings(firstFamilyOf('image')));
   readonly prompt = signal('');
+  readonly style = signal<string | null>(null);
   readonly reference = signal<ReferenceSelection | null>(null);
 
   readonly axisTooltips = AXIS_TOOLTIPS;
@@ -126,6 +139,7 @@ export class LeftPanel {
       base.aspectRatio = prefs.defaultAspect;
     }
     this.settings.set(base);
+    this.style.set(styleById(prefs.defaultStyle)?.id ?? null);
   }
 
   readonly families = computed(() => MODEL_FAMILIES.filter((f) => f.kind === this.mode()));
@@ -200,10 +214,6 @@ export class LeftPanel {
     () => this.prompt().trim().length > 0 && !this.insufficient(),
   );
 
-  notSupported(axis: string): string {
-    return `${axis} is not supported by ${this.family().name}.`;
-  }
-
   setMode(kind: ModelKind): void {
     if (kind === 'video' && this.videoLocked) return;
     this.mode.set(kind);
@@ -231,6 +241,11 @@ export class LeftPanel {
 
   updatePrompt(value: string): void {
     this.prompt.set(value);
+  }
+
+  setStyle(id: string | null): void {
+    this.style.set(id);
+    void this.prefsService.update({ defaultStyle: id ?? '' });
   }
 
   setReference(ref: ReferenceSelection | null): void {
@@ -270,6 +285,7 @@ export class LeftPanel {
       family: this.family(),
       settings: { ...this.settings() },
       prompt: this.prompt().trim(),
+      style: this.mode() === 'image' ? this.style() : null,
       referenceId: this.reference()?.id ?? null,
       referenceUploadId: this.reference()?.uploadId ?? null,
       referenceUrl: this.reference()?.url ?? null,

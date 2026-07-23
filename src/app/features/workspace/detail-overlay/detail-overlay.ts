@@ -10,6 +10,7 @@ import {
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
 import { upscaleCreditCost } from '../../../core/catalog/model-families';
+import { styleById } from '../../../core/catalog/style-presets';
 import { CachedSrc } from '../../../core/media/cached-src';
 
 /**
@@ -53,6 +54,7 @@ export class DetailOverlay {
       s.resolution ?? null,
       s.quality ?? null,
       s.durationS ? `${s.durationS}s` : null,
+      s.style ? (styleById(s.style)?.name ?? null) : null,
     ].filter((c): c is string => !!c);
   }
 

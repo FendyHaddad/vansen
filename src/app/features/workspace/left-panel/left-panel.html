@@ -64,7 +64,7 @@
     <div class="field">
       <span class="field-label">Prompt</span>
       <textarea
-        rows="4"
+        rows="3"
         class="prompt-input"
         placeholder="Describe the {{ mode() }} you want..."
         [value]="prompt()"
@@ -72,57 +72,62 @@
       ></textarea>
     </div>
 
-    <div class="field" [class.field-disabled]="!family().capabilities.imageInput">
-      <span class="field-label">
-        Reference image
-        <app-hint
-          text="Attach an image to edit or guide the generation (image-to-image). Not all models accept image input."
-        >
-          <span class="og-info">ⓘ</span>
-        </app-hint>
-      </span>
-      @if (reference(); as ref) {
-        <div class="ref-preview">
-          <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
-          <button
-            type="button"
-            class="ref-clear"
-            (click)="setReference(null)"
-            aria-label="Remove reference"
+    @if (mode() === 'image') {
+      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
+    }
+
+    @if (family().capabilities.imageInput) {
+      <div class="field">
+        <span class="field-label">
+          Reference image
+          <app-hint
+            text="Attach an image to edit or guide the generation (image-to-image)."
           >
-            <ng-icon name="lucideX" size="14"/>
-          </button>
-        </div>
-      } @else {
-        <div class="ref-actions">
-          <label class="ref-drop" [class.ref-blocked]="!family().capabilities.imageInput || uploading()">
-            <ng-icon name="lucideImagePlus" size="16"/>
-            {{ uploading() ? 'Uploading…' : 'Upload' }}
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              class="ref-file-input"
-              [disabled]="!family().capabilities.imageInput || uploading()"
-              (change)="onFilePicked($event)"
-            />
-          </label>
-          <button
-            type="button"
-            class="ref-drop"
-            [disabled]="!family().capabilities.imageInput"
-            (click)="pickReferenceRequested.emit()"
-          >
-            From library
-          </button>
-        </div>
-        @if (uploadError()) {
-          <p class="ref-error">{{ uploadError() }}</p>
+            <span class="og-info">ⓘ</span>
+          </app-hint>
+        </span>
+        @if (reference(); as ref) {
+          <div class="ref-preview">
+            <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
+            <button
+              type="button"
+              class="ref-clear"
+              (click)="setReference(null)"
+              aria-label="Remove reference"
+            >
+              <ng-icon name="lucideX" size="14"/>
+            </button>
+          </div>
+        } @else {
+          <div class="ref-actions">
+            <label class="ref-drop" [class.ref-blocked]="uploading()">
+              <ng-icon name="lucideImagePlus" size="16"/>
+              {{ uploading() ? 'Uploading…' : 'Upload' }}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="ref-file-input"
+                [disabled]="uploading()"
+                (change)="onFilePicked($event)"
+              />
+            </label>
+            <button
+              type="button"
+              class="ref-drop"
+              (click)="pickReferenceRequested.emit()"
+            >
+              From library
+            </button>
+          </div>
+          @if (uploadError()) {
+            <p class="ref-error">{{ uploadError() }}</p>
+          }
         }
-      }
-    </div>
+      </div>
+    }
   </section>
 
-  <section class="rail-section rail-divided">
+  <section class="rail-section rail-divided rail-settings">
     <h3 class="rail-title">Settings</h3>
 
     <app-option-group
@@ -130,7 +135,6 @@
       [axisTooltip]="axisTooltips.version"
       [options]="versionOptions()"
       [selected]="settings().version"
-      [disabledReason]="notSupported('Version selection')"
       (changed)="setAxis('version', $event)"
     />
 
@@ -147,7 +151,6 @@
       [axisTooltip]="axisTooltips.resolution"
       [options]="resolutionOptions()"
       [selected]="settings().resolution"
-      [disabledReason]="notSupported('Resolution')"
       (changed)="setAxis('resolution', $event)"
     />
 
@@ -156,7 +159,6 @@
       [axisTooltip]="axisTooltips.quality"
       [options]="qualityOptions()"
       [selected]="settings().quality"
-      [disabledReason]="notSupported('A quality/effort dial')"
       (changed)="setAxis('quality', $event)"
     />
 
@@ -166,7 +168,6 @@
         [axisTooltip]="axisTooltips.duration"
         [options]="durationOptions()"
         [selected]="settings().durationS?.toString()"
-        [disabledReason]="notSupported('Duration')"
         (changed)="setDuration($event)"
       />
     }

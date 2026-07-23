@@ -6,6 +6,8 @@ export interface Prefs {
   defaultImageFamily: string;
   defaultVideoFamily: string;
   defaultAspect: string;
+  /** Style preset id preselected in the left panel ('' = none). */
+  defaultStyle: string;
   /** True once the onboarding tour was finished or skipped. */
   tourSeen: boolean;
 }
@@ -15,6 +17,7 @@ const DEFAULTS: Prefs = {
   defaultImageFamily: 'nano-banana',
   defaultVideoFamily: 'veo',
   defaultAspect: '1:1',
+  defaultStyle: '',
   tourSeen: false,
 };
 

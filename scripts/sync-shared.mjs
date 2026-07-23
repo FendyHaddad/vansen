@@ -25,6 +25,11 @@ export const FILES = [
         'const PAYG_MARGIN = 0.33;',
       ),
   },
+  {
+    src: 'src/app/core/catalog/style-presets.ts',
+    out: 'style-presets.ts',
+    transform: (code) => code,
+  },
 ];
 
 export function transformed(file, root = scriptRoot) {

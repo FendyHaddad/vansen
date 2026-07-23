@@ -1,0 +1,132 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Matches the left panel's .field-label — component encapsulation means the
+ * rail styles don't reach in here, so the tokens are repeated. */
+.field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.og-info {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.style-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.style-trigger:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+}
+
+.style-trigger-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.style-trigger-none {
+  color: var(--muted-foreground);
+}
+
+.style-trigger-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.style-chevron {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.style-menu {
+  width: 320px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.style-group-title {
+  margin: 10px 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.style-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: none;
+  cursor: pointer;
+}
+
+.style-tile img,
+.style-tile-blank {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: calc(var(--radius) - 4px);
+  object-fit: cover;
+  background: var(--muted);
+}
+
+.style-tile-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+}
+
+.style-tile-none {
+  width: calc(25% - 5px);
+}
+
+.style-tile-active {
+  border-color: var(--primary);
+}
+
+.style-tile-name {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  text-align: center;
+  line-height: 1.2;
+}
