@@ -9,7 +9,7 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  gap: 14px;
+  gap: 33px;
 }
 
 .rail-section {
@@ -40,7 +40,7 @@
 
 .rail-divided {
   border-top: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
-  padding-top: 14px;
+  padding-top: 33px;
 }
 
 /* Pin the generate action to the bottom of the rail; bleed past the
@@ -116,36 +116,54 @@
   letter-spacing: 0;
 }
 
-/* Model dropdown */
+/* Model settings row — same tokens as option-group (encapsulation keeps
+ * those styles out of this template, so they are repeated here). */
 
-.model-trigger {
+.og {
   display: flex;
   align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 2px);
-  background: var(--background);
-  color: var(--foreground);
-  font-size: 0.875rem;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.og-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
   font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.og-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--foreground);
+  padding: 5px 4px 5px 8px;
+  font-size: 0.8125rem;
+  font-weight: 550;
   cursor: pointer;
-  transition: border-color 0.12s ease;
+  transition: background-color 0.12s ease;
 }
 
-.model-trigger:hover {
-  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+.og-trigger:hover {
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
 }
 
-.model-trigger-name {
+.og-trigger-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-chevron {
-  margin-left: auto;
+.og-chevron {
   color: var(--muted-foreground);
   flex-shrink: 0;
 }

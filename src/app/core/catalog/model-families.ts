@@ -100,7 +100,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Google',
     logo: '/logos/google.svg',
     kind: 'image',
-    blurb: 'Google’s all-rounder — Fast, Standard, and Pro tiers.',
+    blurb: 'Google’s all-rounder — Fast, Latest, and Pro tiers.',
     capabilities: {
       versions: [
         {
@@ -110,7 +110,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         },
         {
           value: 'standard',
-          label: 'Standard',
+          label: 'Latest',
           tag: 'Latest',
           tooltip: 'Gemini 3.1 Flash Image — current generation, up to 4K.',
         },

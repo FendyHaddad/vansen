@@ -1,5 +1,5 @@
-<div class="field">
-  <span class="field-label">
+<div class="og">
+  <span class="og-label">
     Style
     <app-hint
       text="Boosts your prompt toward a visual style. Applied at generation — your prompt text is untouched."
@@ -7,15 +7,15 @@
       <span class="og-info">ⓘ</span>
     </app-hint>
   </span>
-  <button type="button" class="style-trigger" [hlmDropdownMenuTrigger]="styleMenu" align="start">
+  <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="styleMenu" align="end">
     @if (current(); as style) {
       <img [src]="style.thumb" [alt]="style.name" class="style-trigger-thumb"/>
-      <span class="style-trigger-name">{{ style.name }}</span>
+      <span class="og-trigger-label">{{ style.name }}</span>
     } @else {
       <ng-icon name="lucidePalette" size="14" class="style-trigger-none"/>
-      <span class="style-trigger-name">None</span>
+      <span class="og-trigger-label">None</span>
     }
-    <ng-icon name="lucideChevronDown" size="14" class="style-chevron"/>
+    <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
   </button>
   <ng-template #styleMenu>
     <div hlmDropdownMenu class="style-menu">

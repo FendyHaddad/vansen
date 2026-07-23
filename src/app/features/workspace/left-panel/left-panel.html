@@ -23,45 +23,8 @@
   </div>
 
   <section class="rail-section">
-    <h3 class="rail-title">Create</h3>
 
-    <div class="field">
-      <span class="field-label">
-        Model
-        <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
-          <span class="og-info">ⓘ</span>
-        </app-hint>
-      </span>
-      <button type="button" class="model-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="start">
-        <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
-        <span class="model-trigger-name">{{ family().name }}</span>
-        <ng-icon name="lucideChevronDown" size="14" class="model-chevron"/>
-      </button>
-      <ng-template #modelMenu>
-        <div hlmDropdownMenu class="model-menu">
-          @for (f of families(); track f.id) {
-            <button
-              hlmDropdownMenuItem
-              class="model-item"
-              [class.model-item-active]="familyId() === f.id"
-              [disabled]="disabledFamily(f.id)"
-              (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
-            >
-              <span class="model-item-top">
-                <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
-                <span class="model-item-name">{{ f.name }}</span>
-                @if (disabledFamily(f.id)) {
-                  <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
-                }
-              </span>
-              <span class="model-item-blurb">{{ f.blurb }}</span>
-            </button>
-          }
-        </div>
-      </ng-template>
-    </div>
-
-    <div class="field">
+    <div class="field mb-5">
       <span class="field-label">Prompt</span>
       <textarea
         rows="3"
@@ -71,10 +34,6 @@
         (input)="updatePrompt($any($event.target).value)"
       ></textarea>
     </div>
-
-    @if (mode() === 'image') {
-      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
-    }
 
     @if (family().capabilities.imageInput) {
       <div class="field">
@@ -128,7 +87,42 @@
   </section>
 
   <section class="rail-section rail-divided rail-settings">
-    <h3 class="rail-title">Settings</h3>
+
+    <div class="og">
+      <span class="og-label">
+        Model
+        <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
+          <span class="og-info">ⓘ</span>
+        </app-hint>
+      </span>
+      <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="end">
+        <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
+        <span class="og-trigger-label">{{ family().name }}</span>
+        <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
+      </button>
+      <ng-template #modelMenu>
+        <div hlmDropdownMenu class="model-menu">
+          @for (f of families(); track f.id) {
+            <button
+              hlmDropdownMenuItem
+              class="model-item"
+              [class.model-item-active]="familyId() === f.id"
+              [disabled]="disabledFamily(f.id)"
+              (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
+            >
+              <span class="model-item-top">
+                <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
+                <span class="model-item-name">{{ f.name }}</span>
+                @if (disabledFamily(f.id)) {
+                  <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
+                }
+              </span>
+              <span class="model-item-blurb">{{ f.blurb }}</span>
+            </button>
+          }
+        </div>
+      </ng-template>
+    </div>
 
     <app-option-group
       label="Version"
@@ -137,6 +131,10 @@
       [selected]="settings().version"
       (changed)="setAxis('version', $event)"
     />
+
+    @if (mode() === 'image') {
+      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
+    }
 
     <app-option-group
       label="Aspect ratio"

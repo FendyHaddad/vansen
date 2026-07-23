@@ -16,7 +16,7 @@
           </span>
         }
         <span class="og-trigger-label">{{ sel.label }}</span>
-        @if (sel.tag) {
+        @if (sel.tag && sel.tag !== sel.label) {
           <span class="og-tag">{{ sel.tag }}</span>
         }
       }
@@ -43,7 +43,7 @@
                   </span>
                 }
                 <span class="og-item-label">{{ option.label }}</span>
-                @if (option.tag) {
+                @if (option.tag && option.tag !== option.label) {
                   <span class="og-tag">{{ option.tag }}</span>
                 }
                 @if (selected() === option.value) {

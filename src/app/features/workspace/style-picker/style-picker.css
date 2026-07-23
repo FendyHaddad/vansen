@@ -1,16 +1,18 @@
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* Matches the left panel's .field-label — component encapsulation means the
- * rail styles don't reach in here, so the tokens are repeated. */
-.field-label {
+/* Settings row, identical tokens to option-group — component encapsulation
+ * means those styles don't reach in here, so they are repeated. */
+.og {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.og-label {
+  display: flex;
+  align-items: center;
   gap: 6px;
+  flex-shrink: 0;
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted-foreground);
@@ -22,24 +24,35 @@
   letter-spacing: 0;
 }
 
-.style-trigger {
+.og-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 2px);
-  background: var(--background);
+  gap: 7px;
+  min-width: 0;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
   color: var(--foreground);
+  padding: 5px 4px 5px 8px;
   font-size: 0.8125rem;
   font-weight: 550;
   cursor: pointer;
-  transition: border-color 0.12s ease;
+  transition: background-color 0.12s ease;
 }
 
-.style-trigger:hover {
-  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+.og-trigger:hover {
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
+}
+
+.og-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.og-chevron {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
 }
 
 .style-trigger-thumb {
@@ -47,23 +60,11 @@
   height: 18px;
   border-radius: 4px;
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .style-trigger-none {
   color: var(--muted-foreground);
-}
-
-.style-trigger-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-
-.style-chevron {
-  color: var(--muted-foreground);
-  flex-shrink: 0;
 }
 
 .style-menu {
