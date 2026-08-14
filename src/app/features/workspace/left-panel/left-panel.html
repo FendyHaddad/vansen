@@ -35,7 +35,7 @@
       ></textarea>
     </div>
 
-    @if (family().capabilities.imageInput) {
+    @if (family().capabilities.imageInput && !personaActive()) {
       <div class="field">
         <span class="field-label">
           Reference image
@@ -88,52 +88,71 @@
 
   <section class="rail-section rail-divided rail-settings">
 
-    <div class="og">
-      <span class="og-label">
-        Model
-        <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
-          <span class="og-info">ⓘ</span>
-        </app-hint>
-      </span>
-      <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="end">
-        <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
-        <span class="og-trigger-label">{{ family().name }}</span>
-        <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
-      </button>
-      <ng-template #modelMenu>
-        <div hlmDropdownMenu class="model-menu">
-          @for (f of families(); track f.id) {
-            <button
-              hlmDropdownMenuItem
-              class="model-item"
-              [class.model-item-active]="familyId() === f.id"
-              [disabled]="disabledFamily(f.id)"
-              (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
-            >
-              <span class="model-item-top">
-                <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
-                <span class="model-item-name">{{ f.name }}</span>
-                @if (disabledFamily(f.id)) {
-                  <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
-                }
-              </span>
-              <span class="model-item-blurb">{{ f.blurb }}</span>
-            </button>
-          }
-        </div>
-      </ng-template>
-    </div>
+    @if (!personaActive()) {
+      <div class="og">
+        <span class="og-label">
+          Model
+          <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
+            <span class="og-info">ⓘ</span>
+          </app-hint>
+        </span>
+        <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="end">
+          <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
+          <span class="og-trigger-label">{{ family().name }}</span>
+          <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
+        </button>
+        <ng-template #modelMenu>
+          <div hlmDropdownMenu class="model-menu">
+            @for (f of families(); track f.id) {
+              <button
+                hlmDropdownMenuItem
+                class="model-item"
+                [class.model-item-active]="familyId() === f.id"
+                [disabled]="disabledFamily(f.id)"
+                (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
+              >
+                <span class="model-item-top">
+                  <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
+                  <span class="model-item-name">{{ f.name }}</span>
+                  @if (disabledFamily(f.id)) {
+                    <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
+                  }
+                </span>
+                <span class="model-item-blurb">{{ f.blurb }}</span>
+              </button>
+            }
+          </div>
+        </ng-template>
+      </div>
 
-    <app-option-group
-      label="Version"
-      [axisTooltip]="axisTooltips.version"
-      [options]="versionOptions()"
-      [selected]="settings().version"
-      (changed)="setAxis('version', $event)"
-    />
+      <app-option-group
+        label="Version"
+        [axisTooltip]="axisTooltips.version"
+        [options]="versionOptions()"
+        [selected]="settings().version"
+        (changed)="setAxis('version', $event)"
+      />
+    } @else {
+      <div class="og">
+        <span class="og-label">Model</span>
+        <div class="persona-pipeline-chip">
+          <ng-icon name="lucideLock" size="13"/>
+          <span>Persona — FLUX likeness</span>
+          <app-hint text="Persona images render on the FLUX LoRA pipeline your persona was trained for. Clear the persona to pick a model.">
+            <span class="og-info">ⓘ</span>
+          </app-hint>
+        </div>
+      </div>
+    }
 
     @if (mode() === 'image') {
       <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
+      <app-persona-picker
+        [selected]="persona()"
+        (changed)="setPersona($event)"
+        (manageRequested)="managePersonasRequested.emit()"
+      />
+      <app-trend-gallery (picked)="applyTrend($event)"/>
     }
 
     <app-option-group
@@ -144,21 +163,23 @@
       (changed)="setAxis('aspectRatio', $event)"
     />
 
-    <app-option-group
-      label="Resolution"
-      [axisTooltip]="axisTooltips.resolution"
-      [options]="resolutionOptions()"
-      [selected]="settings().resolution"
-      (changed)="setAxis('resolution', $event)"
-    />
+    @if (!personaActive()) {
+      <app-option-group
+        label="Resolution"
+        [axisTooltip]="axisTooltips.resolution"
+        [options]="resolutionOptions()"
+        [selected]="settings().resolution"
+        (changed)="setAxis('resolution', $event)"
+      />
 
-    <app-option-group
-      label="Quality"
-      [axisTooltip]="axisTooltips.quality"
-      [options]="qualityOptions()"
-      [selected]="settings().quality"
-      (changed)="setAxis('quality', $event)"
-    />
+      <app-option-group
+        label="Quality"
+        [axisTooltip]="axisTooltips.quality"
+        [options]="qualityOptions()"
+        [selected]="settings().quality"
+        (changed)="setAxis('quality', $event)"
+      />
+    }
 
     @if (mode() === 'video') {
       <app-option-group

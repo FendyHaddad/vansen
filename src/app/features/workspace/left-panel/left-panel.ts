@@ -26,6 +26,7 @@ import {
   ModelKind,
   creditCost,
   defaultSettings,
+  personaGenCreditCost,
 } from '../../../core/catalog/model-families';
 import { LedgerService } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
@@ -38,6 +39,10 @@ import { Hint } from '../../../shared/hint/hint';
 import { CachedSrc } from '../../../core/media/cached-src';
 import { styleById } from '../../../core/catalog/style-presets';
 import { StylePicker } from '../style-picker/style-picker';
+import { PersonaStore } from '../../../core/personas/persona-store';
+import { PersonaPicker } from '../persona-picker/persona-picker';
+import { TrendPreset } from '../../../core/catalog/trend-presets';
+import { TrendGallery } from '../trend-gallery/trend-gallery';
 
 export interface GenerateRequest {
   family: ModelFamily;
@@ -45,6 +50,10 @@ export interface GenerateRequest {
   prompt: string;
   /** Style preset id, null = none. Server appends the modifier. */
   style: string | null;
+  /** Persona id, null = none. Server injects the trigger + locks to flux-lora. */
+  personaId: string | null;
+  /** Trend the prompt was prefilled from, null = hand-written. */
+  trendId: string | null;
   /** Library generation used as edit source. */
   referenceId: string | null;
   /** Uploaded image (storage path) used as edit source. */
@@ -84,6 +93,8 @@ const AXIS_TOOLTIPS = {
     Hint,
     CachedSrc,
     StylePicker,
+    PersonaPicker,
+    TrendGallery,
     ...HlmDropdownMenuImports,
   ],
   providers: [
@@ -104,9 +115,11 @@ export class LeftPanel {
   private readonly prefsService = inject(PreferencesService);
   private readonly api = inject(ApiService);
   private readonly availability = inject(ModelAvailability);
+  private readonly personaStore = inject(PersonaStore);
 
   readonly generateRequested = output<GenerateRequest>();
   readonly pickReferenceRequested = output<void>();
+  readonly managePersonasRequested = output<void>();
 
   readonly uploading = signal(false);
   readonly uploadError = signal('');
@@ -119,6 +132,9 @@ export class LeftPanel {
   readonly settings = signal<GenerationSettings>(defaultSettings(firstFamilyOf('image')));
   readonly prompt = signal('');
   readonly style = signal<string | null>(null);
+  readonly persona = signal<string | null>(null);
+  /** Set when the prompt came from a trend prefill; survives edits, dies with the prompt. */
+  readonly appliedTrend = signal<string | null>(null);
   readonly reference = signal<ReferenceSelection | null>(null);
 
   readonly axisTooltips = AXIS_TOOLTIPS;
@@ -140,6 +156,12 @@ export class LeftPanel {
     }
     this.settings.set(base);
     this.style.set(styleById(prefs.defaultStyle)?.id ?? null);
+    this.persona.set(prefs.defaultPersona || null);
+    // Reset silently if the remembered persona is gone or not ready.
+    void this.personaStore.load().then(() => {
+      const id = this.persona();
+      if (id && !this.personaStore.readyById(id)) this.persona.set(null);
+    });
   }
 
   readonly families = computed(() => MODEL_FAMILIES.filter((f) => f.kind === this.mode()));
@@ -204,8 +226,12 @@ export class LeftPanel {
   /** Owner accounts have unlimited credits — the price is shown, never a blocker. */
   readonly isOwner = this.profileStore.isOwner;
 
+  readonly personaActive = computed(() => this.mode() === 'image' && !!this.persona());
+
   readonly batch = computed(() => this.settings().batch ?? 1);
-  readonly unitCredits = computed(() => creditCost(this.family(), this.settings()));
+  readonly unitCredits = computed(() =>
+    this.personaActive() ? personaGenCreditCost() : creditCost(this.family(), this.settings()),
+  );
   readonly priceCredits = computed(() => this.unitCredits() * this.batch());
   readonly insufficient = computed(
     () => !this.isOwner() && this.priceCredits() > this.ledger.totalCredits(),
@@ -216,6 +242,7 @@ export class LeftPanel {
 
   setMode(kind: ModelKind): void {
     if (kind === 'video' && this.videoLocked) return;
+    this.appliedTrend.set(null);
     this.mode.set(kind);
     this.selectFamily(firstFamilyOf(kind).id);
   }
@@ -241,11 +268,32 @@ export class LeftPanel {
 
   updatePrompt(value: string): void {
     this.prompt.set(value);
+    if (!value.trim()) this.appliedTrend.set(null);
   }
 
   setStyle(id: string | null): void {
     this.style.set(id);
     void this.prefsService.update({ defaultStyle: id ?? '' });
+  }
+
+  applyTrend(trend: TrendPreset): void {
+    const current = this.prompt().trim();
+    if (current && current !== trend.prompt) {
+      if (!confirm('Replace your current prompt with this trend?')) return;
+    }
+    this.prompt.set(trend.prompt);
+    this.appliedTrend.set(trend.id);
+    if (trend.aspectRatio && this.family().capabilities.aspectRatios.includes(trend.aspectRatio)) {
+      this.settings.update((s) => ({ ...s, aspectRatio: trend.aspectRatio! }));
+    }
+  }
+
+  setPersona(id: string | null): void {
+    this.persona.set(id);
+    // The likeness pipeline is text-to-image only — a lingering reference would
+    // silently flip the request to an edit op the server rejects.
+    if (id) this.reference.set(null);
+    void this.prefsService.update({ defaultPersona: id ?? '' });
   }
 
   setReference(ref: ReferenceSelection | null): void {
@@ -286,13 +334,16 @@ export class LeftPanel {
       settings: { ...this.settings() },
       prompt: this.prompt().trim(),
       style: this.mode() === 'image' ? this.style() : null,
-      referenceId: this.reference()?.id ?? null,
-      referenceUploadId: this.reference()?.uploadId ?? null,
-      referenceUrl: this.reference()?.url ?? null,
+      personaId: this.personaActive() ? this.persona() : null,
+      trendId: this.mode() === 'image' ? this.appliedTrend() : null,
+      referenceId: this.personaActive() ? null : (this.reference()?.id ?? null),
+      referenceUploadId: this.personaActive() ? null : (this.reference()?.uploadId ?? null),
+      referenceUrl: this.personaActive() ? null : (this.reference()?.url ?? null),
       batch: this.batch(),
       priceCredits: this.priceCredits(),
     });
     this.prompt.set('');
+    this.appliedTrend.set(null);
   }
 
   /** Reset options that fell out of range after a version switch. */

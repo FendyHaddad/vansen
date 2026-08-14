@@ -27,6 +27,7 @@ const TYPE_LABELS: Record<LedgerEntry['type'], string> = {
   cycle_reset: 'Monthly grant',
   pack_expiry: 'Pack expiry',
   promo: 'Promo',
+  persona_training: 'Persona training',
 };
 
 interface FamilyUsageRow {

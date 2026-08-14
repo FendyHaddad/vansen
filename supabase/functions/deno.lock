@@ -11,6 +11,7 @@
     "npm:@supabase/postgrest-js@2.110.7": "2.110.7",
     "npm:@supabase/realtime-js@2.110.7": "2.110.7",
     "npm:@supabase/storage-js@2.110.7": "2.110.7",
+    "npm:fflate@0.8.2": "0.8.2",
     "npm:stripe@17": "17.7.0"
   },
   "jsr": {
@@ -178,6 +179,9 @@
         "has-tostringtag",
         "hasown"
       ]
+    },
+    "fflate@0.8.2": {
+      "integrity": "sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A=="
     },
     "form-data@4.0.6": {
       "integrity": "sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==",

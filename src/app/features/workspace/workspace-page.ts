@@ -48,6 +48,8 @@ import { CanvasViewport } from '../studio/canvas-viewport/canvas-viewport';
 import { RightPanel } from '../studio/right-panel/right-panel';
 import { PlanChangeDialog } from '../studio/plan-change-dialog/plan-change-dialog';
 import { CreditPacksDialog } from './credit-packs-dialog/credit-packs-dialog';
+import { PersonaManager } from './persona-manager/persona-manager';
+import { PersonaStore } from '../../core/personas/persona-store';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
@@ -75,6 +77,7 @@ const SAMPLE_PROMPTS = [
     RightPanel,
     PlanChangeDialog,
     CreditPacksDialog,
+    PersonaManager,
   ],
   providers: [
     provideIcons({
@@ -93,6 +96,7 @@ export class WorkspacePage {
   private readonly auth = inject(AuthService);
   private readonly ledger = inject(LedgerService);
   private readonly store = inject(GenerationStore);
+  private readonly personaStore = inject(PersonaStore);
   /** Public: the plan-change dialog reads subscription state straight from it. */
   readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
@@ -281,13 +285,18 @@ export class WorkspacePage {
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
-    const op = req.referenceId || req.referenceUploadId ? GenerationOp.Edit : GenerationOp.Generate;
+    // Personas are generate-only; the server routes them to its own family.
+    const op = !req.personaId && (req.referenceId || req.referenceUploadId)
+      ? GenerationOp.Edit
+      : GenerationOp.Generate;
     try {
       await this.store.create({
         familyId: req.family.id,
         op,
         prompt: req.prompt,
         style: req.style ?? undefined,
+        personaId: req.personaId ?? undefined,
+        trendId: req.trendId ?? undefined,
         settings: req.settings,
         batch: req.batch,
         parentId: req.referenceId ?? undefined,
@@ -303,6 +312,13 @@ export class WorkspacePage {
 
   startReferencePick(): void {
     this.pickingReference.set(true);
+  }
+
+  readonly personaManagerOpen = signal(false);
+
+  openPersonaManager(): void {
+    this.personaManagerOpen.set(true);
+    void this.personaStore.load();
   }
 
   /** Topbar file input — pull the file, reset input, hand off to onUpload. */

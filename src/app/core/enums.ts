@@ -13,6 +13,7 @@ export const LedgerType = {
   CycleReset: 'cycle_reset',
   PackExpiry: 'pack_expiry',
   Promo: 'promo',
+  PersonaTraining: 'persona_training',
 } as const;
 export type LedgerType = (typeof LedgerType)[keyof typeof LedgerType];
 
@@ -36,6 +37,14 @@ export const MediaKind = {
   Video: 'video',
 } as const;
 export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
+
+export const PersonaStatus = {
+  Draft: 'draft',
+  Training: 'training',
+  Ready: 'ready',
+  Failed: 'failed',
+} as const;
+export type PersonaStatus = (typeof PersonaStatus)[keyof typeof PersonaStatus];
 
 export const SubscriptionPlan = {
   Studio: 'studio',

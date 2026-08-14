@@ -8,6 +8,8 @@ export interface Prefs {
   defaultAspect: string;
   /** Style preset id preselected in the left panel ('' = none). */
   defaultStyle: string;
+  /** Persona id preselected in the left panel ('' = none). */
+  defaultPersona: string;
   /** True once the onboarding tour was finished or skipped. */
   tourSeen: boolean;
 }
@@ -18,6 +20,7 @@ const DEFAULTS: Prefs = {
   defaultVideoFamily: 'veo',
   defaultAspect: '1:1',
   defaultStyle: '',
+  defaultPersona: '',
   tourSeen: false,
 };
 

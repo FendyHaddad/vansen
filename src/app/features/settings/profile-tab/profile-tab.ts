@@ -30,6 +30,9 @@ export class ProfileTab {
   readonly displayName = signal(this.profileStore.displayName());
   readonly saved = signal(false);
   readonly error = signal('');
+  readonly password = signal('');
+  readonly passwordSaved = signal(false);
+  readonly passwordError = signal('');
 
   constructor() {
     if (!this.profileStore.loaded()) {
@@ -45,6 +48,23 @@ export class ProfileTab {
       setTimeout(() => this.saved.set(false), 2000);
     } catch (e) {
       this.error.set(e instanceof ApiError ? e.message : 'Save failed');
+    }
+  }
+
+  async setPassword(): Promise<void> {
+    this.passwordError.set('');
+    const password = this.password();
+    if (password.length < 8) {
+      this.passwordError.set('Password must be at least 8 characters.');
+      return;
+    }
+    try {
+      await this.auth.setPassword(password);
+      this.password.set('');
+      this.passwordSaved.set(true);
+      setTimeout(() => this.passwordSaved.set(false), 2000);
+    } catch (e) {
+      this.passwordError.set(e instanceof Error ? e.message : 'Could not set password');
     }
   }
 

@@ -327,3 +327,13 @@
   letter-spacing: 0.06em;
   color: var(--muted-foreground);
 }
+
+.persona-pipeline-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  color: var(--muted-foreground);
+  padding: 5px 4px 5px 8px;
+}

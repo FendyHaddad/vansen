@@ -38,6 +38,34 @@
     @if (error()) {
       <p class="small error-text">{{ error() }}</p>
     }
+
+    <div class="divider"></div>
+
+    <div class="setting-row">
+      <div class="setting-text">
+        <label hlmLabel for="password">Password</label>
+        <p class="muted small">
+          Set a password to sign in with your email — Google sign-in keeps working.
+        </p>
+      </div>
+      <div class="setting-control name-control">
+        <input
+          hlmInput
+          id="password"
+          type="password"
+          autocomplete="new-password"
+          [value]="password()"
+          (input)="password.set($any($event.target).value)"
+          placeholder="New password"
+        />
+        <button hlmBtn size="sm" variant="outline" (click)="setPassword()">
+          {{ passwordSaved() ? 'Saved ✓' : 'Set' }}
+        </button>
+      </div>
+    </div>
+    @if (passwordError()) {
+      <p class="small error-text">{{ passwordError() }}</p>
+    }
   </div>
 
   <div class="panel danger-panel">

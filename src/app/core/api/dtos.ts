@@ -3,6 +3,7 @@ import {
   GenerationStatus,
   LedgerType,
   MediaKind,
+  PersonaStatus,
   SubscriptionPlan,
   SubscriptionStatus,
 } from '../enums';
@@ -97,6 +98,10 @@ export interface CreateGenerationRequest {
   parentId?: string;
   referenceUploadId?: string;
   maskPngBase64?: string;
+  /** Persona id — server validates ownership/readiness and injects the trigger. */
+  personaId?: string;
+  /** Trend preset id — stamped into settings for analytics when the prompt came from a trend. */
+  trendId?: string;
 }
 
 export interface CreateGenerationResponse {
@@ -119,6 +124,38 @@ export interface UploadResponse {
 
 export interface SaveEditResponse {
   item: GenerationDto;
+}
+
+export interface PersonaDto {
+  id: string;
+  name: string;
+  status: PersonaStatus;
+  photoCount: number;
+  /** Signed URL of the first photo (1h) — picker/manager thumbnail. */
+  thumbUrl: string;
+  error: string | null;
+  createdAt: string;
+  trainedAt: string | null;
+}
+
+export interface PersonasResponse {
+  items: PersonaDto[];
+  slots: { used: number; max: number };
+}
+
+export interface CreatePersonaRequest {
+  name: string;
+  /** "This is me, or someone who gave me permission." Required true. */
+  attested: boolean;
+}
+
+export interface TrainPersonaRequest {
+  photoUploadIds: string[];
+}
+
+export interface TrainPersonaResponse {
+  item: PersonaDto;
+  credits: CreditsDto;
 }
 
 export interface SubscribeRequest {

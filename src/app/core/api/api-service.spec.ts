@@ -49,4 +49,26 @@ describe('ApiService', () => {
     const api = makeApi('tok');
     await expect(api.get('/ledger')).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('sends the platform header on JSON requests', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await api.get('/profile');
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['x-vansen-client']).toBe('web');
+  });
+
+  it('sends the platform header on multipart requests', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await api.postForm('/uploads', new FormData());
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['x-vansen-client']).toBe('web');
+  });
 });

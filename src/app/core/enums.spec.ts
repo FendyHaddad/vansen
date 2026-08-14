@@ -4,6 +4,7 @@ import {
   GenerationStatus,
   LedgerType,
   MediaKind,
+  PersonaStatus,
   SubscriptionPlan,
   SubscriptionStatus,
 } from './enums';
@@ -17,10 +18,14 @@ describe('domain enums', () => {
         'generate',
         'pack_expiry',
         'pack_purchase',
+        'persona_training',
         'promo',
         'refund',
         'upscale',
       ].sort(),
+    );
+    expect(Object.values(PersonaStatus).sort()).toEqual(
+      ['draft', 'failed', 'ready', 'training'].sort(),
     );
     expect(Object.values(GenerationOp).sort()).toEqual(
       ['edit', 'generate', 'upscale', 'variation'].sort(),

@@ -19,6 +19,10 @@ export interface GenerationSettings {
   batch?: number;
   /** Style preset id (style-presets.ts). Set server-side; free — no price impact. */
   style?: string;
+  /** Persona id used for this generation. Set server-side; likeness pipeline. */
+  persona?: string;
+  /** Trend preset id — stamped when the prompt came from a trend prefill. */
+  trend?: string;
 }
 
 export interface ModelFamily {
@@ -329,6 +333,34 @@ export const UPSCALER = {
   name: 'Precision Upscale',
   providerCost: 0.04,
 } as const;
+
+/** Hidden persona pipeline — fal flux-lora with the user's trained LoRA weights.
+ * Not in the picker; selected implicitly when a persona is active. */
+export const PERSONA_GEN = {
+  id: 'persona',
+  name: 'Persona',
+  // fal-ai/flux-lora ≈ $0.035 per ~1MP image (verify on first live bill).
+  providerCost: 0.035,
+} as const;
+
+/** Persona LoRA training — fixed retail like EDIT_TOOLS (~$2 fal trainer cost). */
+export const PERSONA_TRAINING = {
+  creditCost: 350,
+  providerCost: 2.0,
+  minPhotos: 5,
+  maxPhotos: 20,
+} as const;
+
+/** Concurrent persona slots per plan. */
+export const PERSONA_SLOTS: Record<'studio' | 'pro' | 'owner', number> = {
+  studio: 2,
+  pro: 5,
+  owner: 5,
+};
+
+export function personaGenCreditCost(): number {
+  return Math.ceil((PERSONA_GEN.providerCost / (1 - STUDIO_MARGIN)) * 100);
+}
 
 /**
  * Studio panel AI edit tools — fixed-function (one curated backend model each,

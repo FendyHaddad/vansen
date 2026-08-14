@@ -3,6 +3,9 @@ import {
   CREDIT_PACKS,
   EDIT_TOOLS,
   MODEL_FAMILIES,
+  PERSONA_GEN,
+  PERSONA_SLOTS,
+  PERSONA_TRAINING,
   PLAN_CREDITS,
   STUDIO_MARGIN,
   creditCost,
@@ -10,6 +13,7 @@ import {
   editToolById,
   familyById,
   packCredits,
+  personaGenCreditCost,
   upscaleCreditCost,
 } from './model-families';
 
@@ -146,5 +150,26 @@ describe('credit pricing', () => {
     expect(packCredits(25, 'pro')).toBe(3281);
     expect(packCredits(50, 'pro')).toBe(6750);
     expect(packCredits(100, 'pro')).toBe(13750);
+  });
+});
+
+describe('persona pricing', () => {
+  it('prices a persona generation with the margin formula', () => {
+    // ceil(0.035 / 0.6 * 100) = 6 credits
+    expect(personaGenCreditCost()).toBe(6);
+    expect(PERSONA_GEN.id).toBe('persona');
+  });
+
+  it('fixes training at 350 credits with a positive margin over provider cost', () => {
+    expect(PERSONA_TRAINING.creditCost).toBe(350);
+    expect(PERSONA_TRAINING.creditCost / 100).toBeGreaterThan(PERSONA_TRAINING.providerCost);
+    expect(PERSONA_TRAINING.minPhotos).toBe(5);
+    expect(PERSONA_TRAINING.maxPhotos).toBe(20);
+  });
+
+  it('grants slots per plan', () => {
+    expect(PERSONA_SLOTS.studio).toBe(2);
+    expect(PERSONA_SLOTS.pro).toBe(5);
+    expect(PERSONA_SLOTS.owner).toBe(5);
   });
 });

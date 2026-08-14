@@ -48,6 +48,13 @@ export class AuthService {
     if (error) throw new Error(error.message);
   }
 
+  /** Sets (or replaces) the account password — lets OAuth-only users add
+   * email+password sign-in. Requires a live session. */
+  async setPassword(password: string): Promise<void> {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(error.message);
+  }
+
   async signOut(): Promise<void> {
     await supabase.auth.signOut();
   }

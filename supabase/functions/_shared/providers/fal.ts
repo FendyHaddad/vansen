@@ -17,6 +17,7 @@ function slugFor(ctx: SubmitCtx): string {
   if (ctx.familyId === 'upscaler' || ctx.op === 'upscale') return 'fal-ai/clarity-upscaler';
   if (ctx.familyId === 'edit-bg') return 'fal-ai/birefnet/v2';
   if (FILL_TOOLS.includes(ctx.familyId)) return 'fal-ai/flux-pro/v1/fill';
+  if (ctx.familyId === 'persona') return 'fal-ai/flux-lora';
   if (ctx.familyId === 'flux') return 'fal-ai/flux-pro/v1.1';
   if (ctx.familyId === 'seedream') {
     return ctx.referenceUrl
@@ -26,8 +27,26 @@ function slugFor(ctx: SubmitCtx): string {
   throw new Error(`fal: no slug for ${ctx.familyId}`);
 }
 
+/** Our aspect ratios → fal image_size presets (~1MP each). */
+const PERSONA_SIZES: Record<string, string> = {
+  '1:1': 'square_hd',
+  '3:4': 'portrait_4_3',
+  '9:16': 'portrait_16_9',
+  '4:3': 'landscape_4_3',
+  '16:9': 'landscape_16_9',
+};
+
 function payloadFor(ctx: SubmitCtx): Record<string, unknown> {
   const aspect = String(ctx.settings.aspectRatio ?? '1:1');
+  if (ctx.familyId === 'persona') {
+    return {
+      prompt: ctx.prompt,
+      image_size: PERSONA_SIZES[aspect] ?? 'square_hd',
+      loras: [{ path: ctx.loraUrl, scale: 1 }],
+      num_images: 1,
+      output_format: 'png',
+    };
+  }
   if (ctx.familyId === 'upscaler' || ctx.op === 'upscale') {
     return { image_url: ctx.referenceUrl };
   }
@@ -104,3 +123,54 @@ export const falAdapter: ProviderAdapter = {
     return { state: 'done', bytes, contentType };
   },
 };
+
+// --- Persona LoRA training (queue API, polled by GET /personas) -------------
+
+const TRAINER_SLUG = 'fal-ai/flux-lora-portrait-trainer';
+
+/** Fixed trigger phrase baked into every persona's captions; the api gateway
+ * prepends it to persona prompts. Stored per-persona for forward-compat. */
+export const PERSONA_TRIGGER = 'VNSNPRSN';
+
+export async function submitPersonaTraining(zipUrl: string): Promise<string> {
+  const res = await fetch(`${FAL_BASE}/${TRAINER_SLUG}`, {
+    method: 'POST',
+    headers: await auth(),
+    body: JSON.stringify({
+      images_data_url: zipUrl,
+      trigger_phrase: PERSONA_TRIGGER,
+      steps: 1000,
+      subject_crop: true,
+    }),
+  });
+  if (!res.ok) throw new Error(`fal training submit ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return JSON.stringify({ statusUrl: data.status_url, responseUrl: data.response_url });
+}
+
+export type TrainingCheck =
+  | { state: 'running' }
+  | { state: 'failed'; error: string }
+  | { state: 'done'; loraUrl: string };
+
+export async function checkPersonaTraining(providerRef: string): Promise<TrainingCheck> {
+  const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
+  if (!ref.statusUrl?.startsWith(FAL_BASE) || !ref.responseUrl?.startsWith(FAL_BASE)) {
+    return { state: 'failed', error: 'fal ref missing queue urls' };
+  }
+  const statusRes = await fetch(ref.statusUrl, { headers: { Authorization: `Key ${key()}` } });
+  if (!statusRes.ok) return { state: 'failed', error: `fal status ${statusRes.status}` };
+  const status = await statusRes.json();
+  if (status.status !== 'COMPLETED') {
+    if (status.status === 'IN_QUEUE' || status.status === 'IN_PROGRESS') return { state: 'running' };
+    return { state: 'failed', error: `fal status ${status.status}` };
+  }
+  const resultRes = await fetch(ref.responseUrl, { headers: { Authorization: `Key ${key()}` } });
+  if (!resultRes.ok) {
+    return { state: 'failed', error: `fal result ${resultRes.status}` };
+  }
+  const result = await resultRes.json();
+  const loraUrl = result.diffusers_lora_file?.url;
+  if (!loraUrl) return { state: 'failed', error: 'fal training result had no lora file' };
+  return { state: 'done', loraUrl };
+}

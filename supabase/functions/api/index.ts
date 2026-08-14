@@ -7,17 +7,27 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
 import {
   CREDIT_PACKS,
+  PERSONA_GEN,
+  PERSONA_SLOTS,
+  PERSONA_TRAINING,
   UPSCALER,
   creditCost,
   editToolById,
   familyById,
   packCredits,
+  personaGenCreditCost,
   upscaleCreditCost,
   type GenerationSettings,
 } from './_shared/model-families.ts';
 import { applyStyle, styleById } from './_shared/style-presets.ts';
 import { GenerationOp, LedgerType, MediaKind } from './_shared/enums.ts';
 import { adapterFor } from './_shared/providers/index.ts';
+import {
+  PERSONA_TRIGGER,
+  checkPersonaTraining,
+  submitPersonaTraining,
+} from './_shared/providers/fal.ts';
+import { zipSync } from 'npm:fflate@0.8.2';
 import type { CheckResult } from './_shared/providers/types.ts';
 import { moderate } from './_shared/moderation.ts';
 import { safetyId } from './_shared/safety.ts';
@@ -135,6 +145,7 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
   ['defaultStyle', (v) => typeof v === 'string' && v.length <= 40],
+  ['defaultPersona', (v) => typeof v === 'string' && v.length <= 40],
   ['tourSeen', (v) => typeof v === 'boolean'],
 ];
 
@@ -157,7 +168,7 @@ app.use(
   '*',
   cors({
     origin: (origin) => allowedOrigin(origin) ?? undefined,
-    allowHeaders: ['authorization', 'content-type'],
+    allowHeaders: ['authorization', 'content-type', 'x-vansen-client'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   }),
 );
@@ -188,6 +199,21 @@ function logError(c: ErrCtx, code: string, err: unknown): void {
     .then(({ error }) => {
       if (error) console.error('app_errors insert failed:', error.message);
     });
+}
+
+const KNOWN_CLIENTS = new Set(['web', 'ios', 'android']);
+
+/** Platform marker from the x-vansen-client header; anything unexpected → null. */
+function clientOf(c: { req: { header: (name: string) => string | undefined } }): string | null {
+  const v = c.req.header('x-vansen-client');
+  return v && KNOWN_CLIENTS.has(v) ? v : null;
+}
+
+/** Short free-text field: control chars stripped, trimmed, capped, null if empty. */
+function sanitizeLabel(v: unknown, max = 80): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, max);
+  return s || null;
 }
 
 app.use('*', async (c, next) => {
@@ -599,6 +625,38 @@ app.get('/models', async (c) => {
   return c.json({ models: data ?? [] });
 });
 
+// Client-side error reports (web ErrorHandler, mobile crash hooks). Same
+// privacy rule as logError: message + stack only, never bodies or headers.
+app.post('/errors', async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json().catch(() => null);
+  const message = typeof body?.message === 'string' ? body.message.trim().slice(0, 1000) : '';
+  if (!message) return fail(c, 400, 'invalid_payload', 'message required');
+
+  const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+  const { count } = await admin
+    .from('app_errors')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('source', 'client')
+    .gte('created_at', hourAgo);
+  if ((count ?? 0) >= 20) return fail(c, 429, 'rate_limited', 'Too many error reports');
+
+  const { error } = await admin.from('app_errors').insert({
+    source: 'client',
+    client: clientOf(c),
+    route: sanitizeLabel(body.route),
+    code: sanitizeLabel(body.code),
+    message,
+    stack: typeof body.stack === 'string' && body.stack ? body.stack.slice(0, 4000) : null,
+    app_version: sanitizeLabel(body.appVersion),
+    user_id: userId,
+    request_id: c.get('requestId') ?? null,
+  });
+  if (error) return fail(c, 500, 'report_failed', 'Could not record the report');
+  return c.body(null, 204);
+});
+
 app.get('/jobs', async (c) => {
   const userId = c.get('userId');
   const idsParam = c.req.query('ids') ?? '';
@@ -650,6 +708,8 @@ app.post('/generations', async (c) => {
   const settings = sanitizeSettings(body.settings);
   const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
   const styleId = typeof body.style === 'string' && body.style ? body.style : null;
+  const personaId = typeof body.personaId === 'string' && body.personaId ? body.personaId : null;
+  const trendId = sanitizeLabel(body.trendId, 40);
 
   if (!Object.values(GenerationOp).includes(op as never)) {
     return fail(c, 400, 'invalid_op', `op must be one of ${Object.values(GenerationOp).join(', ')}`);
@@ -662,8 +722,7 @@ app.post('/generations', async (c) => {
   if (styleId && !styleById(styleId)) {
     return fail(c, 400, 'invalid_style', 'Unknown style preset');
   }
-  // Boosted prompt is what moderation and the provider see; the stored prompt stays the user's text.
-  const effectivePrompt = applyStyle(prompt, styleId);
+  const styled = applyStyle(prompt, styleId);
   if ((op === GenerationOp.Edit || op === GenerationOp.Upscale) && !parentId) {
     return fail(c, 400, 'invalid_parent', `${op} requires parentId`);
   }
@@ -679,6 +738,28 @@ app.post('/generations', async (c) => {
     return fail(c, 403, 'subscription_required', 'An active subscription is required to generate.');
   }
 
+  // Persona: owned + ready, generate-op only. Routes to the hidden flux-lora family.
+  let persona: { lora_url: string; trigger_word: string } | null = null;
+  if (personaId) {
+    if (op !== GenerationOp.Generate) {
+      return fail(c, 400, 'invalid_op', 'Personas support generate only');
+    }
+    const { data } = await admin
+      .from('personas')
+      .select('status, lora_url, trigger_word')
+      .eq('id', personaId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!data || data.status !== 'ready' || !data.lora_url) {
+      return fail(c, 400, 'persona_not_ready', 'Persona not found or not ready');
+    }
+    persona = { lora_url: data.lora_url, trigger_word: data.trigger_word ?? '' };
+  }
+
+  // Boosted prompt is what moderation and the provider see; the stored prompt
+  // stays the user's text. Persona trigger word leads so the LoRA locks on.
+  const effectivePrompt = persona ? `${persona.trigger_word}, ${styled}` : styled;
+
   let familyId: string;
   let familyName: string;
   let kind: string;
@@ -689,6 +770,11 @@ app.post('/generations', async (c) => {
     familyName = UPSCALER.name;
     kind = MediaKind.Image;
     unitCredits = upscaleCreditCost();
+  } else if (persona) {
+    familyId = PERSONA_GEN.id;
+    familyName = PERSONA_GEN.name;
+    kind = MediaKind.Image;
+    unitCredits = personaGenCreditCost();
   } else {
     const editTool = editToolById(String(body.familyId ?? ''));
     if (editTool) {
@@ -755,6 +841,8 @@ app.post('/generations', async (c) => {
   const note = batch > 1 ? `${familyName} ×${batch}` : familyName;
 
   if (styleId) settings.style = styleId;
+  if (personaId && persona) settings.persona = personaId;
+  if (trendId) settings.trend = trendId;
 
   const items = Array.from({ length: batch }, () => ({
     kind,
@@ -766,6 +854,7 @@ app.post('/generations', async (c) => {
     priceCredits: unitCredits,
     mediaUrl: '', // filled when the provider job completes
     parentId,
+    client: clientOf(c) ?? '',
   }));
 
   const { data, error } = await admin.rpc('fn_charge_and_generate', {
@@ -803,6 +892,7 @@ app.post('/generations', async (c) => {
         settings: { ...settings },
         referenceUrl,
         maskPngBase64: typeof body.maskPngBase64 === 'string' ? body.maskPngBase64 : undefined,
+        loraUrl: persona?.lora_url,
         safetyId: sid,
       });
       await admin.from('jobs').update({ provider_ref: submitted.providerRef }).eq('id', jobRow!.id);
@@ -1256,6 +1346,188 @@ app.post('/uploads', async (c) => {
   }
 
   return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
+});
+
+async function toPersonaDto(row: Record<string, unknown>) {
+  const photos = (row.photo_paths as string[]) ?? [];
+  let thumbUrl = '';
+  if (photos[0]) {
+    const { data } = await admin.storage.from('uploads').createSignedUrl(photos[0], 3600);
+    thumbUrl = data?.signedUrl ?? '';
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    photoCount: photos.length,
+    thumbUrl,
+    error: row.error,
+    createdAt: row.created_at,
+    trainedAt: row.trained_at,
+  };
+}
+
+/** List personas; lazily settle any in-flight trainings (same pattern as GET /jobs). */
+app.get('/personas', async (c) => {
+  const userId = c.get('userId');
+  const { data: rows } = await admin
+    .from('personas')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  let changed = false;
+  for (const row of rows ?? []) {
+    if (row.status !== 'training' || !row.provider_ref) continue;
+    try {
+      const check = await checkPersonaTraining(row.provider_ref);
+      if (check.state === 'done') {
+        await admin
+          .from('personas')
+          .update({ status: 'ready', lora_url: check.loraUrl, trained_at: new Date().toISOString() })
+          .eq('id', row.id);
+        changed = true;
+      } else if (check.state === 'failed') {
+        await admin.rpc('fn_fail_persona', { p_persona: row.id, p_error: check.error });
+        changed = true;
+      }
+    } catch (e) {
+      logError(c, 'persona_check_failed', e);
+    }
+  }
+  const { data: fresh } = changed
+    ? await admin.from('personas').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+    : { data: rows };
+
+  const plan = await activePlan(userId);
+  const max = plan ? PERSONA_SLOTS[plan] : 0;
+  const items = await Promise.all((fresh ?? []).map(toPersonaDto));
+  return c.json({ items, slots: { used: items.length, max } });
+});
+
+app.post('/personas', async (c) => {
+  const userId = c.get('userId');
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
+  }
+  const plan = await activePlan(userId);
+  if (!plan) return fail(c, 403, 'studio_required', 'Personas require an active subscription.');
+  const body = await c.req.json().catch(() => null);
+  const name = typeof body?.name === 'string'
+    ? body.name.replace(/[\u0000-\u001f\u007f]/gu, '').trim()
+    : '';
+  if (!name || name.length > 40) {
+    return fail(c, 400, 'invalid_payload', 'name required (max 40 chars)');
+  }
+  if (body?.attested !== true) {
+    return fail(c, 400, 'invalid_payload', 'Consent attestation is required');
+  }
+  const { count } = await admin
+    .from('personas')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  if ((count ?? 0) >= PERSONA_SLOTS[plan]) {
+    return fail(c, 403, 'slot_limit', `Your plan allows ${PERSONA_SLOTS[plan]} personas`);
+  }
+  const { data: row, error } = await admin
+    .from('personas')
+    .insert({ user_id: userId, name, client: clientOf(c) })
+    .select('*')
+    .single();
+  if (error || !row) return fail(c, 400, 'create_failed', 'Could not create the persona');
+  return c.json({ item: await toPersonaDto(row) });
+});
+
+app.delete('/personas/:id', async (c) => {
+  const userId = c.get('userId');
+  const { data: rows, error } = await admin
+    .from('personas')
+    .delete()
+    .eq('id', c.req.param('id'))
+    .eq('user_id', userId)
+    .select('id, photo_paths');
+  if (error) return fail(c, 400, 'delete_failed', error.message);
+  const row = rows?.[0];
+  if (!row) return fail(c, 404, 'not_found', 'Persona not found');
+  const paths = [...((row.photo_paths as string[]) ?? []), `persona-zips/${userId}/${row.id}.zip`];
+  await admin.storage.from('uploads').remove(paths); // best-effort cleanup
+  return c.json({ ok: true });
+});
+
+/** Charge 350 credits, zip the moderated photos, submit fal LoRA training. */
+app.post('/personas/:id/train', async (c) => {
+  const userId = c.get('userId');
+  const personaId = c.req.param('id');
+  if (await isSuspended(userId)) {
+    return fail(c, 429, 'account_suspended', 'Account suspended — contact support to appeal.');
+  }
+  if (!(await activePlan(userId))) {
+    return fail(c, 403, 'studio_required', 'Personas require an active subscription.');
+  }
+  const body = await c.req.json().catch(() => null);
+  const photoIds = Array.isArray(body?.photoUploadIds)
+    ? (body.photoUploadIds as unknown[]).filter(
+        (p): p is string => typeof p === 'string' && p.startsWith(`${userId}/`),
+      )
+    : [];
+  if (
+    photoIds.length < PERSONA_TRAINING.minPhotos ||
+    photoIds.length > PERSONA_TRAINING.maxPhotos ||
+    new Set(photoIds).size !== photoIds.length
+  ) {
+    return fail(
+      c, 400, 'invalid_payload',
+      `Between ${PERSONA_TRAINING.minPhotos} and ${PERSONA_TRAINING.maxPhotos} unique photos required`,
+    );
+  }
+
+  // Fetch every photo BEFORE charging — a bad reference must not cost credits.
+  const files: Record<string, Uint8Array> = {};
+  for (let i = 0; i < photoIds.length; i++) {
+    const { data: blob, error } = await admin.storage.from('uploads').download(photoIds[i]);
+    if (error || !blob) return fail(c, 400, 'invalid_payload', 'A photo could not be read');
+    files[`photo_${String(i + 1).padStart(2, '0')}.jpg`] = new Uint8Array(await blob.arrayBuffer());
+  }
+
+  const { error: chargeErr } = await admin.rpc('fn_charge_persona', {
+    p_user: userId,
+    p_persona: personaId,
+    p_amount: PERSONA_TRAINING.creditCost,
+  });
+  if (chargeErr) {
+    if (chargeErr.message.includes('insufficient_balance')) {
+      return fail(c, 402, 'insufficient_credits', 'Not enough credits for training');
+    }
+    if (chargeErr.message.includes('invalid_persona_status')) {
+      return fail(c, 400, 'train_failed', 'Persona not found or already training');
+    }
+    logError(c, 'persona_charge_failed', new Error(chargeErr.message));
+    return fail(c, 400, 'charge_failed', 'Charge could not be completed');
+  }
+
+  try {
+    const zip = zipSync(files, { level: 0 }); // JPEGs don't compress
+    const zipPath = `persona-zips/${userId}/${personaId}.zip`;
+    const { error: upErr } = await admin.storage.from('uploads').upload(zipPath, zip, {
+      contentType: 'application/zip',
+      upsert: true,
+    });
+    if (upErr) throw new Error(`zip upload: ${upErr.message}`);
+    const { data: signed } = await admin.storage.from('uploads').createSignedUrl(zipPath, 3600);
+    if (!signed?.signedUrl) throw new Error('zip sign failed');
+    const providerRef = await submitPersonaTraining(signed.signedUrl);
+    await admin
+      .from('personas')
+      .update({ provider_ref: providerRef, photo_paths: photoIds, trigger_word: PERSONA_TRIGGER })
+      .eq('id', personaId);
+  } catch (e) {
+    logError(c, 'persona_train_submit_failed', e);
+    await admin.rpc('fn_fail_persona', { p_persona: personaId, p_error: String(e).slice(0, 500) });
+    return fail(c, 502, 'train_failed', 'Training could not be started — credits refunded');
+  }
+
+  const { data: row } = await admin.from('personas').select('*').eq('id', personaId).single();
+  return c.json({ item: await toPersonaDto(row!), credits: await creditsOf(userId) });
 });
 
 /** Persist a locally-edited canvas as a new $0 generation version. */

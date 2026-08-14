@@ -78,7 +78,7 @@ export class ApiService {
   /** Multipart POST (file uploads) — does not set Content-Type (browser adds boundary). */
   async postForm<T>(path: string, form: FormData): Promise<T> {
     const token = await this.tokenProvider();
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { 'x-vansen-client': 'web' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const response = await this.fetch('POST', path, { headers, body: form });
     return this.handle<T>('POST', path, response);
@@ -86,7 +86,10 @@ export class ApiService {
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await this.tokenProvider();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-vansen-client': 'web',
+    };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const response = await this.fetch(method, path, {
       headers,

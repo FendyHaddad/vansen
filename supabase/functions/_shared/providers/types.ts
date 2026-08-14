@@ -9,6 +9,8 @@ export interface SubmitCtx {
   referenceUrl?: string;
   /** Base64 PNG mask for GPT edits. */
   maskPngBase64?: string;
+  /** fal-hosted LoRA weights URL for persona generations (familyId 'persona'). */
+  loraUrl?: string;
   /** sha256(user_id) — provider-side abuse attribution. */
   safetyId: string;
 }
