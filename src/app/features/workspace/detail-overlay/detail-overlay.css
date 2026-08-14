@@ -185,3 +185,32 @@
   color: var(--loss);
   border-color: color-mix(in oklch, var(--loss) 40%, var(--border));
 }
+
+.action:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+.action-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.action-spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 25%, transparent);
+  border-top-color: var(--foreground);
+  animation: do-spin 0.7s linear infinite;
+}
+
+@keyframes do-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

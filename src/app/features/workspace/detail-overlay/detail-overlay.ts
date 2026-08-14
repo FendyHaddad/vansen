@@ -30,6 +30,8 @@ import { CachedSrc } from '../../../core/media/cached-src';
 export class DetailOverlay {
   readonly item = input.required<GenerationItem>();
   readonly parent = input<GenerationItem | null>(null);
+  /** True while an action on this item is in flight — buttons disable and spin. */
+  readonly busy = input(false);
 
   readonly closed = output<void>();
   readonly download = output<string>();

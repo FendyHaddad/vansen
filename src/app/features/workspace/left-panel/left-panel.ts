@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   inject,
+  input,
   output,
   signal,
 } from '@angular/core';
@@ -116,6 +117,9 @@ export class LeftPanel {
   private readonly api = inject(ApiService);
   private readonly availability = inject(ModelAvailability);
   private readonly personaStore = inject(PersonaStore);
+
+  /** True while the parent has a generate request in flight — button spins. */
+  readonly generating = input(false);
 
   readonly generateRequested = output<GenerateRequest>();
   readonly pickReferenceRequested = output<void>();
@@ -328,7 +332,7 @@ export class LeftPanel {
   }
 
   generate(): void {
-    if (!this.canGenerate()) return;
+    if (!this.canGenerate() || this.generating()) return;
     this.generateRequested.emit({
       family: this.family(),
       settings: { ...this.settings() },

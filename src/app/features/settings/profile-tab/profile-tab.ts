@@ -29,10 +29,13 @@ export class ProfileTab {
   readonly initial = computed(() => (this.email().charAt(0) || '?').toUpperCase());
   readonly displayName = signal(this.profileStore.displayName());
   readonly saved = signal(false);
+  readonly saving = signal(false);
   readonly error = signal('');
   readonly password = signal('');
   readonly passwordSaved = signal(false);
   readonly passwordError = signal('');
+  readonly settingPassword = signal(false);
+  readonly deleting = signal(false);
 
   constructor() {
     if (!this.profileStore.loaded()) {
@@ -41,6 +44,8 @@ export class ProfileTab {
   }
 
   async save(): Promise<void> {
+    if (this.saving()) return;
+    this.saving.set(true);
     this.error.set('');
     try {
       await this.profileStore.updateDisplayName(this.displayName().trim());
@@ -48,16 +53,20 @@ export class ProfileTab {
       setTimeout(() => this.saved.set(false), 2000);
     } catch (e) {
       this.error.set(e instanceof ApiError ? e.message : 'Save failed');
+    } finally {
+      this.saving.set(false);
     }
   }
 
   async setPassword(): Promise<void> {
+    if (this.settingPassword()) return;
     this.passwordError.set('');
     const password = this.password();
     if (password.length < 8) {
       this.passwordError.set('Password must be at least 8 characters.');
       return;
     }
+    this.settingPassword.set(true);
     try {
       await this.auth.setPassword(password);
       this.password.set('');
@@ -65,13 +74,17 @@ export class ProfileTab {
       setTimeout(() => this.passwordSaved.set(false), 2000);
     } catch (e) {
       this.passwordError.set(e instanceof Error ? e.message : 'Could not set password');
+    } finally {
+      this.settingPassword.set(false);
     }
   }
 
   async deleteAccount(): Promise<void> {
+    if (this.deleting()) return;
     if (!confirm('Delete your account? Library, balance, and history are wiped. This cannot be undone.')) {
       return;
     }
+    this.deleting.set(true);
     this.error.set('');
     try {
       await this.profileStore.deleteAccount();
@@ -79,8 +92,10 @@ export class ProfileTab {
       this.ledger.reset();
       this.store.reset();
       this.router.navigate(['/']);
+      // Stay "deleting" — navigation replaces this view.
     } catch (e) {
       this.error.set(e instanceof ApiError ? e.message : 'Delete failed');
+      this.deleting.set(false);
     }
   }
 }

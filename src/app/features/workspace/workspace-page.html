@@ -20,6 +20,7 @@
 
     <div class="side-scroll" data-tour="left-panel">
       <app-left-panel
+        [generating]="generating()"
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
         (managePersonasRequested)="openPersonaManager()"
@@ -199,6 +200,7 @@
       } @else {
         <app-library-grid
           [items]="generations()"
+          [busyIds]="busyIds()"
           [pickMode]="pickingReference()"
           [samplePrompts]="samplePrompts"
           [search]="searchTerm()"
@@ -253,6 +255,7 @@
     <app-detail-overlay
       [item]="opened"
       [parent]="openedParent()"
+      [busy]="busyIds().has(opened.id)"
       (closed)="openedId.set(null)"
       (download)="onDownload($event)"
       (upscale)="onUpscale($event)"

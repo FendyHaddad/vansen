@@ -206,6 +206,20 @@
   opacity: 1;
 }
 
+/* Keep the overlay visible while an action is in flight, even without hover. */
+.qa-overlay.qa-busy {
+  opacity: 1;
+}
+
+.qa-spin {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.3);
+  border-top-color: white;
+  animation: spin 0.7s linear infinite;
+}
+
 .qa {
   display: inline-flex;
   align-items: center;
@@ -347,6 +361,9 @@
 }
 
 .failed-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 4px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -360,4 +377,18 @@
 
 .failed-retry:hover {
   border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+}
+
+.failed-retry:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.btn-spin {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 25%, transparent);
+  border-top-color: var(--foreground);
+  animation: spin 0.7s linear infinite;
 }

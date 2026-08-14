@@ -23,6 +23,7 @@ export class LoginPage {
   readonly password = signal('');
   readonly error = signal('');
   readonly busy = signal(false);
+  readonly googleBusy = signal(false);
   readonly signupDone = signal(false);
 
   readonly submitLabel = computed(() =>
@@ -36,12 +37,15 @@ export class LoginPage {
   }
 
   async signInGoogle(): Promise<void> {
+    if (this.googleBusy()) return;
+    this.googleBusy.set(true);
     this.error.set('');
     try {
       await this.auth.signInGoogle();
-      // Supabase redirects the browser; nothing else to do here.
+      // Supabase redirects the browser; stay busy until the page unloads.
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : 'Google sign-in failed');
+      this.googleBusy.set(false);
     }
   }
 

@@ -51,6 +51,21 @@
   border-top: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
 }
 
+.gen-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  animation: lp-spin 0.7s linear infinite;
+}
+
+@keyframes lp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Identical to the right-panel Studio/Pro switch. */
 .mode-toggle {
   display: grid;

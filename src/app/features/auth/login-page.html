@@ -31,9 +31,9 @@
         }}
       </p>
 
-      <button type="button" class="google-btn mt-8" (click)="signInGoogle()">
+      <button type="button" class="google-btn mt-8" [disabled]="googleBusy()" (click)="signInGoogle()">
         <img src="/logos/google.svg" alt="" class="google-logo" />
-        Continue with Google
+        {{ googleBusy() ? 'Redirecting…' : 'Continue with Google' }}
       </button>
 
       <div class="divider">

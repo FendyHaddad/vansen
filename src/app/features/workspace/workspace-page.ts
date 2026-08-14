@@ -162,6 +162,27 @@ export class WorkspacePage {
    * refuse repeat clicks, since the round trip is slow enough to look frozen. */
   readonly checkoutBusy = signal(false);
 
+  /** Item ids with an action (retry/delete/upscale/variation/download) in flight —
+   * their buttons show a spinner and ignore repeat clicks. */
+  readonly busyIds = signal<Set<string>>(new Set());
+
+  /** True while a generate request is in flight — the rail button shows progress. */
+  readonly generating = signal(false);
+
+  private async withBusy(id: string, fn: () => Promise<void>): Promise<void> {
+    if (this.busyIds().has(id)) return;
+    this.busyIds.update((s) => new Set(s).add(id));
+    try {
+      await fn();
+    } finally {
+      this.busyIds.update((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
   constructor() {
     // Deep link from the absorbed /app/edit/:id route.
     const editParam = this.route.snapshot.paramMap.get('id');
@@ -285,10 +306,12 @@ export class WorkspacePage {
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
+    if (this.generating()) return;
     // Personas are generate-only; the server routes them to its own family.
     const op = !req.personaId && (req.referenceId || req.referenceUploadId)
       ? GenerationOp.Edit
       : GenerationOp.Generate;
+    this.generating.set(true);
     try {
       await this.store.create({
         familyId: req.family.id,
@@ -307,6 +330,8 @@ export class WorkspacePage {
       this.poller.watch();
     } catch (e) {
       this.showError(e, 'Generation failed');
+    } finally {
+      this.generating.set(false);
     }
   }
 
@@ -356,81 +381,93 @@ export class WorkspacePage {
   }
 
   async onDeleted(id: string): Promise<void> {
-    try {
-      await this.store.remove(id);
-    } catch (e) {
-      this.showError(e, 'Delete failed');
-    }
-    this.openedId.set(null);
+    await this.withBusy(id, async () => {
+      try {
+        await this.store.remove(id);
+      } catch (e) {
+        this.showError(e, 'Delete failed');
+      }
+      this.openedId.set(null);
+    });
   }
 
   /** Library grid delete — one card or a multi-select batch. */
   async onDeleteMany(ids: string[]): Promise<void> {
     for (const id of ids) {
-      try {
-        await this.store.remove(id);
-      } catch (e) {
-        this.showError(e, 'Delete failed');
-        return;
-      }
+      let failed = false;
+      await this.withBusy(id, async () => {
+        try {
+          await this.store.remove(id);
+        } catch (e) {
+          this.showError(e, 'Delete failed');
+          failed = true;
+        }
+      });
+      if (failed) return;
     }
   }
 
   async onDownload(id: string): Promise<void> {
-    const item = this.store.byId(id);
-    if (!item) return;
-    // Serve from the media cache — an already-viewed image downloads free.
-    let blob: Blob;
-    try {
-      blob = await this.mediaCache.blob(item.id, item.mediaUrl);
-    } catch {
-      this.notice.set('Download failed — the media link may have expired. Reload and retry.');
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `vansen-${item.id}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    await this.withBusy(id, async () => {
+      const item = this.store.byId(id);
+      if (!item) return;
+      // Serve from the media cache — an already-viewed image downloads free.
+      let blob: Blob;
+      try {
+        blob = await this.mediaCache.blob(item.id, item.mediaUrl);
+      } catch {
+        this.notice.set('Download failed — the media link may have expired. Reload and retry.');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vansen-${item.id}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    });
   }
 
   async onUpscale(id: string): Promise<void> {
-    const item = this.store.byId(id);
-    if (!item || item.kind !== 'image') return;
-    try {
-      await this.store.create({
-        op: GenerationOp.Upscale,
-        prompt: item.prompt,
-        settings: item.settings,
-        batch: 1,
-        parentId: item.id,
-      });
-      this.notice.set('');
-      this.poller.watch();
-    } catch (e) {
-      this.showError(e, 'Upscale failed');
-    }
+    await this.withBusy(id, async () => {
+      const item = this.store.byId(id);
+      if (!item || item.kind !== 'image') return;
+      try {
+        await this.store.create({
+          op: GenerationOp.Upscale,
+          prompt: item.prompt,
+          settings: item.settings,
+          batch: 1,
+          parentId: item.id,
+        });
+        this.notice.set('');
+        this.poller.watch();
+      } catch (e) {
+        this.showError(e, 'Upscale failed');
+      }
+    });
   }
 
   async onVariation(id: string): Promise<void> {
-    const item = this.store.byId(id);
-    if (!item) return;
-    try {
-      await this.store.create({
-        familyId: item.familyId,
-        op: GenerationOp.Variation,
-        prompt: item.prompt,
-        settings: item.settings,
-        batch: 1,
-      });
-      this.notice.set('');
-      this.poller.watch();
-    } catch (e) {
-      this.showError(e, 'Variation failed');
-    }
+    await this.withBusy(id, async () => {
+      const item = this.store.byId(id);
+      if (!item) return;
+      try {
+        await this.store.create({
+          familyId: item.familyId,
+          op: GenerationOp.Variation,
+          prompt: item.prompt,
+          settings: item.settings,
+          batch: 1,
+        });
+        this.notice.set('');
+        this.poller.watch();
+      } catch (e) {
+        this.showError(e, 'Variation failed');
+      }
+    });
   }
 
   onEdit(id: string): void {
@@ -561,22 +598,24 @@ export class WorkspacePage {
 
   /** Re-submit a failed generation with the same settings. */
   async onRetry(id: string): Promise<void> {
-    const item = this.store.byId(id);
-    if (!item) return;
-    try {
-      await this.store.create({
-        familyId: item.familyId,
-        op: item.op === 'edit' || item.op === 'upscale' ? item.op : GenerationOp.Generate,
-        prompt: item.prompt,
-        settings: item.settings,
-        batch: 1,
-        parentId: item.parentId ?? undefined,
-      });
-      this.notice.set('');
-      this.poller.watch();
-    } catch (e) {
-      this.showError(e, 'Retry failed');
-    }
+    await this.withBusy(id, async () => {
+      const item = this.store.byId(id);
+      if (!item) return;
+      try {
+        await this.store.create({
+          familyId: item.familyId,
+          op: item.op === 'edit' || item.op === 'upscale' ? item.op : GenerationOp.Generate,
+          prompt: item.prompt,
+          settings: item.settings,
+          batch: 1,
+          parentId: item.parentId ?? undefined,
+        });
+        this.notice.set('');
+        this.poller.watch();
+      } catch (e) {
+        this.showError(e, 'Retry failed');
+      }
+    });
   }
 
   usePrompt(value: string): void {

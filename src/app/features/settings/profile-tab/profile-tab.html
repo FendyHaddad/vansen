@@ -30,8 +30,8 @@
           (input)="displayName.set($any($event.target).value)"
           placeholder="Your name"
         />
-        <button hlmBtn size="sm" variant="outline" (click)="save()">
-          {{ saved() ? 'Saved ✓' : 'Save' }}
+        <button hlmBtn size="sm" variant="outline" [disabled]="saving()" (click)="save()">
+          {{ saving() ? 'Saving…' : saved() ? 'Saved ✓' : 'Save' }}
         </button>
       </div>
     </div>
@@ -58,8 +58,8 @@
           (input)="password.set($any($event.target).value)"
           placeholder="New password"
         />
-        <button hlmBtn size="sm" variant="outline" (click)="setPassword()">
-          {{ passwordSaved() ? 'Saved ✓' : 'Set' }}
+        <button hlmBtn size="sm" variant="outline" [disabled]="settingPassword()" (click)="setPassword()">
+          {{ settingPassword() ? 'Setting…' : passwordSaved() ? 'Saved ✓' : 'Set' }}
         </button>
       </div>
     </div>
@@ -77,8 +77,8 @@
         </p>
       </div>
       <div class="setting-control">
-        <button hlmBtn variant="destructive" size="sm" (click)="deleteAccount()">
-          Delete account
+        <button hlmBtn variant="destructive" size="sm" [disabled]="deleting()" (click)="deleteAccount()">
+          {{ deleting() ? 'Deleting…' : 'Delete account' }}
         </button>
       </div>
     </div>

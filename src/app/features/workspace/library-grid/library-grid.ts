@@ -36,6 +36,8 @@ export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
 })
 export class LibraryGrid {
   readonly items = input.required<GenerationItem[]>();
+  /** Item ids with an action in flight — their buttons show a spinner and stay disabled. */
+  readonly busyIds = input<Set<string>>(new Set());
   readonly pickMode = input(false);
   readonly samplePrompts = input<string[]>([]);
   readonly search = input('');

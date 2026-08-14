@@ -214,13 +214,18 @@
         Not enough credits for this configuration — top up with “Add credits” in the top bar.
       </p>
     }
-    <button hlmBtn class="w-full" [disabled]="!canGenerate()" (click)="generate()">
-      <ng-icon name="lucideWandSparkles" size="16"/>
-      Generate
-      @if (batch() > 1) {
-        <span class="num">×{{ batch() }}</span>
+    <button hlmBtn class="w-full" [disabled]="!canGenerate() || generating()" (click)="generate()">
+      @if (generating()) {
+        <span class="gen-spin" role="status" aria-label="Generating"></span>
+        Generating…
+      } @else {
+        <ng-icon name="lucideWandSparkles" size="16"/>
+        Generate
+        @if (batch() > 1) {
+          <span class="num">×{{ batch() }}</span>
+        }
+        · <span class="num">{{ priceCredits() }} cr</span>
       }
-      · <span class="num">{{ priceCredits() }} cr</span>
     </button>
   </div>
 </div>

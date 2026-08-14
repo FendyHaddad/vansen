@@ -45,25 +45,36 @@
         }
 
         <div class="action-col">
-          <button type="button" class="action" (click)="download.emit(item().id)">
+          @if (busy()) {
+            <div class="action-busy" role="status">
+              <span class="action-spin"></span>
+              Working…
+            </div>
+          }
+          <button type="button" class="action" [disabled]="busy()" (click)="download.emit(item().id)">
             <ng-icon name="lucideDownload" size="15" />
             Download
           </button>
           @if (item().kind === 'image') {
-            <button type="button" class="action" (click)="upscale.emit(item().id)">
+            <button type="button" class="action" [disabled]="busy()" (click)="upscale.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
               Upscale · <span class="num">{{ upscaleCredits }} cr</span>
             </button>
-            <button type="button" class="action" (click)="variation.emit(item().id)">
+            <button type="button" class="action" [disabled]="busy()" (click)="variation.emit(item().id)">
               <ng-icon name="lucideSparkles" size="15" />
               Variation · <span class="num">{{ item().priceCredits }} cr</span>
             </button>
-            <button type="button" class="action" (click)="edit.emit(item().id)">
+            <button type="button" class="action" [disabled]="busy()" (click)="edit.emit(item().id)">
               <ng-icon name="lucidePencil" size="15" />
               Edit →
             </button>
           }
-          <button type="button" class="action action-danger" (click)="confirmDelete()">
+          <button
+            type="button"
+            class="action action-danger"
+            [disabled]="busy()"
+            (click)="confirmDelete()"
+          >
             <ng-icon name="lucideTrash2" size="15" />
             Delete
           </button>
