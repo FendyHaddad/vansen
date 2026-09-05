@@ -7,7 +7,7 @@
 /bazel-out
 
 # Node
-/node_modules
+node_modules/
 npm-debug.log
 yarn-error.log
 
@@ -64,6 +64,8 @@ supabase/.temp/
 supabase/.branches/
 supabase/functions/**/.env
 supabase/seed-secrets.sql
+# stray CLI state when running `supabase` from inside functions/
+supabase/functions/supabase/
 
 # Stripe
 stripe-webhook-secret*

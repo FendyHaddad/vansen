@@ -1,0 +1,100 @@
+/* Settings row, identical tokens to option-group — component encapsulation
+ * means those styles don't reach in here, so they are repeated. */
+.og {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.og-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.og-info {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.og-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--foreground);
+  padding: 5px 4px 5px 8px;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.og-trigger:hover {
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
+}
+
+.og-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.og-chevron {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.trend-trigger-icon {
+  color: var(--muted-foreground);
+}
+
+.trend-menu {
+  width: 300px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.trend-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: none;
+  cursor: pointer;
+}
+
+.trend-tile img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: calc(var(--radius) - 4px);
+  object-fit: cover;
+  background: var(--muted);
+}
+
+.trend-tile-name {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  text-align: center;
+  line-height: 1.2;
+}

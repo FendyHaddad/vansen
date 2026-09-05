@@ -1,0 +1,168 @@
+<div class="pm-backdrop" (click)="close()"></div>
+
+<div
+  class="pm-dialog"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pm-title"
+  (click)="$event.stopPropagation()"
+>
+  <button type="button" class="pm-close" aria-label="Close" (click)="close()">
+    <ng-icon name="lucideX" size="15"/>
+  </button>
+
+  <h2 class="pm-title" id="pm-title">My personas</h2>
+  <p class="pm-sub">{{ slots().used }} of {{ slots().max }} slots used</p>
+
+  @if (!creating()) {
+    <ul class="pm-list">
+      @for (persona of personas(); track persona.id) {
+        <li class="pm-row">
+          @if (persona.thumbUrl) {
+            <img [src]="persona.thumbUrl" [alt]="persona.name" class="pm-thumb"/>
+          } @else {
+            <span class="pm-thumb pm-thumb-blank"><ng-icon name="lucideUserRound" size="18"/></span>
+          }
+          <div class="pm-meta">
+            <span class="pm-name">{{ persona.name }}</span>
+            @switch (persona.status) {
+              @case (statuses.Training) {
+                <span class="pm-status pm-training">
+                  <ng-icon name="lucideLoaderCircle" size="12" class="pm-spin"/>
+                  Training — about 5 min
+                </span>
+              }
+              @case (statuses.Ready) {
+                <span class="pm-status pm-ready">Ready</span>
+              }
+              @case (statuses.Failed) {
+                <span class="pm-status pm-failed">Failed — credits refunded</span>
+              }
+              @default {
+                <span class="pm-status">Draft</span>
+              }
+            }
+          </div>
+          @if (persona.status === statuses.Failed) {
+            <button
+              hlmBtn
+              variant="ghost"
+              size="sm"
+              type="button"
+              [disabled]="itemBusy() !== null"
+              (click)="retry(persona.id)"
+            >
+              @if (itemBusy() === persona.id) {
+                <ng-icon name="lucideLoaderCircle" size="14" class="pm-spin"/>
+              }
+              Retry
+            </button>
+          }
+          <button
+            hlmBtn
+            variant="ghost"
+            size="sm"
+            type="button"
+            aria-label="Delete persona"
+            [disabled]="itemBusy() !== null"
+            (click)="remove(persona.id)"
+          >
+            @if (itemBusy() === persona.id && persona.status !== statuses.Failed) {
+              <ng-icon name="lucideLoaderCircle" size="14" class="pm-spin"/>
+            } @else {
+              <ng-icon name="lucideTrash2" size="14"/>
+            }
+          </button>
+        </li>
+      } @empty {
+        <li class="pm-empty">No personas yet — train one from a few photos of yourself.</li>
+      }
+    </ul>
+    <button hlmBtn class="pm-new" type="button" [disabled]="slotsFull()" (click)="startCreate()">
+      <ng-icon name="lucidePlus" size="14"/>
+      New persona
+    </button>
+    @if (slotsFull()) {
+      <p class="pm-hint">All slots used — delete a persona to free one.</p>
+    }
+  } @else {
+    <div class="pm-wizard">
+      <label class="pm-field">
+        <span>Name</span>
+        <input
+          type="text"
+          maxlength="40"
+          placeholder="Me"
+          [value]="name()"
+          (input)="name.set($any($event.target).value)"
+        />
+      </label>
+
+      <label class="pm-attest">
+        <input
+          type="checkbox"
+          [checked]="attested()"
+          (change)="attested.set($any($event.target).checked)"
+        />
+        <span>This is me, or someone who gave me permission to use their photos.</span>
+      </label>
+
+      <div class="pm-photos">
+        <p class="pm-guide">
+          {{ training.minPhotos }}–{{ training.maxPhotos }} photos of one person: clear face,
+          varied angles and lighting, no sunglasses, no other people.
+        </p>
+        <div class="pm-grid">
+          @for (photo of photos(); track photo.uploadId) {
+            <div class="pm-cell">
+              <img [src]="photo.url" alt="Persona photo"/>
+              <button
+                type="button"
+                class="pm-cell-x"
+                aria-label="Remove photo"
+                (click)="removePhoto(photo.uploadId)"
+              >
+                <ng-icon name="lucideX" size="12"/>
+              </button>
+            </div>
+          }
+          @if (photos().length < training.maxPhotos) {
+            <label class="pm-cell pm-add" [class.pm-add-busy]="uploading()">
+              @if (uploading()) {
+                <ng-icon name="lucideLoaderCircle" size="16" class="pm-spin"/>
+              } @else {
+                <ng-icon name="lucidePlus" size="16"/>
+              }
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                class="pm-file-input"
+                [disabled]="uploading()"
+                (change)="onPhotosPicked($event)"
+              />
+            </label>
+          }
+        </div>
+        <span class="pm-count">{{ photos().length }} / {{ training.maxPhotos }}</span>
+      </div>
+
+      @if (error()) {
+        <p class="pm-error">{{ error() }}</p>
+      }
+      @if (!canAfford()) {
+        <p class="pm-error">Training costs {{ training.creditCost }} credits — top up first.</p>
+      }
+
+      <footer class="pm-actions">
+        <button hlmBtn variant="ghost" type="button" (click)="cancelCreate()">Cancel</button>
+        <button hlmBtn type="button" [disabled]="!canTrain()" (click)="trainNow()">
+          @if (busy()) {
+            <ng-icon name="lucideLoaderCircle" size="14" class="pm-spin"/>
+          }
+          Train — {{ training.creditCost }} credits
+        </button>
+      </footer>
+    </div>
+  }
+</div>

@@ -1,0 +1,25 @@
+<div class="og">
+  <span class="og-label">
+    Trends
+    <app-hint text="Popular persona looks. Picking one fills the prompt — edit anything before you generate.">
+      <span class="og-info">ⓘ</span>
+    </app-hint>
+  </span>
+  <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="trendMenu" align="end">
+    <ng-icon name="lucideFlame" size="14" class="trend-trigger-icon"/>
+    <span class="og-trigger-label">Browse</span>
+    <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
+  </button>
+  <ng-template #trendMenu>
+    <div hlmDropdownMenu class="trend-menu">
+      <div class="trend-grid">
+        @for (trend of trends; track trend.id) {
+          <button type="button" hlmDropdownMenuItem class="trend-tile" (triggered)="pick(trend)">
+            <img [src]="trend.thumb" [alt]="trend.name" loading="lazy"/>
+            <span class="trend-tile-name">{{ trend.name }}</span>
+          </button>
+        }
+      </div>
+    </div>
+  </ng-template>
+</div>

@@ -1,0 +1,68 @@
+<div class="og">
+  <span class="og-label">
+    Persona
+    <app-hint
+      text="Your trained likeness. Generations run on the FLUX likeness pipeline — model choice is fixed while a persona is active."
+    >
+      <span class="og-info">ⓘ</span>
+    </app-hint>
+  </span>
+  @if (locked()) {
+    <button type="button" class="og-trigger persona-locked" (click)="manage()">
+      <ng-icon name="lucideLock" size="13"/>
+      <span class="og-trigger-label">Studio feature</span>
+    </button>
+  } @else {
+    <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="personaMenu" align="end">
+      @if (current(); as persona) {
+        <img [src]="persona.thumbUrl" [alt]="persona.name" class="persona-trigger-thumb"/>
+        <span class="og-trigger-label">{{ persona.name }}</span>
+      } @else {
+        <ng-icon name="lucideUserRound" size="14" class="persona-trigger-none"/>
+        <span class="og-trigger-label">None</span>
+      }
+      <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
+    </button>
+    <ng-template #personaMenu>
+      <div hlmDropdownMenu class="persona-menu">
+        <button
+          type="button"
+          hlmDropdownMenuItem
+          class="persona-row"
+          [class.persona-row-active]="!selected()"
+          (triggered)="select(null)"
+        >
+          <span class="persona-row-blank"><ng-icon name="lucideUserRound" size="16"/></span>
+          <span class="persona-row-name">None</span>
+        </button>
+        @for (persona of personas(); track persona.id) {
+          <button
+            type="button"
+            hlmDropdownMenuItem
+            class="persona-row"
+            [class.persona-row-active]="selected() === persona.id"
+            [disabled]="persona.status !== statuses.Ready"
+            (triggered)="persona.status === statuses.Ready && select(persona.id)"
+          >
+            @if (persona.thumbUrl) {
+              <img [src]="persona.thumbUrl" [alt]="persona.name" class="persona-row-thumb"/>
+            } @else {
+              <span class="persona-row-blank"><ng-icon name="lucideUserRound" size="16"/></span>
+            }
+            <span class="persona-row-name">{{ persona.name }}</span>
+            @if (persona.status === statuses.Training) {
+              <span class="persona-row-status">Training…</span>
+            } @else if (persona.status === statuses.Failed) {
+              <span class="persona-row-status persona-row-failed">Failed</span>
+            } @else if (persona.status === statuses.Draft) {
+              <span class="persona-row-status">Draft</span>
+            }
+          </button>
+        }
+        <button type="button" hlmDropdownMenuItem class="persona-row persona-row-manage" (triggered)="manage()">
+          <span class="persona-row-name">Manage personas…</span>
+        </button>
+      </div>
+    </ng-template>
+  }
+</div>
