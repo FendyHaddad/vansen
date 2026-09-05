@@ -64,7 +64,8 @@
   color/filter previews run on the ≤1100px proxy; slider input coalesced per frame via
   `core/editing/preview-scheduler.ts` (bokeh keeps 150ms timer). Phase-4 engine ledger:
   AI Sharpen = NAFNet deblur ONNX, MIT, 87.5MB, HF `opencv/deblurring_nafnet`
-  (dynamic HxW, RGB 0..1) — verified but NOT wired yet; Denoise (NAFNet-SIDD .pth MIT)
+  (dynamic HxW, RGB 0..1) — WIRED 2026-09-05 as Pro tool `aisharpen` via
+  `engines/deblur-engine.ts` (tile 256 + 32 overlap, pad ×16); Denoise (NAFNet-SIDD .pth MIT)
   and Colorize (DDColor tiny, Apache) have NO license-clean hosted ONNX — need offline
   export + self-hosting (see docs/superpowers/plans/2026-07-11-phase4-model-notes.md).
   GFPGAN / CodeFormer / MODNet weights / face-parsing CelebA weights = banned (NC).

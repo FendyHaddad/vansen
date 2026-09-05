@@ -18,3 +18,11 @@ export const upscaleTileProgress = signal<number | null>(null);
  * tiling keeps inference memory flat, the output buffer is the ceiling.
  * Lives here (not in upscale-engine) so the UI can read it eagerly. */
 export const MAX_UPSCALE_PIXELS = 4096 * 4096;
+
+export const deblurModelProgress = signal<number | null>(null);
+
+/** 0..1 across AI Sharpen (NAFNet) tiles while inference runs, null otherwise. */
+export const deblurTileProgress = signal<number | null>(null);
+
+/** Largest input AI Sharpen attempts (same-size output, tiled). */
+export const MAX_DEBLUR_PIXELS = 4096 * 4096;

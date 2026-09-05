@@ -51,6 +51,9 @@ Adding a new model MUST be a DB row + config only, zero new code.
 - Provider calls our webhook Edge Function on completion/failure.
 - Webhook updates the `jobs` row; Supabase Realtime pushes update to Angular client.
 - Frontend subscribes to its own jobs via Realtime — no client-side polling loops.
+- **As built (2026-07):** the client polls `GET /jobs` (`job-poller.ts`) instead of
+  Realtime — deliberate simplification, see `CLAUDE.md`. Spec intent above kept for
+  reference.
 - Handle timeouts: job with no webhook after N minutes marked failed by scheduled
   function.
 
@@ -72,7 +75,8 @@ Adding a new model MUST be a DB row + config only, zero new code.
 
 **Cost → Price → Profit calculator (built — internal admin tool).**
 
-Lives at route `/admin/pricing` (Angular). Derives credits-per-model from provider cost,
+Lived at Angular route `/admin/pricing`; moved 2026-07-12 to the separate
+`vankode-backoffice` repo (reads Vansen through its own service key). Derives credits-per-model from provider cost,
 target net margin, and amortized Stripe overhead — so we see per-model where we make or
 lose money before setting credit prices.
 
@@ -117,21 +121,25 @@ stub with a ledger (`core/ledger/ledger-service.ts`) that mirrors the future
 - Stripe webhooks → Edge Function → `credit_ledger` top-up entries.
 - Subscription renewal and cancellation reflected in ledger.
 
-**Subscription tiers (decided):**
+**Subscription plans (repriced 2026-07-13, spec
+`docs/superpowers/specs/2026-07-13-credit-subscription-pricing-design.md`):**
 
-| Tier | Price | Credits/mo | Video generation |
+| Plan | Price | Credits/cycle | Video generation |
 | --- | --- | --- | --- |
-| Tier 1 | $15/mo | 200 credits | Not allowed — image models only |
-| Tier 2 | $30/mo | 500 credits | Allowed |
+| Studio | $15/mo | 1,500 | Not allowed — image models + full editing suite |
+| Pro | $30/mo | 3,750 | Allowed (Phase 4b, still locked) |
+| Owner | internal, hidden | unlimited (plan bypass, ledger still written) | Pro access |
 
-- Tier gate enforced server-side, not client-side: dispatch Edge Function checks caller's
-  active subscription tier against `models.kind` (image vs video) before submitting job.
-  Tier 1 subscriber attempting a video model job → rejected before reserve entry written.
-- `subscriptions` table tracks user's active tier (`tier_1` / `tier_2`), Stripe
-  subscription id, status, current period end.
-- One-time credit packs remain independent of subscription tier and do not unlock video
-  access by themselves — video access is a Tier 2 subscription gate, not a credit-balance
-  gate.
+- 1 credit = $0.01 Studio retail. Charge = `ceil(providerCost / (1 − 0.40) × 100) × batch`;
+  AI edit tools fixed (Remove/Fill/Expand 10 cr, Remove BG 5 cr, Upscale 7 cr); local
+  tools free. Launch promo: first 2 cycles $10 / $25 with full credit grant.
+- Two ledger buckets: `plan` (reset to grant each cycle, spent first) and `pack`
+  (add-on packs $10/25/50/100 with 0/5/8/10 % bonus, roll over while subscribed, die 30
+  days after lapse). Refunds return to the bucket drawn from. Non-subscribers browse only.
+- Plan gate enforced server-side (`modelGate()` checks `models.min_plan` against the
+  caller's active plan before any charge). `subscriptions.plan` ∈ `studio | pro | owner`.
+- iOS non-US/EU storefronts sell through Apple IAP (Lane B, ~+15 % price sheet); see
+  Status 2026-07-19.
 
 ### 6. Library
 
@@ -223,7 +231,89 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
   spartan already provides; copy them in, style via Tailwind + CSS variables.
 
-## Status (2026-07-09)
+## Status (2026-09-05)
+
+Deployed: `api` v41 (2026-08-14, in sync with backend HEAD), `stripe-webhook` v12,
+`appstore-webhook` v2. Gates green: `ng build` clean, 197 vitest + 19 deno tests. Recent
+commits (07-24 → 09-05) are UI/auth fixes only: left panel, auth flow, buttons, misc.
+
+**Open items (carry-forward):**
+- Stripe still TEST mode; live keys flip once bank authorization clears.
+- Trend thumbnails not generated (`scripts/gen-trend-thumbs.mjs`, ~$0.50 OpenAI);
+  `public/trends/` missing so trend tiles render alt text.
+- Persona live smoke never run (~$2.30 fal); analytics manual smoke pending
+  (`docs/superpowers/punchlist.md`).
+- Leaked-password protection waits on Supabase Pro upgrade.
+- Not started: i18n (en + ms), session cap / account-sharing heuristics, dispatch rate
+  limit, daily spend alarm, CI. Video = Phase 4b locked teaser. Denoise / Colorize need
+  offline ONNX export + self-host.
+- Legal pages are AI-drafted; attorney review (Malaysia + EU/US) outstanding.
+
+**AI Sharpen shipped (2026-09-05)** (spec `docs/superpowers/specs/2026-09-05-ai-sharpen-design.md`):
+Pro rail tool `aisharpen` → `core/editing/engines/deblur-engine.ts`, NAFNet GoPro deblur ONNX
+(OpenCV zoo, MIT, ~88 MB first-use download into the shared `vansen-models` cache). Tiled
+256 px core + 32 px overlap, edge-padded to multiples of 16, WebGPU with `saneTile` hot-swap
+to wasm, same 16 MP ceiling as Upscale. Same-size output, alpha copied through. Free,
+on-device, no credits.
+
+**Style presets, avatar personas, trends, client analytics shipped (2026-07-24)**
+(specs: `2026-07-24-style-presets-design.md`, `2026-07-24-avatar-persona-design.md`;
+migrations 0013–0015): 20 style presets (`src/app/core/catalog/style-presets.ts` →
+`_shared/style-presets.ts` via `sync-shared`, drift-guarded); server appends the style
+modifier before moderation, stored prompt stays clean, thumbs in `public/styles`.
+Personas = trained FLUX LoRA on fal (5–20 photos, fixed 350 cr, Studio 2 / Pro 5 slots,
+self-attested consent); `GET/POST/DELETE /personas`, `POST /personas/:id/train`,
+hidden `persona` family routes generation through fal flux-lora with trigger word
+injected server-side. 12 curated trends (`trend-presets.ts`) prefill the prompt box.
+Analytics: `x-vansen-client` header → `client` column on generations / personas /
+app_errors, `POST /errors` logs client errors, `backoffice_feature_usage(p_days)` RPC
+feeds the backoffice feature page.
+
+**Mobile lane — FCM push + iOS IAP shipped (2026-07-18/19)** (migrations 0011, 0012):
+`POST/DELETE /devices` stores FCM tokens; `_shared/push.ts` (HTTP v1, service-account
+JWT) pushes `generation_done | generation_failed` on job settle. `GET /billing/lane`:
+Android + US/EU iOS = Lane A (web Stripe), other iOS storefronts = Lane B (IAP) when
+enabled, else C. IAP: `_shared/iap-products.ts` price sheet (+~15 % over web, credit
+grants identical, guarded by test), `POST /iap/verify`, `appstore-webhook` = ASSNv2
+consumer and sole `iap` ledger writer (Apple JWS x5c chain verify, `webhook_events`
+dedupe on notificationUUID + `iaptx:` marker shared with verify, `fn_iap_clawback` on
+refund, `subscriptions.iap_original_transaction_id`). Mobile deep-link return targets for
+Stripe checkout. Flutter client lives in a separate repo (`~/StudioProjects/Vansen-mobile`).
+
+**Age gate + legal pages shipped (2026-07-17)** (specs `2026-07-17-age-gate-design.md`,
+`2026-07-17-legal-pages-design.md`; migration 0008_age_gate; `api` v29): global 18+,
+neutral date-of-birth screen at `/onboarding` after any login (covers Google OAuth),
+`POST /profile/age` stores `birth_date`; under-18 → two-step confirm → account deleted +
+signed out. `ageGuard` / `onboardingGuard` protect `/app`. Legal: `/legal/terms`,
+`/legal/privacy`, `/legal/acceptable-use`, footer links, clickwrap notice at sign-in.
+Entity Vankode Technology (Malaysia), governing law Malaysia, contact support@vankode.com,
+all sales final.
+
+**Credit-based repricing, owner tier, notifications, onboarding tour (2026-07-13 →
+07-15)** (specs `2026-07-13-credit-subscription-pricing-design.md`,
+`2026-07-13-owner-tier-lock-pass-design.md`,
+`2026-07-13-notifications-and-onboarding-design.md`; migrations 0007, 0008_credit_plans,
+0009, 0010): supersedes the $15 first-purchase model — see Billing §5 for the plan table,
+credit formula and two-bucket ledger. Billing routes: `/billing/subscribe | pack |
+change-plan (pending_plan_change) | cancel (cancel_reason) | resume | portal | overview |
+lane | reconcile`. Owner plan = hidden, unlimited via plan bypass in
+`fn_charge_and_generate` (charge rows still written, balance goes negative by design);
+granted from the backoffice. Pro lock pass: Pro-preview tools gated to `pro | owner`,
+locked teaser otherwise. Notification center (bell, unread badge, toast; refund /
+ready / moderation-blocked events, device-local) and spotlight onboarding tour
+(auto-runs first workspace load, replayable). Backoffice split out 2026-07-12 into
+`vankode-backoffice` (own service key; `/admin/*` routes and `backoffice-api` function
+dropped from Vansen); `app_errors` surface there as notifications.
+
+**Studio & Pro tools expansion shipped (2026-07-11)** (spec
+`2026-07-11-studio-pro-tools-expansion-design.md`): 17 filter presets, Dehaze,
+Portrait Smooth, Magic Erase (SlimSAM → dilate → MI-GAN); heal moved from OpenCV Telea to
+MI-GAN inpainting (28 MB ONNX, lazy). Pro tools: enhance / levels / clone / retouch /
+perspective (pure ops) + ONNX engines Cut Out (ISNet fp16), Bokeh (Depth Anything V2
+small), Upscale 2× (Swin2SR), Smart Select (SlimSAM-77), all through shared
+`model-loader.ts` and Cache Storage `vansen-models`. Perf: colour/filter previews on the
+≤1100 px proxy, slider input coalesced per frame (`preview-scheduler.ts`). License policy
+enforced (RMBG, AGPL ISNet mirror, GFPGAN, CodeFormer, MODNet banned).
 
 **Phase 3b — Studio editing panel shipped** (spec: `docs/superpowers/specs/2026-07-09-studio-editing-panel-design.md`):
 Photoshop-lite editing inside the workspace: clicking Edit swaps the library grid for a
@@ -247,8 +337,8 @@ switch shows Pro locked. Video generation moved to Phase 4b.
 Real image generation for all four image families through provider adapters
 (`supabase/functions/_shared/providers/`): GPT Image generate + edits (OpenAI, inline),
 Seedream + FLUX + clarity upscaler (fal queue, polled via `GET /jobs`), Nano Banana
-(Google Gemini, inline — blocked until the Google AI key gets billing; free tier has
-zero image quota). Generations insert `pending`, jobs dispatch, outputs land in the
+(Google Gemini, inline; `fast|default|pro` → gemini-2.5-flash-image / gemini-3.1-flash-image /
+gemini-3-pro-image — the 2026-08 free-tier 429s are resolved, Nano Banana Pro generates fine). Generations insert `pending`, jobs dispatch, outputs land in the
 private `media` bucket with 7-day signed URLs (direct bucket access rejected — verified).
 Failures refund exactly once via `fn_fail_job` (`ledger_refund_once` unique index,
 verified live); stale jobs sweep every 5 min. Safety: OpenAI omni-moderation gates every

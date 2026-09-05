@@ -655,6 +655,44 @@
       </button>
     </div>
   }
+  @case ('aisharpen') {
+    <div class="opts">
+      <p class="opt-hint">
+        Fixes motion and lens blur with NAFNet — a real deblur model, not an unsharp
+        mask. Runs on your device, free.
+      </p>
+      @if (enginePct() !== null) {
+        <p class="opt-hint">
+          Preparing engine — one-time download (~88 MB),
+          <span class="num">{{ enginePct() }}%</span>
+        </p>
+      }
+      @if (deblurPct() !== null) {
+        <p class="opt-hint">
+          Sharpening —
+          <span class="num">{{ deblurPct() }}%</span>
+        </p>
+      }
+      @if (engineError()) {
+        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      }
+      @if (deblurTooLarge()) {
+        <p class="opt-hint">Image too large for on-device sharpening — the limit is 16 MP (4096×4096).</p>
+      } @else if (imageSize(); as s) {
+        @if (s.w * s.h > 4000000) {
+          <p class="opt-hint">Big image — this can take a few minutes on-device.</p>
+        }
+      }
+      <button
+        type="button"
+        class="apply-btn"
+        [disabled]="engineBusy() || deblurTooLarge()"
+        (click)="runAiSharpen()"
+      >
+        {{ engineBusy() ? 'Working…' : 'Sharpen with AI' }}
+      </button>
+    </div>
+  }
   @case ('select') {
     <div class="opts">
       @if (enginePct() !== null) {

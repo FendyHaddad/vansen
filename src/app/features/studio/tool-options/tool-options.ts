@@ -15,11 +15,13 @@ import {
 } from '@angular/core';
 import { EDIT_TOOLS } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
-import { MAX_UPSCALE_PIXELS } from '../../../core/editing/engines/engine-status';
+import { MAX_DEBLUR_PIXELS, MAX_UPSCALE_PIXELS } from '../../../core/editing/engines/engine-status';
 // Type-only: a value import would drag onnxruntime into the eager bundle.
 import type { SelectPoint } from '../../../core/editing/engines/select-engine';
 import {
   cutoutModelProgress,
+  deblurModelProgress,
+  deblurTileProgress,
   depthModelProgress,
   samModelProgress,
   upscaleModelProgress,
@@ -167,6 +169,7 @@ export class ToolOptions {
       cutoutModelProgress() ??
       depthModelProgress() ??
       upscaleModelProgress() ??
+      deblurModelProgress() ??
       samModelProgress();
     return p === null ? null : Math.round(p * 100);
   });
@@ -184,6 +187,15 @@ export class ToolOptions {
   readonly upscaleTooLarge = computed(() => {
     const s = this.imageSize();
     return !!s && s.w * s.h > MAX_UPSCALE_PIXELS;
+  });
+  /** AI Sharpen inference progress %, null when idle. */
+  readonly deblurPct = computed(() => {
+    const p = deblurTileProgress();
+    return p === null ? null : Math.round(p * 100);
+  });
+  readonly deblurTooLarge = computed(() => {
+    const s = this.imageSize();
+    return !!s && s.w * s.h > MAX_DEBLUR_PIXELS;
   });
 
   private bokehToken = 0;
@@ -484,6 +496,14 @@ export class ToolOptions {
     });
   }
 
+  /** AI Sharpen: tiled NAFNet deblur, on-device. */
+  async runAiSharpen(): Promise<void> {
+    await this.runEngine(async () => {
+      const { deblur } = await import('../../../core/editing/engines/deblur-engine');
+      await this.session.applyEngine(deblur);
+    });
+  }
+
   /** Magic Erase: tap an object → SAM mask → grow → MI-GAN inpaint it away. */
   private async runErase(point: SelectPoint): Promise<void> {
     await this.runEngine(async () => {
@@ -626,7 +646,7 @@ export class ToolOptions {
       const msg = e instanceof Error ? e.message : '';
       this.engineError.set(
         msg === 'too_large'
-          ? 'Image too large for on-device upscaling — the limit is 16 MP (4096×4096).'
+          ? 'Image too large for on-device processing — the limit is 16 MP (4096×4096).'
           : /fetch|network/i.test(msg) || !msg
             ? 'Engine failed to load — check your connection and try again.'
             : `Engine error: ${msg}`,

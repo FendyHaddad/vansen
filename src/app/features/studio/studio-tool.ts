@@ -19,7 +19,8 @@ export type StudioTool =
   | 'select'
   | 'dehaze'
   | 'portraitsmooth'
-  | 'erase';
+  | 'erase'
+  | 'aisharpen';
 
 /** Tools that own the left-click/drag gesture on the canvas (no click-drag
  * panning) — brushes plus the point-pick tools. */

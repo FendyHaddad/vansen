@@ -20,6 +20,7 @@ import {
   lucideDownload,
   lucideEclipse,
   lucideEraser,
+  lucideFocus,
   lucideImageOff,
   lucideLock,
   lucideMaximize2,
@@ -71,6 +72,7 @@ const LOCAL_TOOLS: LocalToolDef[] = [
 const PRO_TOOLS: LocalToolDef[] = [
   { id: 'select', label: 'Ai Select', icon: 'lucideMousePointerClick' },
   { id: 'upscale', label: 'Ai Upscale', icon: 'lucideMaximize2' },
+  { id: 'aisharpen', label: 'Ai Sharpen', icon: 'lucideFocus' },
   { id: 'bgremove', label: 'Cut Out', icon: 'lucideImageOff' },
   { id: 'bokeh', label: 'Bokeh', icon: 'lucideAperture' },
   { id: 'enhance', label: 'Enhance', icon: 'lucideSun' },
@@ -106,7 +108,7 @@ const PLAN_PITCH: Record<'studio' | 'pro', PlanPitch> = {
     sub: 'Everything in Studio, plus the Pro tools and video generation.',
     perks: [
       'Everything in Studio',
-      'Cut Out, Bokeh, Upscale, Magic Erase — free',
+      'Cut Out, Bokeh, Upscale, AI Sharpen, Magic Erase — free',
       'Video models — Pro only',
       `${PLAN_CREDITS.pro.toLocaleString()} credits every month — 25% more per dollar`,
     ],
@@ -146,6 +148,7 @@ const EXPORT_FORMATS: ExportFormat[] = [
       lucideDownload,
       lucideEclipse,
       lucideEraser,
+      lucideFocus,
       lucideImageOff,
       lucideLock,
       lucideMaximize2,
