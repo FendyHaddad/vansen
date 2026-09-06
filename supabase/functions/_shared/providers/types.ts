@@ -1,4 +1,8 @@
 // Provider adapter contract. Server-only (not synced from Angular).
+import type { VideoMode } from '../model-families.ts';
+
+export type ProviderName = 'google' | 'openai' | 'fal' | 'runway';
+export type JobPhase = 'queued' | 'rendering';
 
 export interface SubmitCtx {
   familyId: string;
@@ -13,18 +17,48 @@ export interface SubmitCtx {
   loraUrl?: string;
   /** sha256(user_id) — provider-side abuse attribution. */
   safetyId: string;
+  /** Video only. */
+  mode?: VideoMode;
+  /** Signed URLs (1 h). ref2v: 1–3 refs; keyframes: [first, last]. */
+  referenceUrls?: string[];
+  /** Signed URL of the parent video for extend/edit. */
+  parentVideoUrl?: string;
+  /** Omni conversation id for extend/edit. */
+  interactionId?: string;
 }
 
 export type CheckResult =
-  | { state: 'running' }
+  | { state: 'running'; progress?: number; phase?: JobPhase; queuePosition?: number }
   | { state: 'done'; bytes: Uint8Array; contentType: string }
+  | {
+      state: 'done';
+      url: string;
+      headers?: Record<string, string>;
+      contentType: string;
+      durationS?: number;
+      width?: number;
+      height?: number;
+    }
   | { state: 'failed'; error: string };
 
+export interface SubmitResult {
+  providerRef: string;
+  inline?: CheckResult;
+  /** Omni only: conversation id persisted into generation settings. */
+  interactionId?: string;
+}
+
 export interface ProviderAdapter {
-  readonly provider: 'google' | 'openai' | 'fal';
+  readonly provider: ProviderName;
   /** Start async work. May return an inline result when the provider answers synchronously. */
-  submit(ctx: SubmitCtx): Promise<{ providerRef: string; inline?: CheckResult }>;
+  submit(ctx: SubmitCtx): Promise<SubmitResult>;
   check(providerRef: string): Promise<CheckResult>;
+  /** Optional. Providers that cannot cancel omit it (Veo, Omni). */
+  cancel?(providerRef: string): Promise<void>;
+}
+
+export function isUrlResult(r: CheckResult): r is Extract<CheckResult, { url: string }> {
+  return r.state === 'done' && 'url' in r;
 }
 
 export async function fetchBytes(url: string, init?: RequestInit): Promise<{ bytes: Uint8Array; contentType: string }> {

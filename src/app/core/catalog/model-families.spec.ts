@@ -8,6 +8,7 @@ import {
   PERSONA_TRAINING,
   PLAN_CREDITS,
   STUDIO_MARGIN,
+  VIDEO_DAILY_CAP_USD,
   creditCost,
   defaultSettings,
   editToolById,
@@ -15,6 +16,7 @@ import {
   packCredits,
   personaGenCreditCost,
   upscaleCreditCost,
+  videoFamilySupports,
 } from './model-families';
 
 describe('model families', () => {
@@ -107,6 +109,55 @@ describe('model families', () => {
         for (const o of opts ?? []) expect(o.tooltip.length).toBeGreaterThan(10);
       }
     }
+  });
+
+  it('ships the five spec video families and no sora', () => {
+    const ids = MODEL_FAMILIES.filter((f) => f.kind === 'video').map((f) => f.id);
+    expect(ids).toEqual(['veo', 'omni', 'kling', 'runway', 'seedance']);
+    expect(familyById('sora')).toBeUndefined();
+  });
+
+  it('every video family declares audio, modes and expectedSPerS', () => {
+    for (const f of MODEL_FAMILIES.filter((f) => f.kind === 'video')) {
+      expect(['included', 'none', 'selectable']).toContain(f.capabilities.audio);
+      expect(f.capabilities.modes?.length).toBeGreaterThan(0);
+      expect(f.capabilities.expectedSPerS).toBeGreaterThan(0);
+      expect(f.capabilities.aspectRatios).toEqual(['16:9', '9:16', '1:1']);
+    }
+  });
+
+  it('videoFamilySupports reads capabilities.modes', () => {
+    expect(videoFamilySupports(familyById('runway')!, 't2v')).toBe(true);
+    expect(videoFamilySupports(familyById('runway')!, 'extend')).toBe(false);
+    expect(videoFamilySupports(familyById('omni')!, 'edit')).toBe(true);
+    expect(videoFamilySupports(familyById('flux')!, 't2v')).toBe(false);
+  });
+
+  it('video pricing matches the spec table', () => {
+    const veo = familyById('veo')!;
+    expect(veo.providerCost({ aspectRatio: '16:9', version: 'standard', resolution: '1080p', durationS: 8 })).toBeCloseTo(3.2);
+    expect(veo.providerCost({ aspectRatio: '16:9', version: 'standard', resolution: '4K', durationS: 8 })).toBeCloseTo(4.8);
+    expect(veo.providerCost({ aspectRatio: '16:9', version: 'fast', resolution: '720p', durationS: 4 })).toBeCloseTo(0.4);
+    expect(veo.providerCost({ aspectRatio: '16:9', version: 'fast', resolution: '4K', durationS: 4 })).toBeCloseTo(1.2);
+    expect(veo.providerCost({ aspectRatio: '16:9', version: 'lite', resolution: '1080p', durationS: 4 })).toBeCloseTo(0.32);
+    const omni = familyById('omni')!;
+    expect(omni.providerCost({ aspectRatio: '16:9', resolution: '4K', durationS: 10 })).toBeCloseTo(3.0);
+    const kling = familyById('kling')!;
+    expect(kling.providerCost({ aspectRatio: '16:9', durationS: 5, audio: 'off' })).toBeCloseTo(0.56);
+    expect(kling.providerCost({ aspectRatio: '16:9', durationS: 5, audio: 'voice' })).toBeCloseTo(0.98);
+    expect(familyById('runway')!.providerCost({ aspectRatio: '16:9', durationS: 10 })).toBeCloseTo(1.2);
+    expect(familyById('seedance')!.providerCost({ aspectRatio: '16:9', resolution: '480p', durationS: 5 })).toBeCloseTo(1.1025);
+  });
+
+  it('defaultSettings sets mode t2v for video and audio off when selectable', () => {
+    expect(defaultSettings(familyById('kling')!)).toMatchObject({ mode: 't2v', audio: 'off', durationS: 5 });
+    expect(defaultSettings(familyById('veo')!).audio).toBeUndefined();
+    expect(defaultSettings(familyById('veo')!).mode).toBe('t2v');
+    expect(defaultSettings(familyById('flux')!).mode).toBeUndefined();
+  });
+
+  it('exposes the daily video spend cap', () => {
+    expect(VIDEO_DAILY_CAP_USD).toBe(40);
   });
 });
 

@@ -22,7 +22,7 @@ import {
 } from '@ng-icons/lucide';
 import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
-import { GenerationStore } from '../../core/generations/generation-store';
+import { GenerationStore, type GenerationItem } from '../../core/generations/generation-store';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
 import { BillingService } from '../../core/billing/billing-service';
@@ -42,6 +42,7 @@ import { NotificationStore } from '../../core/notifications/notification-store';
 import { TourService } from '../../core/tour/tour-service';
 import { TourOverlay } from '../../shared/tour-overlay/tour-overlay';
 import { LeftPanel, GenerateRequest } from './left-panel/left-panel';
+import { RenderingChip } from './rendering-chip/rendering-chip';
 import { LibraryGrid } from './library-grid/library-grid';
 import { DetailOverlay } from './detail-overlay/detail-overlay';
 import { CanvasViewport } from '../studio/canvas-viewport/canvas-viewport';
@@ -49,6 +50,7 @@ import { RightPanel } from '../studio/right-panel/right-panel';
 import { PlanChangeDialog } from '../studio/plan-change-dialog/plan-change-dialog';
 import { CreditPacksDialog } from './credit-packs-dialog/credit-packs-dialog';
 import { PersonaManager } from './persona-manager/persona-manager';
+import { VideoPickerDialog } from './video-picker-dialog/video-picker-dialog';
 import { PersonaStore } from '../../core/personas/persona-store';
 
 const SAMPLE_PROMPTS = [
@@ -56,6 +58,22 @@ const SAMPLE_PROMPTS = [
   'Product shot of a perfume bottle on black marble, studio light',
   'Isometric cutaway of a cozy cabin in a snowstorm',
 ];
+
+/** Synchronous video-submit / cancel error codes → verbatim notice copy. */
+const VIDEO_ERROR_COPY: Record<string, string> = {
+  provider_blocked: 'Provider declined this prompt. Credits refunded.',
+  too_many_jobs: '3 videos are still rendering — wait for one to finish',
+  unsupported_mode: "This model can't do that mode.",
+  bad_parent: 'Pick a finished video to extend or edit.',
+  not_cancellable: "This model can't be cancelled once started.",
+  bad_reference_count: 'Add the reference images this mode needs.',
+};
+
+async function fetchBlob(url: string): Promise<Blob> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
+  return res.blob();
+}
 
 @Component({
   selector: 'app-workspace-page',
@@ -69,6 +87,7 @@ const SAMPLE_PROMPTS = [
     ProfileMenu,
     NotificationBell,
     NotificationToast,
+    RenderingChip,
     TourOverlay,
     LeftPanel,
     LibraryGrid,
@@ -78,6 +97,7 @@ const SAMPLE_PROMPTS = [
     PlanChangeDialog,
     CreditPacksDialog,
     PersonaManager,
+    VideoPickerDialog,
   ],
   providers: [
     provideIcons({
@@ -130,6 +150,7 @@ export class WorkspacePage {
   readonly studioActive = this.profileStore.studioActive;
   readonly graceDaysLeft = this.profileStore.graceDaysLeft;
   readonly generations = this.store.items;
+  readonly pendingVideoCount = this.store.pendingVideoCount;
   readonly samplePrompts = SAMPLE_PROMPTS;
 
   /** True while the user is choosing a library item as edit reference. */
@@ -169,6 +190,9 @@ export class WorkspacePage {
   /** True while a generate request is in flight — the rail button shows progress. */
   readonly generating = signal(false);
 
+  /** Captured once at construction, before the title effect ever touches it. */
+  private readonly baseTitle = document.title;
+
   private async withBusy(id: string, fn: () => Promise<void>): Promise<void> {
     if (this.busyIds().has(id)) return;
     this.busyIds.update((s) => new Set(s).add(id));
@@ -191,6 +215,15 @@ export class WorkspacePage {
       this.poller.watch();
       if (editParam) void this.enterEdit(editParam);
       else if (!this.resumeCheckoutIntent()) this.maybeStartTour();
+    });
+
+    // Tab title reflects pending video renders while any are in flight.
+    effect((onCleanup) => {
+      const n = this.pendingVideoCount();
+      document.title = n > 0 ? `(${n}) Rendering… · ${this.baseTitle}` : this.baseTitle;
+      onCleanup(() => {
+        document.title = this.baseTitle;
+      });
     });
 
     // When an AI edit on the open session's chain completes, jump to the result.
@@ -267,50 +300,63 @@ export class WorkspacePage {
   }
 
   private showError(e: unknown, fallback: string): void {
-    if (e instanceof ApiError) {
-      if (e.code === 'insufficient_credits') {
-        this.notice.set('Not enough credits — top up with “Add credits” in the top bar.');
-        return;
-      }
-      if (e.code === 'subscription_required') {
-        this.notice.set('An active subscription is required — pick a plan to start creating.');
-        return;
-      }
-      if (e.code === 'pro_required') {
-        this.notice.set('That model needs the Pro plan — upgrade from Settings → Subscription.');
-        return;
-      }
-      if (e.code === 'account_suspended') {
-        this.suspended.set(true);
-        return;
-      }
-      if (e.code === 'content_policy') {
-        this.notice.set(
-          'This request violates our content policy and was blocked. Two violations suspend your account. If this was a mistake, contact support to appeal.',
-        );
-        this.notifications.add({
-          kind: 'blocked',
-          title: 'Blocked by moderation',
-          detail: 'The request violated the content policy — nothing was charged.',
-        });
-        return;
-      }
-      if (e.code === 'model_disabled') {
-        this.notice.set('That model is temporarily unavailable. Try another.');
-        return;
-      }
-      this.notice.set(e.message);
+    if (!(e instanceof ApiError)) {
+      this.notice.set(fallback);
       return;
     }
-    this.notice.set(fallback);
+    if (e.code === 'insufficient_credits') {
+      this.notice.set('Not enough credits — top up with “Add credits” in the top bar.');
+      return;
+    }
+    if (e.code === 'subscription_required') {
+      this.notice.set('An active subscription is required — pick a plan to start creating.');
+      return;
+    }
+    if (e.code === 'pro_required') {
+      this.notice.set('That model needs the Pro plan — upgrade from Settings → Subscription.');
+      return;
+    }
+    if (e.code === 'account_suspended') {
+      this.suspended.set(true);
+      return;
+    }
+    if (e.code === 'content_policy') {
+      this.notice.set(
+        'This request violates our content policy and was blocked. Two violations suspend your account. If this was a mistake, contact support to appeal.',
+      );
+      this.notifications.add({
+        kind: 'blocked',
+        title: 'Blocked by moderation',
+        detail: 'The request violated the content policy — nothing was charged.',
+      });
+      return;
+    }
+    if (e.code === 'model_disabled') {
+      this.notice.set('That model is temporarily unavailable. Try another.');
+      return;
+    }
+    if (e.code === 'daily_cap') {
+      const parsed = Date.parse(String(e.details['resetsAt'] ?? ''));
+      const h = Number.isFinite(parsed) ? Math.max(1, Math.ceil((parsed - Date.now()) / 3_600_000)) : 24;
+      this.notice.set(`Daily video limit reached, resets in ${h}h`);
+      return;
+    }
+    if (VIDEO_ERROR_COPY[e.code]) {
+      this.notice.set(VIDEO_ERROR_COPY[e.code]);
+      return;
+    }
+    this.notice.set(e.message);
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
     if (this.generating()) return;
     // Personas are generate-only; the server routes them to its own family.
-    const op = !req.personaId && (req.referenceId || req.referenceUploadId)
-      ? GenerationOp.Edit
-      : GenerationOp.Generate;
+    // Video never becomes an Edit op — its modes live in settings.mode instead.
+    const isImageEdit =
+      req.settings.mode === undefined &&
+      !!(req.referenceId || req.referenceUploadId) &&
+      !req.personaId;
+    const op = isImageEdit ? GenerationOp.Edit : GenerationOp.Generate;
     this.generating.set(true);
     try {
       await this.store.create({
@@ -322,8 +368,9 @@ export class WorkspacePage {
         trendId: req.trendId ?? undefined,
         settings: req.settings,
         batch: req.batch,
-        parentId: req.referenceId ?? undefined,
+        parentId: req.videoParentId ?? req.referenceId ?? undefined,
         referenceUploadId: req.referenceUploadId ?? undefined,
+        referencePaths: req.referencePaths,
       });
       this.rail().setReference(null);
       this.notice.set('');
@@ -337,6 +384,21 @@ export class WorkspacePage {
 
   startReferencePick(): void {
     this.pickingReference.set(true);
+  }
+
+  /** Video parent picker (extend / edit modes). */
+  readonly videoPickerOpen = signal(false);
+
+  onVideoPicked(item: GenerationItem): void {
+    this.rail().setVideoParent(item);
+    this.videoPickerOpen.set(false);
+  }
+
+  /** Extend / Edit → from the detail overlay: hand the clip to the left panel
+   * as a video follow-up and close the overlay. */
+  onVideoFollowUp(item: GenerationItem, mode: 'extend' | 'edit'): void {
+    this.openedId.set(null);
+    this.rail().startVideoFollowUp(item, mode);
   }
 
   readonly personaManagerOpen = signal(false);
@@ -411,10 +473,14 @@ export class WorkspacePage {
     await this.withBusy(id, async () => {
       const item = this.store.byId(id);
       if (!item) return;
-      // Serve from the media cache — an already-viewed image downloads free.
+      // Images serve from the media cache — an already-viewed image downloads
+      // free. Videos stream straight through: multi-MB clips have no business
+      // in Cache Storage.
       let blob: Blob;
       try {
-        blob = await this.mediaCache.blob(item.id, item.mediaUrl);
+        blob = item.kind === 'video'
+          ? await fetchBlob(item.mediaUrl)
+          : await this.mediaCache.blob(item.id, item.mediaUrl);
       } catch {
         this.notice.set('Download failed — the media link may have expired. Reload and retry.');
         return;
@@ -422,7 +488,7 @@ export class WorkspacePage {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `vansen-${item.id}.jpg`;
+      a.download = `vansen-${item.id}.${item.kind === 'video' ? 'mp4' : 'jpg'}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -616,6 +682,16 @@ export class WorkspacePage {
         this.showError(e, 'Retry failed');
       }
     });
+  }
+
+  /** Cancel a still-rendering video job from its pending card. */
+  async onCancel(id: string): Promise<void> {
+    try {
+      const refunded = await this.store.cancel(id);
+      this.notice.set(`Cancelled. Refunded ${refunded} cr.`);
+    } catch (e) {
+      this.showError(e, 'Could not cancel');
+    }
   }
 
   usePrompt(value: string): void {

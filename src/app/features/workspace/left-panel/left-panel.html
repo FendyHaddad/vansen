@@ -13,11 +13,11 @@
       type="button"
       class="mode-btn"
       [class.mode-active]="mode() === 'video'"
-      [class.mode-locked]="videoLocked"
-      [attr.title]="videoLocked ? 'Video — Pro plan, coming soon' : null"
-      (click)="setMode('video')"
+      [class.mode-locked]="videoLocked()"
+      [attr.title]="videoLocked() ? 'Video — Pro plan' : null"
+      (click)="onVideoModeToggle()"
     >
-      <ng-icon [name]="videoLocked ? 'lucideLock' : 'lucideVideo'" size="13"/>
+      <ng-icon [name]="videoLocked() ? 'lucideLock' : 'lucideVideo'" size="13"/>
       Video
     </button>
   </div>
@@ -35,7 +35,7 @@
       ></textarea>
     </div>
 
-    @if (family().capabilities.imageInput && !personaActive()) {
+    @if (mode() === 'image' && family().capabilities.imageInput && !personaActive()) {
       <div class="field">
         <span class="field-label">
           Reference image
@@ -81,6 +81,32 @@
           @if (uploadError()) {
             <p class="ref-error">{{ uploadError() }}</p>
           }
+        }
+      </div>
+    }
+
+    @if (showReferences()) {
+      <div class="field">
+        <app-reference-drop
+          [mode]="videoMode()"
+          [slots]="refSlots()"
+          (slotsChanged)="refSlots.set($event)"
+        />
+      </div>
+    }
+
+    @if (showVideoParent()) {
+      <div class="field">
+        @if (videoParent(); as parent) {
+          <div class="parent-row">
+            <span class="parent-name">{{ parent.familyName }} · {{ parent.durationS ?? parent.settings?.durationS }}s</span>
+            <button type="button" class="parent-change" (click)="pickVideoRequested.emit()">Change</button>
+          </div>
+        } @else {
+          <button type="button" class="parent-pick" (click)="pickVideoRequested.emit()">
+            <ng-icon name="lucideVideo" size="14"/>
+            Pick a finished video
+          </button>
         }
       </div>
     }
@@ -145,6 +171,14 @@
       </div>
     }
 
+    @if (mode() === 'video') {
+      <app-mode-picker
+        [family]="family()"
+        [selected]="videoMode()"
+        (changed)="setVideoMode($event)"
+      />
+    }
+
     @if (mode() === 'image') {
       <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
       <app-persona-picker
@@ -155,13 +189,15 @@
       <app-trend-gallery (picked)="applyTrend($event)"/>
     }
 
-    <app-option-group
-      label="Aspect ratio"
-      [axisTooltip]="axisTooltips.aspect"
-      [options]="aspectOptions()"
-      [selected]="settings().aspectRatio"
-      (changed)="setAxis('aspectRatio', $event)"
-    />
+    @if (!hideAspect()) {
+      <app-option-group
+        label="Aspect ratio"
+        [axisTooltip]="axisTooltips.aspect"
+        [options]="aspectOptions()"
+        [selected]="settings().aspectRatio"
+        (changed)="setAxis('aspectRatio', $event)"
+      />
+    }
 
     @if (!personaActive()) {
       <app-option-group
@@ -191,15 +227,30 @@
       />
     }
 
-    <app-option-group
-      label="Batch"
-      [axisTooltip]="axisTooltips.batch"
-      [options]="batchOptions"
-      [selected]="batch().toString()"
-      (changed)="setBatch($event)"
-    />
+    @if (mode() === 'image') {
+      <div class="batch-group">
+        <app-option-group
+          label="Batch"
+          [axisTooltip]="axisTooltips.batch"
+          [options]="batchOptions"
+          [selected]="batch().toString()"
+          (changed)="setBatch($event)"
+        />
+      </div>
+    }
 
-    @if (family().capabilities.audio) {
+    @if (audioSelectable()) {
+      <div class="audio-group">
+        <app-option-group
+          label="Audio"
+          axisTooltip="Soundtrack changes the price per second."
+          [options]="audioOptions"
+          [selected]="settings().audio ?? 'off'"
+          (changed)="setAudio($event)"
+        />
+      </div>
+    }
+    @if (audioIncluded()) {
       <p class="audio-note">
         <app-hint text="This model generates a native soundtrack with every clip.">
           <span>♪ Audio included</span>
@@ -221,7 +272,7 @@
       } @else {
         <ng-icon name="lucideWandSparkles" size="16"/>
         Generate
-        @if (batch() > 1) {
+        @if (mode() === 'image' && batch() > 1) {
           <span class="num">×{{ batch() }}</span>
         }
         · <span class="num">{{ priceCredits() }} cr</span>

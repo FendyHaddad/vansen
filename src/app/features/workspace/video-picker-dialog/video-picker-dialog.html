@@ -1,0 +1,26 @@
+<div class="backdrop" (click)="onBackdrop($event)">
+  <div class="panel" role="dialog" aria-label="Pick a video">
+    <div class="panel-head">
+      <h2>Pick a video</h2>
+      <button type="button" class="close-btn" (click)="closed.emit()" aria-label="Close">
+        <ng-icon name="lucideX" size="16" />
+      </button>
+    </div>
+    @if (candidates().length === 0) {
+      <p class="muted">No finished videos yet. Generate one first.</p>
+    } @else {
+      <div class="pick-grid">
+        @for (v of candidates(); track v.id) {
+          <button type="button" class="pick-tile" (click)="picked.emit(v)">
+            @if (v.thumbUrl) {
+              <img [src]="v.thumbUrl" alt="" />
+            } @else {
+              <span class="pick-dark"><ng-icon name="lucidePlay" size="20" /></span>
+            }
+            <span class="pick-caption">{{ v.familyName }} · {{ v.durationS ?? v.settings.durationS }}s</span>
+          </button>
+        }
+      </div>
+    }
+  </div>
+</div>

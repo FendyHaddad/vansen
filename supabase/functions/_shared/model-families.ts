@@ -1,5 +1,8 @@
 export type ModelKind = 'image' | 'video';
-export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration';
+export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
+export type VideoMode = 't2v' | 'i2v' | 'ref2v' | 'keyframes' | 'extend' | 'edit';
+export type AudioMode = 'off' | 'on' | 'voice';
+export type AudioCapability = 'included' | 'none' | 'selectable';
 
 export interface FamilyOption {
   value: string;
@@ -23,6 +26,12 @@ export interface GenerationSettings {
   persona?: string;
   /** Trend preset id — stamped when the prompt came from a trend prefill. */
   trend?: string;
+  /** Video audio selection, only meaningful when capabilities.audio === 'selectable'. */
+  audio?: AudioMode;
+  /** Video generation mode — text-to-video, image-to-video, extend, etc. */
+  mode?: VideoMode;
+  /** Conversational continuation id, for models that support edit/extend by reference. */
+  interactionId?: string;
 }
 
 export interface ModelFamily {
@@ -38,7 +47,10 @@ export interface ModelFamily {
     resolutions?: FamilyOption[];
     qualities?: FamilyOption[];
     durations?: number[];
-    audio?: boolean;
+    audio?: AudioCapability;
+    modes?: VideoMode[];
+    /** Expected provider render seconds per output second, for wait-time estimates. */
+    expectedSPerS?: number;
     imageInput: boolean;
     maskInput: boolean;
   };
@@ -47,6 +59,9 @@ export interface ModelFamily {
 
 const AR_IMAGE = ['1:1', '3:4', '4:3', '16:9', '9:16'];
 const AR_VIDEO = ['16:9', '9:16', '1:1'];
+
+/** Hard ceiling on provider spend for video per user per rolling 24 h. */
+export const VIDEO_DAILY_CAP_USD = 40;
 
 const RES_TOOLTIPS: Record<string, string> = {
   '1K': 'Output size ~1024px. Resolution is pixel count — not detail effort.',
@@ -95,6 +110,29 @@ export function packCredits(usd: number, plan: 'studio' | 'pro'): number {
   if (!pack) return 0;
   const rate = plan === 'pro' ? PRO_PURCHASE_RATE : 1;
   return Math.floor(usd * 100 * rate * (1 + pack.bonusPct / 100));
+}
+
+function veoRate(version: string | undefined, resolution: string | undefined): number {
+  if (version === 'lite' && resolution === '1080p') return 0.08;
+  if (version === 'lite') return 0.05;
+  if (version === 'fast' && resolution === '4K') return 0.3;
+  if (version === 'fast' && resolution === '1080p') return 0.12;
+  if (version === 'fast') return 0.1;
+  if (resolution === '4K') return 0.6;
+  return 0.4;
+}
+
+function omniRate(resolution: string | undefined): number {
+  if (resolution === '360p') return 0.03;
+  if (resolution === '1080p') return 0.15;
+  if (resolution === '4K') return 0.3;
+  return 0.1;
+}
+
+function klingRate(audio: AudioMode | undefined): number {
+  if (audio === 'voice') return 0.196;
+  if (audio === 'on') return 0.168;
+  return 0.112;
 }
 
 export const MODEL_FAMILIES: ModelFamily[] = [
@@ -216,114 +254,120 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     // fal: $0.03 per image at any resolution (verified 2026-07-05)
     providerCost: () => 0.03,
   },
+  // ── Video ───────────────────────────────────────────────────────────
   {
     id: 'veo',
-    name: 'Veo',
+    name: 'Veo 3.1',
     provider: 'Google',
     logo: '/logos/google.svg',
     kind: 'video',
-    blurb: 'Veo 3.1 — cinematic clips with native audio.',
+    blurb: 'Veo 3.1 — cinematic clips with native audio, up to 4K.',
     capabilities: {
       versions: [
-        { value: 'standard', label: 'Standard', tooltip: 'Full quality with audio, up to 4K.' },
-        { value: 'fast', label: 'Fast', tooltip: 'Quicker and cheaper, 720p/1080p only.' },
+        { value: 'standard', label: 'Standard', tooltip: 'Best quality. $0.40/s, 4K $0.60/s.', tag: 'Latest' },
+        { value: 'fast', label: 'Fast', tooltip: 'Quicker renders. $0.10/s (1080p $0.12, 4K $0.30).' },
+        { value: 'lite', label: 'Lite', tooltip: 'Cheapest Veo. 720p/1080p only. $0.05/$0.08 per second.' },
       ],
       aspectRatios: AR_VIDEO,
       resolutions: [
-        { value: '720p', label: '720p', tooltip: '720p HD output — smaller files, faster.' },
-        { value: '1080p', label: '1080p', tooltip: 'Full-HD output.' },
-        { value: '4K', label: '4K', tooltip: 'Standard tier only.' },
+        { value: '720p', label: '720p', tooltip: 'HD. Fastest and cheapest.' },
+        { value: '1080p', label: '1080p', tooltip: 'Full HD. Standard $0.40/s, Fast $0.12/s.' },
+        { value: '4K', label: '4K', tooltip: 'Ultra HD. Standard and Fast only.' },
       ],
       durations: [4, 6, 8],
-      audio: true,
-      imageInput: false,
+      audio: 'included',
+      modes: ['t2v', 'i2v', 'ref2v', 'keyframes', 'extend'],
+      expectedSPerS: 12,
+      imageInput: true,
       maskInput: false,
     },
-    providerCost: (s) => {
-      const perS = s.version === 'fast' ? 0.1 : s.resolution === '4K' ? 0.6 : 0.4;
-      return perS * (s.durationS ?? 4);
-    },
+    providerCost: (s) => veoRate(s.version, s.resolution) * (s.durationS ?? 8),
   },
   {
-    id: 'sora',
-    name: 'Sora',
-    provider: 'OpenAI',
-    logo: '/logos/openai.svg',
+    id: 'omni',
+    name: 'Gemini Omni Flash 1.1',
+    provider: 'Google',
+    logo: '/logos/google.svg',
     kind: 'video',
-    blurb: 'Sora 2 — strong physics and coherent motion.',
+    blurb: 'Omni Flash — conversational video: generate, then edit or extend by talking to it.',
     capabilities: {
-      versions: [
-        { value: 'standard', label: 'Standard', tooltip: '720p, best value.' },
-        { value: 'pro', label: 'Pro', tooltip: 'Higher fidelity, unlocks 1080p.' },
-      ],
       aspectRatios: AR_VIDEO,
       resolutions: [
-        { value: '720p', label: '720p', tooltip: '720p HD output — smaller files, faster.' },
-        { value: '1080p', label: '1080p', tooltip: 'Pro tier only.' },
+        { value: '360p', label: '360p', tooltip: 'Preview quality. $0.03/s.' },
+        { value: '720p', label: '720p', tooltip: 'HD. $0.10/s.' },
+        { value: '1080p', label: '1080p', tooltip: 'Full HD. $0.15/s.' },
+        { value: '4K', label: '4K', tooltip: 'Ultra HD. $0.30/s.' },
       ],
-      durations: [4, 8, 12],
-      imageInput: false,
+      durations: [4, 6, 8, 10],
+      audio: 'included',
+      modes: ['t2v', 'i2v', 'ref2v', 'keyframes', 'extend', 'edit'],
+      expectedSPerS: 6,
+      imageInput: true,
       maskInput: false,
     },
-    // Per-second rates derived from OpenAI per-clip pricing in the verified flat catalog
-    providerCost: (s) => {
-      const perS = s.version === 'pro' ? (s.resolution === '1080p' ? 0.7 : 0.3) : 0.1;
-      return perS * (s.durationS ?? 4);
-    },
+    providerCost: (s) => omniRate(s.resolution) * (s.durationS ?? 8),
   },
   {
     id: 'kling',
-    name: 'Kling',
+    name: 'Kling 3.0 Pro',
     provider: 'Kuaishou',
     logo: '/logos/kuaishou.svg',
     kind: 'video',
-    blurb: 'Kling 2.5 Turbo Pro — best value for smooth motion.',
+    blurb: 'Kling 3.0 Pro — smooth motion, optional soundtrack or voice.',
     capabilities: {
       aspectRatios: AR_VIDEO,
-      durations: [5, 10],
-      imageInput: false,
+      durations: [5, 10, 15],
+      audio: 'selectable',
+      modes: ['t2v', 'i2v', 'keyframes'],
+      expectedSPerS: 20,
+      imageInput: true,
       maskInput: false,
     },
-    providerCost: (s) => 0.07 * (s.durationS ?? 5),
+    providerCost: (s) => klingRate(s.audio) * (s.durationS ?? 5),
   },
   {
     id: 'runway',
-    name: 'Runway',
+    name: 'Runway Gen-4.5',
     provider: 'Runway',
     logo: '/logos/runway.svg',
     kind: 'video',
-    blurb: 'Gen-4.5 — director-grade control and consistency.',
-    capabilities: {
-      versions: [
-        { value: 'gen45', label: 'Gen-4.5', tooltip: 'Flagship quality.' },
-        { value: 'gen4-turbo', label: 'Gen-4 Turbo', tooltip: 'Fastest and cheapest Runway.' },
-      ],
-      aspectRatios: AR_VIDEO,
-      durations: [5, 10],
-      imageInput: false,
-      maskInput: false,
-    },
-    providerCost: (s) => (s.version === 'gen4-turbo' ? 0.05 : 0.12) * (s.durationS ?? 5),
-  },
-  {
-    id: 'seedance',
-    name: 'Seedance',
-    provider: 'ByteDance',
-    logo: '/logos/bytedance.svg',
-    kind: 'video',
-    blurb: 'Seedance 1.0 Pro — crisp 1080p clips at fal prices.',
+    blurb: 'Gen-4.5 — director-grade control and consistency. Silent.',
     capabilities: {
       aspectRatios: AR_VIDEO,
       resolutions: [
-        { value: '720p', label: '720p', tooltip: '720p HD output — smaller files, faster.' },
-        { value: '1080p', label: '1080p', tooltip: 'Full-HD output.' },
+        { value: '720p', label: '720p', tooltip: 'HD. Same price as 1080p — smaller files.' },
+        { value: '1080p', label: '1080p', tooltip: 'Full HD. Same price as 720p — sharper detail.' },
       ],
       durations: [5, 10],
-      imageInput: false,
+      audio: 'none',
+      modes: ['t2v', 'i2v'],
+      expectedSPerS: 8,
+      imageInput: true,
       maskInput: false,
     },
-    // fal token pricing: 1080p ≈ $0.124/s, 720p ≈ $0.054/s (verified 2026-07-05)
-    providerCost: (s) => (s.resolution === '720p' ? 0.054 : 0.124) * (s.durationS ?? 5),
+    providerCost: (s) => 0.12 * (s.durationS ?? 5),
+  },
+  {
+    id: 'seedance',
+    name: 'Seedance 2.5',
+    provider: 'ByteDance',
+    logo: '/logos/bytedance.svg',
+    kind: 'video',
+    blurb: 'Seedance 2.5 — crisp clips with audio at fal prices.',
+    capabilities: {
+      aspectRatios: AR_VIDEO,
+      resolutions: [
+        { value: '480p', label: '480p', tooltip: 'Draft quality. $0.22/s.' },
+        { value: '720p', label: '720p', tooltip: 'HD. $0.47/s.' },
+      ],
+      durations: [5, 10, 15],
+      audio: 'included',
+      modes: ['t2v', 'i2v', 'ref2v'],
+      expectedSPerS: 20,
+      imageInput: true,
+      maskInput: false,
+    },
+    providerCost: (s) => (s.resolution === '480p' ? 0.2205 : 0.473) * (s.durationS ?? 5),
   },
 ];
 
@@ -430,7 +474,7 @@ export function familyById(id: string): ModelFamily | undefined {
 export function defaultSettings(family: ModelFamily): GenerationSettings {
   const c = family.capabilities;
   const defaultVersion = c.versions?.find((v) => v.tag === 'Latest') ?? c.versions?.[0];
-  return {
+  const base: GenerationSettings = {
     version: defaultVersion?.value,
     aspectRatio: c.aspectRatios[0],
     resolution: c.resolutions?.[0]?.value,
@@ -438,6 +482,14 @@ export function defaultSettings(family: ModelFamily): GenerationSettings {
     durationS: c.durations?.[0],
     batch: 1,
   };
+  if (family.kind !== 'video') return base;
+  base.mode = 't2v';
+  if (c.audio === 'selectable') base.audio = 'off';
+  return base;
+}
+
+export function videoFamilySupports(family: ModelFamily, mode: VideoMode): boolean {
+  return family.capabilities.modes?.includes(mode) ?? false;
 }
 
 /** Integer credits for one output: ceil(providerCost / (1 − margin) × 100). */
@@ -447,4 +499,24 @@ export function creditCost(family: ModelFamily, s: GenerationSettings): number {
 
 export function upscaleCreditCost(): number {
   return Math.ceil((UPSCALER.providerCost / (1 - STUDIO_MARGIN)) * 100);
+}
+
+/** How many reference images a video mode needs, and whether it needs a parent clip. */
+export interface ReferenceRule {
+  min: number;
+  max: number;
+  needsParent: boolean;
+}
+
+const REFERENCE_RULES: Record<VideoMode, ReferenceRule> = {
+  t2v: { min: 0, max: 0, needsParent: false },
+  i2v: { min: 1, max: 1, needsParent: false },
+  ref2v: { min: 1, max: 3, needsParent: false },
+  keyframes: { min: 2, max: 2, needsParent: false },
+  extend: { min: 0, max: 0, needsParent: true },
+  edit: { min: 0, max: 0, needsParent: true },
+};
+
+export function referenceRule(mode: VideoMode): ReferenceRule {
+  return REFERENCE_RULES[mode];
 }

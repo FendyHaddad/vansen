@@ -1,7 +1,7 @@
 // Vansen API gateway. All data access flows through here (tables are RLS
 // deny-all; RPCs are service_role-only). Client's only other Supabase surface
 // is Auth. REST contract doubles as the future Java migration contract.
-import { Hono } from 'jsr:@hono/hono';
+import { Hono, type Context } from 'jsr:@hono/hono';
 import { cors } from 'jsr:@hono/hono/cors';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Stripe from 'npm:stripe@17';
@@ -10,6 +10,7 @@ import {
   PERSONA_GEN,
   PERSONA_SLOTS,
   PERSONA_TRAINING,
+  STUDIO_MARGIN,
   UPSCALER,
   creditCost,
   editToolById,
@@ -17,7 +18,10 @@ import {
   packCredits,
   personaGenCreditCost,
   upscaleCreditCost,
+  videoFamilySupports,
   type GenerationSettings,
+  type ModelFamily,
+  type VideoMode,
 } from './_shared/model-families.ts';
 import { applyStyle, styleById } from './_shared/style-presets.ts';
 import { GenerationOp, LedgerType, MediaKind } from './_shared/enums.ts';
@@ -29,6 +33,9 @@ import {
 } from './_shared/providers/fal.ts';
 import { zipSync } from 'npm:fflate@0.8.2';
 import type { CheckResult } from './_shared/providers/types.ts';
+import { storageFor, videoPath, thumbPath, type StorageBackend } from './_shared/storage/index.ts';
+import { dailyCapState, expectedSecondsFor, referenceRule, videoJobCapReached } from './_shared/video-rules.ts';
+import { isUrlResult, type SubmitResult } from './_shared/providers/types.ts';
 import { moderate } from './_shared/moderation.ts';
 import { safetyId } from './_shared/safety.ts';
 import { parseServiceAccount, sendGenerationPush, type PushEvent } from './_shared/push.ts';
@@ -115,6 +122,9 @@ function sniffImage(bytes: Uint8Array): 'png' | 'jpg' | 'webp' | null {
 
 const MAX_PROMPT_LEN = 2000;
 const AR_PATTERN = /^\d{1,2}:\d{1,2}$/;
+const VIDEO_MODES: ReadonlySet<string> = new Set(['t2v', 'i2v', 'ref2v', 'keyframes', 'extend', 'edit']);
+const REF_SIGN_TTL_S = 3600;
+const UPLOAD_PATH = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpg|jpeg|webp)$/i;
 
 /** Only known settings keys, type- and size-checked, are ever stored or priced. */
 function sanitizeSettings(raw: unknown): GenerationSettings {
@@ -136,6 +146,8 @@ function sanitizeSettings(raw: unknown): GenerationSettings {
   ) {
     clean.durationS = src.durationS;
   }
+  if (src.audio === 'off' || src.audio === 'on' || src.audio === 'voice') clean.audio = src.audio;
+  if (typeof src.mode === 'string' && VIDEO_MODES.has(src.mode)) clean.mode = src.mode as VideoMode;
   return clean;
 }
 
@@ -143,6 +155,7 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ['defaultMode', (v) => v === 'image' || v === 'video'],
   ['defaultImageFamily', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultVideoFamily', (v) => typeof v === 'string' && v.length <= 40],
+  ['defaultVideoMode', (v) => typeof v === 'string' && VIDEO_MODES.has(v)],
   ['defaultAspect', (v) => typeof v === 'string' && v.length <= 10],
   ['defaultStyle', (v) => typeof v === 'string' && v.length <= 40],
   ['defaultPersona', (v) => typeof v === 'string' && v.length <= 40],
@@ -298,7 +311,51 @@ async function signMedia(path: string | null): Promise<string> {
   return data.signedUrl;
 }
 
-async function toGenerationDto(row: Record<string, unknown>) {
+const r2SignMemo = new Map<string, { url: string; exp: number }>();
+
+/** Video media lives in R2, not the Supabase `media` bucket — sign through the
+ * right backend. R2 URLs are memoized separately since signMedia's memo is
+ * keyed to Supabase's own createSignedUrl call. */
+async function signStored(backend: StorageBackend, path: string | null, ttlS = SIGN_TTL_S): Promise<string> {
+  if (!path) return '';
+  if (backend !== 'r2') return signMedia(path);
+  const memoKey = `${path}|${ttlS}`;
+  const hit = r2SignMemo.get(memoKey);
+  if (hit && hit.exp > Date.now()) return hit.url;
+  const url = await storageFor('r2').signedUrl(path, ttlS);
+  if (r2SignMemo.size > 5000) r2SignMemo.clear();
+  r2SignMemo.set(memoKey, { url, exp: Date.now() + (ttlS - 60) * 1000 });
+  return url;
+}
+
+type JobRow = {
+  id: string;
+  generation_id: string;
+  progress: number | null;
+  phase: string | null;
+  claimed_at: string | null;
+  created_at: string;
+  queue_position: number | null;
+};
+
+const NOT_CANCELLABLE = new Set(['veo', 'omni']);
+
+function jobDto(row: Record<string, unknown>, job: JobRow | undefined) {
+  if (!job || row.status !== 'pending') return undefined;
+  const family = familyById(String(row.family_id));
+  const settings = (row.settings ?? {}) as GenerationSettings;
+  return {
+    progress: job.progress ?? undefined,
+    phase: (job.claimed_at ? 'saving' : job.phase ?? 'queued') as 'queued' | 'rendering' | 'saving',
+    cancellable: !NOT_CANCELLABLE.has(String(row.family_id)),
+    expectedS: family ? expectedSecondsFor(family, settings.durationS) : 30,
+    startedAt: job.created_at,
+    queuePosition: job.queue_position ?? undefined,
+  };
+}
+
+async function toGenerationDto(row: Record<string, unknown>, job?: JobRow) {
+  const backend = (row.storage_backend ?? 'supabase') as StorageBackend;
   return {
     id: row.id,
     kind: row.kind,
@@ -309,14 +366,18 @@ async function toGenerationDto(row: Record<string, unknown>) {
     settings: row.settings,
     priceCredits: Number(row.price_credits),
     status: row.status,
-    mediaUrl: await signMedia((row.media_path as string) ?? null),
+    mediaUrl: await signStored(backend, (row.media_path as string | null) ?? null),
+    thumbUrl: row.thumb_path ? await signStored(backend, row.thumb_path as string) : undefined,
+    storageBackend: row.kind === MediaKind.Video ? backend : undefined,
+    durationS: row.duration_s == null ? undefined : Number(row.duration_s),
     parentId: row.parent_id,
     createdAt: row.created_at,
+    job: jobDto(row, job),
   };
 }
 
-async function toGenerationDtos(rows: Record<string, unknown>[]) {
-  return Promise.all(rows.map(toGenerationDto));
+async function toGenerationDtos(rows: Record<string, unknown>[], jobs: Map<string, JobRow> = new Map()) {
+  return Promise.all(rows.map((r) => toGenerationDto(r, jobs.get(String(r.id)))));
 }
 
 async function isSuspended(userId: string): Promise<boolean> {
@@ -364,24 +425,113 @@ async function pushToDevices(userId: string, generationId: string, type: PushEve
   await admin.from('devices').delete().eq('user_id', userId).in('token', stale);
 }
 
+const MAX_STORE_ATTEMPTS = 3;
+
 /** Upload finished bytes to private storage, flip the generation done. */
 async function finishJob(
-  job: { id: string; user_id: string; generation_id: string },
+  job: { id: string; user_id: string; generation_id: string; attempts?: number },
   result: CheckResult,
 ): Promise<void> {
-  if (result.state === 'running') return;
+  if (result.state === 'running') {
+    await admin
+      .from('jobs')
+      .update({
+        ...(result.progress != null ? { progress: result.progress } : {}),
+        ...(result.queuePosition != null ? { queue_position: result.queuePosition } : {}),
+        phase: result.phase ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', job.id);
+    return;
+  }
   if (result.state === 'failed') {
     await admin.rpc('fn_fail_job', { p_job: job.id, p_error: result.error });
     notifySettled(job.user_id, job.generation_id, 'generation_failed');
     return;
   }
+  if (isUrlResult(result)) {
+    await storeVideoResult(job, result);
+    return;
+  }
   const path = `${job.user_id}/${job.generation_id}.png`;
-  await admin.storage.from('media').upload(path, result.bytes, {
-    contentType: result.contentType,
-    upsert: true,
-  });
+  await admin.storage.from('media').upload(path, result.bytes, { contentType: result.contentType, upsert: true });
   await admin.from('generations').update({ status: 'done', media_path: path }).eq('id', job.generation_id);
   await admin.from('jobs').update({ updated_at: new Date().toISOString() }).eq('id', job.id);
+  notifySettled(job.user_id, job.generation_id, 'generation_done');
+}
+
+// Zero rows can also mean a previous attempt already committed `done` and only
+// its response was lost; never delete media a done row still points at.
+async function dropLostObject(generationId: string, path: string): Promise<void> {
+  const { data: row } = await admin.from('generations').select('status').eq('id', generationId).maybeSingle();
+  if (row?.status === 'done') return;
+  console.warn('[finishJob] generation already settled, dropping object', generationId);
+  await storageFor('r2').delete(path).catch(() => undefined);
+}
+
+async function storeVideoResult(
+  job: { id: string; user_id: string; generation_id: string; attempts?: number },
+  result: Extract<CheckResult, { url: string }>,
+): Promise<void> {
+  // Claim: only one poller streams the file. No row back (and no error) → someone else has it.
+  const { data: claimed, error: claimError } = await admin
+    .from('jobs')
+    .update({ claimed_at: new Date().toISOString(), phase: 'saving' })
+    .eq('id', job.id)
+    .is('claimed_at', null)
+    .select('id');
+  if (claimError) {
+    console.error('[finishJob] claim failed', job.id, claimError.message);
+    return;
+  }
+  if (!claimed || claimed.length === 0) return;
+
+  const path = videoPath(job.user_id, job.generation_id);
+  try {
+    const res = await fetch(result.url, { headers: result.headers });
+    if (!res.ok || !res.body) throw new Error(`video fetch ${res.status}`);
+    // Buffer before the PUT: a streaming body makes fetch send chunked transfer
+    // encoding, which R2's S3 PutObject rejects.
+    const bytes = new Uint8Array(await new Response(res.body).arrayBuffer());
+    await storageFor('r2').put(path, bytes, result.contentType || 'video/mp4');
+  } catch (e) {
+    const attempts = (job.attempts ?? 0) + 1;
+    console.error('store_failed', job.id, attempts, e);
+    if (attempts >= MAX_STORE_ATTEMPTS) {
+      await admin.rpc('fn_fail_job', { p_job: job.id, p_error: 'store_failed' });
+      notifySettled(job.user_id, job.generation_id, 'generation_failed');
+      return;
+    }
+    await admin.from('jobs').update({ claimed_at: null, phase: 'rendering', attempts }).eq('id', job.id);
+    return;
+  }
+
+  // Conditional on still-pending: a cancel or the stale sweep can have failed +
+  // refunded the row while the bytes were in flight. Losing that race must not
+  // hand the user the video on top of the refund.
+  const { data: finished, error: genError } = await admin
+    .from('generations')
+    .update({
+      status: 'done',
+      media_path: path,
+      storage_backend: 'r2',
+      duration_s: result.durationS ?? null,
+      width: result.width ?? null,
+      height: result.height ?? null,
+    })
+    .eq('id', job.generation_id)
+    .eq('status', 'pending')
+    .select('id');
+  if (genError) {
+    console.error('[finishJob] generation update failed', job.generation_id, genError.message);
+    await admin.from('jobs').update({ claimed_at: null, phase: 'rendering' }).eq('id', job.id);
+    return;
+  }
+  if (!finished || finished.length === 0) {
+    await dropLostObject(job.generation_id, path);
+    return;
+  }
+  await admin.from('jobs').update({ progress: 1, updated_at: new Date().toISOString() }).eq('id', job.id);
   notifySettled(job.user_id, job.generation_id, 'generation_done');
 }
 
@@ -665,14 +815,14 @@ app.get('/jobs', async (c) => {
 
   const { data: jobs } = await admin
     .from('jobs')
-    .select('id,user_id,generation_id,provider_ref,error')
+    .select('id,user_id,generation_id,provider_ref,error,progress,phase,claimed_at,created_at,attempts,queue_position')
     .eq('user_id', userId)
     .in('generation_id', ids);
 
   for (const job of jobs ?? []) {
-    if (job.error || !job.provider_ref) continue;
-    // Skip inline providers already resolved at submit; only poll real refs.
-    if (job.provider_ref === 'inline') continue;
+    // Skip already-errored/resolved jobs, inline providers resolved at submit,
+    // and jobs another concurrent tick is currently saving (claimed_at set).
+    if (job.error || !job.provider_ref || job.provider_ref === 'inline' || job.claimed_at) continue;
     const { data: gen } = await admin
       .from('generations')
       .select('status,family_id')
@@ -681,7 +831,7 @@ app.get('/jobs', async (c) => {
     if (!gen || gen.status !== 'pending') continue;
     try {
       const result = await adapterFor(gen.family_id).check(job.provider_ref);
-      await finishJob(job, result);
+      await finishJob({ id: job.id, user_id: job.user_id, generation_id: job.generation_id, attempts: job.attempts }, result);
     } catch (e) {
       logError(c, 'provider_check_failed', e);
       await admin.rpc('fn_fail_job', { p_job: job.id, p_error: String(e).slice(0, 500) });
@@ -689,13 +839,184 @@ app.get('/jobs', async (c) => {
     }
   }
 
-  const { data: gens } = await admin
-    .from('generations')
-    .select('*')
+  const { data: freshJobs } = await admin
+    .from('jobs')
+    .select('id,generation_id,progress,phase,claimed_at,created_at,queue_position')
     .eq('user_id', userId)
-    .in('id', ids);
-  return c.json({ items: await toGenerationDtos(gens ?? []) });
+    .in('generation_id', ids);
+  const jobsByGen = new Map<string, JobRow>((freshJobs ?? []).map((j) => [j.generation_id, j as JobRow]));
+  const { data: gens } = await admin.from('generations').select('*').eq('user_id', userId).in('id', ids);
+  return c.json({ items: await toGenerationDtos(gens ?? [], jobsByGen) });
 });
+
+app.post('/jobs/:id/cancel', async (c) => {
+  const userId = c.get('userId') as string;
+  const generationId = c.req.param('id');
+  const { data: gen } = await admin
+    .from('generations')
+    .select('id,status,family_id,price_credits,kind')
+    .eq('id', generationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!gen) return fail(c, 404, 'not_found', 'Generation not found.');
+  if (gen.status !== 'pending') return fail(c, 409, 'not_pending', 'Already finished.');
+  if (NOT_CANCELLABLE.has(gen.family_id)) {
+    return fail(c, 409, 'not_cancellable', "This model can't be cancelled once started.");
+  }
+  const { data: job } = await admin
+    .from('jobs')
+    .select('id,provider_ref,claimed_at')
+    .eq('generation_id', generationId)
+    .is('error', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!job) return fail(c, 404, 'not_found', 'Job not found.');
+  if (job.claimed_at) return fail(c, 409, 'not_pending', 'Already saving.');
+
+  const adapter = adapterFor(gen.family_id);
+  if (adapter.cancel && job.provider_ref && job.provider_ref !== 'inline') {
+    try {
+      await adapter.cancel(job.provider_ref);
+    } catch (e) {
+      logError(c, 'provider_cancel_failed', e);
+    }
+  }
+  const { error } = await admin.rpc('fn_fail_job', { p_job: job.id, p_error: 'cancelled' });
+  if (error) return fail(c, 500, 'cancel_failed', error.message);
+
+  const { data: settled } = await admin
+    .from('generations')
+    .select('status')
+    .eq('id', generationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (settled?.status !== 'failed') return fail(c, 409, 'not_pending', 'This video already finished.');
+
+  return c.json({ refundedCredits: Number(gen.price_credits), credits: await creditsOf(userId) });
+});
+
+interface VideoPrep {
+  mode: VideoMode;
+  referencePaths: string[];
+  referenceUrls: string[];
+  parentVideoUrl?: string;
+  interactionId?: string;
+}
+
+/** Resolves the parent video for extend/edit modes (a no-op for modes that don't
+ * need one). Guard clauses only — flattened out of `prepareVideo` so the
+ * `rule.needsParent` check never wraps another `if`. */
+async function resolveParentVideo(
+  userId: string,
+  family: ModelFamily,
+  parentId: string | null,
+  needsParent: boolean,
+): Promise<{ parentVideoUrl?: string; interactionId?: string } | 'bad_parent' | null> {
+  if (!needsParent) return null;
+  if (!parentId) return 'bad_parent';
+  const { data: parent } = await admin
+    .from('generations')
+    .select('id,kind,status,media_path,storage_backend,settings,family_id')
+    .eq('id', parentId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const usable = parent && parent.kind === MediaKind.Video && parent.status === 'done' && parent.media_path;
+  if (!usable) return 'bad_parent';
+  // Veo can only continue its own clips — it takes the parent as inline media it
+  // generated, not an arbitrary MP4.
+  if (family.id === 'veo' && parent.family_id !== 'veo') return 'bad_parent';
+  const parentVideoUrl = await signStored(parent.storage_backend as StorageBackend, parent.media_path, REF_SIGN_TTL_S);
+  const parentInteraction = (parent.settings as GenerationSettings | null)?.interactionId;
+  const omniContinuation = family.id === 'omni' && parent.family_id === 'omni' && !!parentInteraction;
+  return { parentVideoUrl, interactionId: omniContinuation ? parentInteraction : undefined };
+}
+
+/** Validates + prepares a video request. Returns a Response on rejection. */
+async function prepareVideo(
+  c: Context,
+  userId: string,
+  family: ModelFamily,
+  settings: GenerationSettings,
+  body: Record<string, unknown>,
+  parentId: string | null,
+): Promise<VideoPrep | Response> {
+  const mode = settings.mode ?? 't2v';
+  if (!videoFamilySupports(family, mode)) {
+    return fail(c, 400, 'unsupported_mode', "This model can't do that mode.");
+  }
+  const rule = referenceRule(mode);
+  const rawRefs = Array.isArray(body.referencePaths) ? body.referencePaths : [];
+  const referencePaths = rawRefs.filter((p): p is string => typeof p === 'string' && UPLOAD_PATH.test(p));
+  if (referencePaths.length !== rawRefs.length || referencePaths.length < rule.min || referencePaths.length > rule.max) {
+    return fail(c, 400, 'bad_reference_count', `${mode} needs ${rule.min}–${rule.max} reference image(s).`);
+  }
+  if (referencePaths.some((p) => !p.startsWith(`${userId}/`))) {
+    return fail(c, 400, 'bad_reference_count', 'Reference does not belong to you.');
+  }
+
+  const prep: VideoPrep = { mode, referencePaths, referenceUrls: [] };
+
+  const parentResult = await resolveParentVideo(userId, family, parentId, rule.needsParent);
+  if (parentResult === 'bad_parent') return fail(c, 400, 'bad_parent', 'Pick a finished video to extend or edit.');
+  if (parentResult) Object.assign(prep, parentResult);
+
+  const { count: pendingCount, error: pendingErr } = await admin
+    .from('generations')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('kind', MediaKind.Video)
+    .eq('status', 'pending');
+  if (pendingErr) return fail(c, 503, 'cap_check_failed', 'Could not verify your video limits. Try again.');
+  if (videoJobCapReached(pendingCount ?? 0)) {
+    return fail(c, 429, 'too_many_jobs', '3 videos are still rendering — wait for one to finish');
+  }
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: recent, error: recentErr } = await admin
+    .from('generations')
+    .select('price_credits,created_at')
+    .eq('user_id', userId)
+    .eq('kind', MediaKind.Video)
+    .neq('status', 'failed')
+    .gte('created_at', since)
+    .order('created_at', { ascending: true });
+  if (recentErr) return fail(c, 503, 'cap_check_failed', 'Could not verify your video limits. Try again.');
+  const spentUsd = (recent ?? []).reduce((sum, r) => sum + Number(r.price_credits), 0) * (1 - STUDIO_MARGIN) / 100;
+  const oldest = recent?.[0]?.created_at ? new Date(recent[0].created_at) : null;
+  const cap = dailyCapState(spentUsd, oldest, new Date());
+  if (cap.blocked) {
+    return c.json({ error: { code: 'daily_cap', message: 'Daily video limit reached.', resetsAt: cap.resetsAt } }, 429);
+  }
+
+  for (const path of referencePaths) {
+    const { data: signed, error } = await admin.storage.from('uploads').createSignedUrl(path, REF_SIGN_TTL_S);
+    if (error || !signed) return fail(c, 400, 'bad_reference_count', 'Reference upload not found.');
+    const mod = await moderate({ imageUrl: signed.signedUrl });
+    if (mod.flagged) {
+      await recordStrike(userId, 'upload', null, mod.categories, path);
+      return fail(c, 422, 'content_policy', 'A reference image was blocked by moderation.');
+    }
+    prep.referenceUrls.push(signed.signedUrl);
+  }
+  return prep;
+}
+
+/** Guard-clause wrapper so the `kind === Video` branch never wraps another
+ * `if` in the handler: non-video requests short-circuit to `null` here. */
+async function resolveVideoPrep(
+  c: Context,
+  userId: string,
+  kind: string,
+  familyId: string,
+  settings: GenerationSettings,
+  body: Record<string, unknown>,
+  parentId: string | null,
+): Promise<VideoPrep | Response | null> {
+  if (kind !== MediaKind.Video) return null;
+  const family = familyById(familyId)!;
+  return prepareVideo(c, userId, family, settings, body, parentId);
+}
 
 app.post('/generations', async (c) => {
   const userId = c.get('userId');
@@ -704,7 +1025,7 @@ app.post('/generations', async (c) => {
 
   const op = body.op as string;
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-  const batch = Number.isInteger(body.batch) ? (body.batch as number) : 1;
+  let batch = Number.isInteger(body.batch) ? (body.batch as number) : 1;
   const settings = sanitizeSettings(body.settings);
   const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
   const styleId = typeof body.style === 'string' && body.style ? body.style : null;
@@ -819,10 +1140,15 @@ app.post('/generations', async (c) => {
     return fail(c, 422, 'content_policy', 'This prompt violates our content policy.');
   }
 
+  const videoResult = await resolveVideoPrep(c, userId, kind, familyId, settings, body as Record<string, unknown>, parentId);
+  if (videoResult instanceof Response) return videoResult;
+  const video = videoResult;
+  if (video) batch = 1;
+
   // Resolve reference (parent generation or uploaded image) to a signed URL.
   let referenceUrl: string | undefined;
   const referenceUploadId = typeof body.referenceUploadId === 'string' ? body.referenceUploadId : null;
-  if (parentId) {
+  if (parentId && !video) {
     const { data: parent } = await admin
       .from('generations')
       .select('media_path')
@@ -885,7 +1211,7 @@ app.post('/generations', async (c) => {
       .select('id')
       .single();
     try {
-      const submitted = await adapter.submit({
+      const submitted: SubmitResult = await adapter.submit({
         familyId,
         op,
         prompt: effectivePrompt,
@@ -894,8 +1220,18 @@ app.post('/generations', async (c) => {
         maskPngBase64: typeof body.maskPngBase64 === 'string' ? body.maskPngBase64 : undefined,
         loraUrl: persona?.lora_url,
         safetyId: sid,
+        mode: video?.mode,
+        referenceUrls: video?.referenceUrls,
+        parentVideoUrl: video?.parentVideoUrl,
+        interactionId: video?.interactionId,
       });
       await admin.from('jobs').update({ provider_ref: submitted.providerRef }).eq('id', jobRow!.id);
+      if (submitted.interactionId) {
+        await admin
+          .from('generations')
+          .update({ settings: { ...settings, interactionId: submitted.interactionId } })
+          .eq('id', genId);
+      }
       if (submitted.inline) {
         await finishJob({ id: jobRow!.id, user_id: userId, generation_id: genId }, submitted.inline);
       }
@@ -1348,6 +1684,35 @@ app.post('/uploads', async (c) => {
   return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
 });
 
+const THUMB_MAX_BYTES = 512 * 1024;
+
+app.post('/generations/:id/thumb', async (c) => {
+  const userId = c.get('userId') as string;
+  const generationId = c.req.param('id');
+  const { data: gen } = await admin
+    .from('generations')
+    .select('id,kind,status,storage_backend,thumb_path')
+    .eq('id', generationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!gen || gen.kind !== MediaKind.Video) return fail(c, 404, 'not_found', 'Video not found.');
+  if (gen.status !== 'done') return fail(c, 409, 'not_ready', 'Video is not finished.');
+
+  const form = await c.req.formData();
+  const file = form.get('file');
+  if (!(file instanceof File)) return fail(c, 400, 'invalid_file', 'Missing file.');
+  if (file.size > THUMB_MAX_BYTES) return fail(c, 413, 'too_large', 'Thumbnail must be ≤ 512 KB.');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (sniffImage(bytes) !== 'jpg') return fail(c, 415, 'bad_type', 'Thumbnail must be JPEG.');
+
+  const backend = (gen.storage_backend ?? 'r2') as StorageBackend;
+  const path = thumbPath(userId, generationId);
+  await storageFor(backend).put(path, bytes, 'image/jpeg');
+  const { error } = await admin.from('generations').update({ thumb_path: path }).eq('id', generationId);
+  if (error) return fail(c, 500, 'thumb_failed', error.message);
+  return c.json({ thumbUrl: await signStored(backend, path) });
+});
+
 async function toPersonaDto(row: Record<string, unknown>) {
   const photos = (row.photo_paths as string[]) ?? [];
   let thumbUrl = '';
@@ -1668,14 +2033,26 @@ app.post('/library/import', async (c) => {
 });
 
 app.delete('/generations/:id', async (c) => {
-  const { data, error } = await admin
+  const userId = c.get('userId') as string;
+  const id = c.req.param('id');
+  const { data: row, error } = await admin
     .from('generations')
     .delete()
-    .eq('id', c.req.param('id'))
-    .eq('user_id', c.get('userId'))
-    .select('id');
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id,media_path,thumb_path,storage_backend')
+    .maybeSingle();
   if (error) return fail(c, 400, 'delete_failed', error.message);
-  if (!data?.length) return fail(c, 404, 'not_found', 'Generation not found');
+  if (!row) return fail(c, 404, 'not_found', 'Generation not found.');
+  const backend = (row.storage_backend ?? 'supabase') as StorageBackend;
+  const paths = [row.media_path, row.thumb_path].filter((p): p is string => !!p);
+  for (const p of paths) {
+    try {
+      await storageFor(backend).delete(p);
+    } catch (e) {
+      logError(c, 'storage_delete_failed', e);
+    }
+  }
   return c.json({ ok: true });
 });
 

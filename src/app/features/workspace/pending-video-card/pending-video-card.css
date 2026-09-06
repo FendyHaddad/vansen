@@ -1,0 +1,59 @@
+.pv {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px;
+  background: linear-gradient(180deg, #1a1a1a, #0d0d0d);
+  color: #e8e8e8;
+}
+
+.pv-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.pv-eta {
+  color: #9a9a9a;
+}
+
+.pv-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.12);
+  overflow: hidden;
+}
+
+.pv-bar-fill {
+  height: 100%;
+  width: calc(var(--p) * 100%);
+  background: #fff;
+  transition: width 600ms ease-out;
+}
+
+.pv-note {
+  font-size: 11px;
+  color: #9a9a9a;
+}
+
+.pv-cancel {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 4px;
+  background: transparent;
+  color: #ddd;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pv-cancel:hover {
+  border-color: #fff;
+  color: #fff;
+}

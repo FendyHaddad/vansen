@@ -25,9 +25,13 @@ import {
   MODEL_FAMILIES,
   ModelFamily,
   ModelKind,
+  VideoMode,
   creditCost,
   defaultSettings,
+  familyById,
   personaGenCreditCost,
+  referenceRule,
+  videoFamilySupports,
 } from '../../../core/catalog/model-families';
 import { LedgerService } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
@@ -44,6 +48,9 @@ import { PersonaStore } from '../../../core/personas/persona-store';
 import { PersonaPicker } from '../persona-picker/persona-picker';
 import { TrendPreset } from '../../../core/catalog/trend-presets';
 import { TrendGallery } from '../trend-gallery/trend-gallery';
+import { ModePicker } from './mode-picker/mode-picker';
+import { ReferenceDrop, RefSlot } from './reference-drop/reference-drop';
+import type { GenerationItem } from '../../../core/generations/generation-store';
 
 export interface GenerateRequest {
   family: ModelFamily;
@@ -64,6 +71,10 @@ export interface GenerateRequest {
   batch: number;
   /** Total credit price for the whole batch (display/confirm only — server prices). */
   priceCredits: number;
+  /** Video reference uploads (storage paths), in slot order. Video mode only. */
+  referencePaths?: string[];
+  /** Finished video the clip extends or edits. */
+  videoParentId?: string;
 }
 
 export interface ReferenceSelection {
@@ -96,6 +107,8 @@ const AXIS_TOOLTIPS = {
     StylePicker,
     PersonaPicker,
     TrendGallery,
+    ModePicker,
+    ReferenceDrop,
     ...HlmDropdownMenuImports,
   ],
   providers: [
@@ -128,8 +141,13 @@ export class LeftPanel {
   readonly uploading = signal(false);
   readonly uploadError = signal('');
 
-  /** Video generation ships with the Pro tier (Phase 4b) — locked teaser until then. */
-  readonly videoLocked = true;
+  /** Video generation is a Pro-tier feature — locked for everyone else. */
+  readonly videoLocked = computed(() => !this.profileStore.proActive());
+  readonly upgradeRequested = output<void>();
+  readonly pickVideoRequested = output<void>();
+
+  readonly refSlots = signal<RefSlot[]>([]);
+  readonly videoParent = signal<GenerationItem | null>(null);
 
   readonly mode = signal<ModelKind>('image');
   readonly familyId = signal(firstFamilyOf('image').id);
@@ -146,13 +164,12 @@ export class LeftPanel {
   constructor() {
     // Apply user preferences as starting state
     const prefs = this.prefsService.prefs();
-    this.mode.set(this.videoLocked ? 'image' : prefs.defaultMode);
+    const startMode: ModelKind = this.videoLocked() ? 'image' : prefs.defaultMode;
+    this.mode.set(startMode);
     const preferredId =
-      prefs.defaultMode === 'video' ? prefs.defaultVideoFamily : prefs.defaultImageFamily;
-    const preferred = MODEL_FAMILIES.find(
-      (f) => f.id === preferredId && f.kind === prefs.defaultMode,
-    );
-    const family = preferred ?? firstFamilyOf(prefs.defaultMode);
+      startMode === 'video' ? prefs.defaultVideoFamily : prefs.defaultImageFamily;
+    const preferred = MODEL_FAMILIES.find((f) => f.id === preferredId && f.kind === startMode);
+    const family = preferred ?? firstFamilyOf(startMode);
     this.familyId.set(family.id);
     const base = defaultSettings(family);
     if (family.capabilities.aspectRatios.includes(prefs.defaultAspect)) {
@@ -201,6 +218,10 @@ export class LeftPanel {
     if (f.id === 'veo' && this.settings().version === 'fast') {
       return list.filter((o) => o.value !== '4K');
     }
+    // Veo Lite tops out at 1080p
+    if (f.id === 'veo' && this.settings().version === 'lite') {
+      return list.filter((o) => o.value !== '4K');
+    }
     return list;
   });
 
@@ -232,28 +253,110 @@ export class LeftPanel {
 
   readonly personaActive = computed(() => this.mode() === 'image' && !!this.persona());
 
+  readonly videoMode = computed<VideoMode>(() => this.settings().mode ?? 't2v');
+  readonly refRule = computed(() => referenceRule(this.videoMode()));
+  readonly showReferences = computed(() => this.mode() === 'video' && this.refRule().max > 0);
+  readonly showVideoParent = computed(() => this.mode() === 'video' && this.refRule().needsParent);
+  readonly audioSelectable = computed(() => this.family().capabilities.audio === 'selectable');
+  readonly audioIncluded = computed(() => this.family().capabilities.audio === 'included');
+  /** Off t2v the source frame dictates the shape (Kling i2v included) — hide the chip. */
+  /** Aspect ratio follows the input frame for i2v and keyframes, so the control hides. */
+  readonly hideAspect = computed(
+    () => this.mode() === 'video' && (this.videoMode() === 'i2v' || this.videoMode() === 'keyframes'),
+  );
+
+  readonly audioOptions: FamilyOption[] = [
+    { value: 'off', label: 'Off', tooltip: 'Silent clip. Cheapest.' },
+    { value: 'on', label: 'Sound', tooltip: 'Ambient sound and music.' },
+    { value: 'voice', label: 'Voice', tooltip: 'Sound plus spoken dialogue.' },
+  ];
+
+  readonly videoInputsReady = computed(() => {
+    if (this.mode() !== 'video') return true;
+    const rule = this.refRule();
+    if (rule.needsParent) return this.videoParent() !== null;
+    const n = this.refSlots().length;
+    return n >= rule.min && n <= rule.max;
+  });
+
   readonly batch = computed(() => this.settings().batch ?? 1);
   readonly unitCredits = computed(() =>
     this.personaActive() ? personaGenCreditCost() : creditCost(this.family(), this.settings()),
   );
-  readonly priceCredits = computed(() => this.unitCredits() * this.batch());
+  readonly priceCredits = computed(() => {
+    const n = this.mode() === 'video' ? 1 : this.batch();
+    return this.unitCredits() * n;
+  });
   readonly insufficient = computed(
     () => !this.isOwner() && this.priceCredits() > this.ledger.totalCredits(),
   );
   readonly canGenerate = computed(
-    () => this.prompt().trim().length > 0 && !this.insufficient(),
+    () => this.prompt().trim().length > 0 && !this.insufficient() && this.videoInputsReady(),
   );
 
   setMode(kind: ModelKind): void {
-    if (kind === 'video' && this.videoLocked) return;
+    if (kind === 'video' && this.videoLocked()) return;
     this.appliedTrend.set(null);
     this.mode.set(kind);
     this.selectFamily(firstFamilyOf(kind).id);
+    if (kind !== 'video') return;
+    const preferred = this.prefsService.prefs().defaultVideoMode;
+    if (videoFamilySupports(this.family(), preferred)) this.setVideoMode(preferred);
+  }
+
+  /** Mode-toggle click: non-Pro gets the upgrade dialog instead of the switch. */
+  onVideoModeToggle(): void {
+    if (this.videoLocked()) {
+      this.upgradeRequested.emit();
+      return;
+    }
+    this.setMode('video');
+  }
+
+  setVideoMode(mode: VideoMode): void {
+    if (!videoFamilySupports(this.family(), mode)) return;
+    this.settings.update((s) => ({ ...s, mode }));
+    this.refSlots.set([]);
+    this.videoParent.set(null);
+  }
+
+  setAudio(value: string): void {
+    if (value !== 'off' && value !== 'on' && value !== 'voice') return;
+    this.settings.update((s) => ({ ...s, audio: value }));
+  }
+
+  setVideoParent(item: GenerationItem | null): void {
+    this.videoParent.set(item);
+  }
+
+  /** Video follow-up from the detail overlay: switch to video mode, pick a family
+   * that supports the requested mode (preferring the item's own family), and load
+   * the item as the parent clip. Video is Pro-only — locked users get the upgrade
+   * dialog instead, mirroring onVideoModeToggle. */
+  startVideoFollowUp(item: GenerationItem, mode: 'extend' | 'edit'): void {
+    if (this.videoLocked()) {
+      this.upgradeRequested.emit();
+      return;
+    }
+    const own = familyById(item.familyId);
+    const ownSupports = !!own && videoFamilySupports(own, mode);
+    // Extend continues this exact clip — no other family can pick it up.
+    if (mode === 'extend' && !ownSupports) return;
+    const target = ownSupports
+      ? own
+      : MODEL_FAMILIES.find((f) => f.kind === 'video' && videoFamilySupports(f, mode));
+    if (!target) return;
+    this.setMode('video');
+    this.selectFamily(target.id);
+    this.setVideoMode(mode);
+    this.setVideoParent(item);
   }
 
   selectFamily(id: string): void {
     this.familyId.set(id);
     this.settings.set(defaultSettings(this.family()));
+    this.refSlots.set([]);
+    this.videoParent.set(null);
     if (!this.family().capabilities.imageInput) this.reference.set(null);
   }
 
@@ -333,29 +436,45 @@ export class LeftPanel {
 
   generate(): void {
     if (!this.canGenerate() || this.generating()) return;
+    // Video carries its inputs in refSlots/videoParent — a leftover image
+    // reference must never ride along as a parent id.
+    const imageMode = this.mode() === 'image';
+    const imageRef = imageMode && !this.personaActive() ? this.reference() : null;
     this.generateRequested.emit({
       family: this.family(),
       settings: { ...this.settings() },
       prompt: this.prompt().trim(),
-      style: this.mode() === 'image' ? this.style() : null,
+      style: imageMode ? this.style() : null,
       personaId: this.personaActive() ? this.persona() : null,
-      trendId: this.mode() === 'image' ? this.appliedTrend() : null,
-      referenceId: this.personaActive() ? null : (this.reference()?.id ?? null),
-      referenceUploadId: this.personaActive() ? null : (this.reference()?.uploadId ?? null),
-      referenceUrl: this.personaActive() ? null : (this.reference()?.url ?? null),
-      batch: this.batch(),
+      trendId: imageMode ? this.appliedTrend() : null,
+      referenceId: imageRef?.id ?? null,
+      referenceUploadId: imageRef?.uploadId ?? null,
+      referenceUrl: imageRef?.url ?? null,
+      batch: imageMode ? this.batch() : 1,
       priceCredits: this.priceCredits(),
+      referencePaths: imageMode ? undefined : this.refSlots().map((slot) => slot.path),
+      videoParentId: imageMode ? undefined : this.videoParent()?.id,
     });
     this.prompt.set('');
     this.appliedTrend.set(null);
+    // Keep videoParent — the user commonly extends the same clip again.
+    this.refSlots.set([]);
   }
 
-  /** Reset options that fell out of range after a version switch. */
+  /** Reset options that fell out of range after a version or family switch. */
   private clampSettings(): void {
+    const f = this.family();
     const allowed = this.resolutionOptions();
-    if (allowed && !allowed.some((o) => o.value === this.settings().resolution)) {
-      this.settings.update((s) => ({ ...s, resolution: allowed[0]?.value }));
-    }
+    const stale = !!allowed && !allowed.some((o) => o.value === this.settings().resolution);
+    this.settings.update((s) => {
+      const next = { ...s };
+      if (stale) next.resolution = allowed![0]?.value;
+      if (f.kind === 'video' && !videoFamilySupports(f, next.mode ?? 't2v')) next.mode = 't2v';
+      if (f.capabilities.audio !== 'selectable') delete next.audio;
+      if (f.capabilities.audio === 'selectable' && !next.audio) next.audio = 'off';
+      if (f.kind !== 'video') delete next.mode;
+      return next;
+    });
   }
 }
 

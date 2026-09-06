@@ -1,8 +1,10 @@
-# Punchlist — as of 2026-09-05
+# Punchlist — as of 2026-09-06
 
-Working tree is clean apart from this doc refresh (`README.md`, `vansen.md`, `.gitignore`,
-this file). All automated gates are green: `ng build` clean, 197 vitest + 19 deno tests;
-`api` v41 deployed 2026-08-14 and in sync with backend HEAD, health `{"ok":true,"db":true}`.
+Working tree has Video (Phase 4b) code plus this doc refresh (`README.md`, `vansen.md`,
+`CLAUDE.md`, this file) uncommitted. All automated gates are green: `ng build` clean,
+239 vitest + 40 deno tests; `api` v41 deployed 2026-08-14; Phase 4b gateway changes (video branch, cancel, thumb, R2) are NOT yet deployed
+for everything except Video, whose deploy is pending redeploy (see 🟡 below), health
+`{"ok":true,"db":true}`.
 
 ---
 
@@ -39,6 +41,27 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 
 ## 🟡 Engineering backlog (unblocked, unscheduled)
 
+- **Video (Phase 4b) rollout pending (2026-09-06)** — code is complete and gates are
+  green, but nothing is live yet. User actions, in order: apply migration
+  `supabase/migrations/0016_video.sql` (MCP `apply_migration`); set secrets
+  `RUNWAY_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+  `R2_BUCKET`; create Cloudflare R2 bucket `vansen-media` + CORS (see
+  `.superpowers/sdd/task-24-brief.md` Step 1 for the CORS JSON); redeploy
+  `supabase functions deploy api --no-verify-jwt` (api version currently pending
+  redeploy — do not assume a version number until this runs); enable each of the five
+  `models` rows (`veo`, `omni`, `kling`, `runway`, `seedance`) one at a time via MCP
+  `execute_sql` and smoke it live with a Pro account (cheapest settings per family,
+  cancel + refund check, R2 object check) per Step 3 of the task-24 brief. Also carries
+  two open product decisions: whether to bring back a "From library" picker for video
+  reference slots (needs gateway `referenceIds` support — see
+  `src/app/features/workspace/left-panel/reference-drop/reference-drop.ts`), and
+  whether to keep the `provider_blocked` client copy ("Provider declined this prompt.
+  Credits refunded.") or change the wording. Two more open follow-ups: whether poster
+  JPEGs (client-captured, currently never re-submitted to moderation) need a moderation
+  pass of their own; and `left-panel.ts` `hideAspect` currently hides the aspect-ratio
+  chip for every non-t2v video mode (spec only called for hiding it on Kling i2v), so
+  ref2v/keyframes users on families that do support a chosen ratio (veo, seedance) can't
+  set one today — decide whether to narrow `hideAspect` or keep the broader hide.
 - **Abuse controls from spec, not built** — concurrent-session cap / account-sharing
   heuristics, dispatch rate limit, daily provider-spend alarm (`vansen.md` Security section).
 - **i18n** — spec calls for en + ms; nothing started.
@@ -46,8 +69,17 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 
 ---
 
-## ✅ Done since last update (2026-07-24 → 2026-09-05)
+## ✅ Done since last update (2026-07-24 → 2026-09-06)
 
+- **Video (Phase 4b) code complete (2026-09-06)** — five families (Veo 3.1, Gemini Omni
+  Flash 1.1, Kling 3.0 Pro, Runway Gen-4.5, Seedance 2.5) via new adapters in
+  `_shared/providers/` (`google-video.ts`, `google-omni.ts`, `runway.ts`, `fal.ts`
+  extended); mode matrix t2v/i2v/ref2v/keyframes/extend/edit; Cloudflare R2 storage
+  adapters (`_shared/storage/`); client-captured poster frames; waiting-UX components
+  (`mode-picker`, `reference-drop`, `video-picker-dialog`, `pending-video-card`,
+  `rendering-chip`); 3-concurrent-job + $40/day caps; cancel + refund. Migration
+  `0016_video.sql` written but not yet applied; see the 🟡 rollout-pending item below
+  for what's still needed before this is live.
 - **AI Sharpen wired (2026-09-05)** — NAFNet deblur ONNX (MIT, ~88 MB) as Pro rail tool
   `aisharpen`; `engines/deblur-engine.ts` tiled like Upscale, WebGPU→wasm fallback,
   16 MP cap. Build + 197 tests green.
@@ -71,7 +103,5 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 
 ## ⏸️ Not started yet (deferred by design)
 
-- **Video (Phase 4b)** — locked teaser. When it ships, use Cloudflare R2 for video
-  storage, not Supabase Storage (egress cost).
 - **Denoise / Colorize** — no license-clean hosted ONNX; need offline export
   (NAFNet-SIDD .pth MIT, DDColor tiny Apache) + self-hosting.

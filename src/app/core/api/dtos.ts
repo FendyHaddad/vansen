@@ -68,6 +68,17 @@ export interface LedgerResponse {
   entries: LedgerEntryDto[];
 }
 
+export type JobPhase = 'queued' | 'rendering' | 'saving';
+
+export interface JobProgressDto {
+  progress?: number;
+  phase?: JobPhase;
+  queuePosition?: number;
+  cancellable: boolean;
+  expectedS: number;
+  startedAt: string;
+}
+
 export interface GenerationDto {
   id: string;
   kind: MediaKind;
@@ -79,6 +90,12 @@ export interface GenerationDto {
   priceCredits: number;
   status: GenerationStatus;
   mediaUrl: string;
+  thumbUrl?: string;
+  storageBackend?: 'supabase' | 'r2';
+  durationS?: number;
+  /** Failure reason from the job row; 'cancelled' when the user stopped it. */
+  error?: string;
+  job?: JobProgressDto;
   parentId: string | null;
   createdAt: string;
 }
@@ -97,6 +114,7 @@ export interface CreateGenerationRequest {
   batch: number;
   parentId?: string;
   referenceUploadId?: string;
+  referencePaths?: string[];
   maskPngBase64?: string;
   /** Persona id — server validates ownership/readiness and injects the trigger. */
   personaId?: string;
@@ -107,6 +125,15 @@ export interface CreateGenerationRequest {
 export interface CreateGenerationResponse {
   items: GenerationDto[];
   credits: CreditsDto;
+}
+
+export interface CancelJobResponse {
+  refundedCredits: number;
+  credits: CreditsDto;
+}
+
+export interface ThumbResponse {
+  thumbUrl: string;
 }
 
 export interface JobsResponse {

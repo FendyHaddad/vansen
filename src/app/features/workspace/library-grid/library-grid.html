@@ -73,10 +73,18 @@
               }
             </span>
           }
-          @if (item.status === 'pending') {
+          @if (item.status === 'pending' && item.kind === 'video') {
+            <app-pending-video-card [item]="item" [now]="now()" (cancel)="cancel.emit($event)" />
+          } @else if (item.status === 'pending') {
             <div class="gen-pending">
               <span class="spinner"></span>
               Generating…
+            </div>
+          } @else if (item.status === 'failed' && item.error === 'cancelled') {
+            <div class="gen-failed gen-cancelled">
+              <span class="failed-sub"
+                >Cancelled · Refunded <span class="num">{{ item.priceCredits }} cr</span></span
+              >
             </div>
           } @else if (item.status === 'failed') {
             <div class="gen-failed">
@@ -98,14 +106,45 @@
                 }
               </button>
             </div>
+          } @else if (item.kind === 'video') {
+            <div class="video-tile" (pointerenter)="poster.ensure(item)">
+              @if (item.thumbUrl) {
+                <img [src]="item.thumbUrl" [alt]="item.prompt" loading="lazy" />
+              } @else {
+                <div class="video-dark"></div>
+              }
+              <span class="video-play"><ng-icon name="lucidePlay" size="18" /></span>
+              <span class="video-tag">{{ item.durationS ?? item.settings.durationS }}s</span>
+            </div>
+            @if (item.op === 'edit' || item.op === 'upscale') {
+              <span class="op-tag">{{ item.op === 'edit' ? 'edited' : 'upscaled' }}</span>
+            }
+            @if (!pickMode() && !selectMode()) {
+              <div class="qa-overlay" [class.qa-busy]="busyIds().has(item.id)">
+                @if (busyIds().has(item.id)) {
+                  <span class="qa-spin" role="status" aria-label="Working…"></span>
+                } @else {
+                  <button
+                    type="button"
+                    class="qa"
+                    aria-label="Download"
+                    (click)="download.emit(item.id); $event.stopPropagation()"
+                  >
+                    <ng-icon name="lucideDownload" size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    class="qa qa-danger"
+                    aria-label="Delete"
+                    (click)="deleteOne(item.id); $event.stopPropagation()"
+                  >
+                    <ng-icon name="lucideTrash2" size="13" />
+                  </button>
+                }
+              </div>
+            }
           } @else {
             <img [cachedSrc]="item.mediaUrl" [cacheKey]="item.id" [alt]="item.prompt" />
-            @if (item.kind === 'video') {
-              <span class="video-tag">
-                <ng-icon name="lucideVideo" size="12" />
-                <span class="num">{{ item.settings.durationS ?? 5 }}s</span>
-              </span>
-            }
             @if (item.op === 'edit' || item.op === 'upscale') {
               <span class="op-tag">{{ item.op === 'edit' ? 'edited' : 'upscaled' }}</span>
             }

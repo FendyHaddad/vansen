@@ -49,4 +49,10 @@ export class NotificationToast {
       this.open.emit(t.notification.genId);
     }
   }
+
+  /** "View" button — same action as clicking the body, without double-firing it. */
+  onView(event: Event): void {
+    event.stopPropagation();
+    this.onClick();
+  }
 }

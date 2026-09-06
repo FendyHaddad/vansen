@@ -36,6 +36,25 @@ describe('ApiService', () => {
     expect(headers['Authorization']).toBe('Bearer tok');
   });
 
+  it('carries error details such as resetsAt through to ApiError', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 'daily_cap', message: 'Daily video limit reached', resetsAt: '2026-09-07T00:00:00Z' },
+        }),
+        { status: 429 },
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const api = makeApi('tok');
+    await expect(api.post('/generations', {})).rejects.toMatchObject({
+      code: 'daily_cap',
+      status: 429,
+      details: { resetsAt: '2026-09-07T00:00:00Z' },
+    });
+  });
+
   it('returns parsed JSON on success', async () => {
     globalThis.fetch = vi
       .fn()

@@ -1,0 +1,99 @@
+.ref-preview {
+  position: relative;
+  width: 96px;
+}
+
+.ref-preview img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: calc(var(--radius) - 4px);
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.ref-clear {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ref-drop {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 0;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.ref-drop:hover:not(.ref-blocked):not(:disabled) {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  color: var(--foreground);
+}
+
+.ref-file-input {
+  display: none;
+}
+
+.ref-error {
+  font-size: 0.75rem;
+  color: var(--loss);
+  margin-top: 6px;
+}
+
+.ref-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ref-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ref-slot-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 20%, transparent);
+  border-top-color: var(--foreground);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

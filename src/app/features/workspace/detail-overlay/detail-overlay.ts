@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, HostListener, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  input,
+  output,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -9,7 +16,11 @@ import {
   lucideX,
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
-import { upscaleCreditCost } from '../../../core/catalog/model-families';
+import {
+  familyById,
+  upscaleCreditCost,
+  videoFamilySupports,
+} from '../../../core/catalog/model-families';
 import { styleById } from '../../../core/catalog/style-presets';
 import { CachedSrc } from '../../../core/media/cached-src';
 
@@ -40,8 +51,18 @@ export class DetailOverlay {
   readonly edit = output<string>();
   readonly deleted = output<string>();
   readonly openParent = output<string>();
+  readonly extend = output<GenerationItem>();
+  readonly editVideo = output<GenerationItem>();
 
   readonly upscaleCredits = upscaleCreditCost();
+
+  /** Extend continues this clip, so only the clip's own family counts. */
+  readonly canExtend = computed(() => {
+    const family = familyById(this.item().familyId);
+    if (!family) return false;
+    return videoFamilySupports(family, 'extend');
+  });
+  readonly canEditVideo = computed(() => this.item().familyId === 'omni');
 
   @HostListener('document:keydown.escape')
   onEscape(): void {

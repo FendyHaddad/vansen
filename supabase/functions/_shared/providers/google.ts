@@ -2,14 +2,7 @@
 // returns image bytes inline, so submit answers synchronously and check() is a
 // defensive no-op for inline refs.
 import { CheckResult, ProviderAdapter, SubmitCtx } from './types.ts';
-
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-
-function key(): string {
-  const k = Deno.env.get('GOOGLE_AI_API_KEY');
-  if (!k) throw new Error('GOOGLE_AI_API_KEY missing');
-  return k;
-}
+import { GOOGLE_API_BASE, googleHeaders } from './google-common.ts';
 
 /** Nano Banana version → Gemini image model id. */
 function modelFor(ctx: SubmitCtx): string {
@@ -43,9 +36,9 @@ export const googleAdapter: ProviderAdapter = {
     if (ctx.settings.resolution) responseFormat.image_size = String(ctx.settings.resolution);
     if (ctx.settings.aspectRatio) responseFormat.aspect_ratio = String(ctx.settings.aspectRatio);
 
-    const res = await fetch(`${API_BASE}/${model}:generateContent`, {
+    const res = await fetch(`${GOOGLE_API_BASE}/models/${model}:generateContent`, {
       method: 'POST',
-      headers: { 'x-goog-api-key': key(), 'Content-Type': 'application/json' },
+      headers: googleHeaders(),
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
         generationConfig: {

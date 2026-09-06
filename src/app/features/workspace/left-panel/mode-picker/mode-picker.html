@@ -1,0 +1,19 @@
+<div class="og">
+  <div class="og-head">
+    <span class="og-label">Mode</span>
+  </div>
+  <div class="mode-chips">
+    @for (m of modes(); track m) {
+      <app-hint [text]="hints[m]">
+        <button
+          type="button"
+          class="mode-chip"
+          [class.mode-chip-on]="m === selected()"
+          (click)="pick(m)"
+        >
+          {{ labels[m] }}
+        </button>
+      </app-hint>
+    }
+  </div>
+</div>

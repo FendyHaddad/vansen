@@ -1,10 +1,12 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { ApiService } from '../api/api-service';
+import type { VideoMode } from '../catalog/model-families';
 
 export interface Prefs {
   defaultMode: 'image' | 'video';
   defaultImageFamily: string;
   defaultVideoFamily: string;
+  defaultVideoMode: VideoMode;
   defaultAspect: string;
   /** Style preset id preselected in the left panel ('' = none). */
   defaultStyle: string;
@@ -18,6 +20,7 @@ const DEFAULTS: Prefs = {
   defaultMode: 'image',
   defaultImageFamily: 'nano-banana',
   defaultVideoFamily: 'veo',
+  defaultVideoMode: 't2v',
   defaultAspect: '1:1',
   defaultStyle: '',
   defaultPersona: '',

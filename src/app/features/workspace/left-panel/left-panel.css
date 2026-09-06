@@ -352,3 +352,41 @@
   color: var(--muted-foreground);
   padding: 5px 4px 5px 8px;
 }
+
+.parent-row,
+.parent-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.parent-pick {
+  cursor: pointer;
+  justify-content: center;
+}
+
+.parent-pick:hover {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+
+.parent-name {
+  flex: 1;
+  color: var(--foreground);
+}
+
+.parent-change {
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}

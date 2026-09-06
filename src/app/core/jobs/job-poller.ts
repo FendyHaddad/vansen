@@ -6,10 +6,22 @@ import { GenerationStore } from '../generations/generation-store';
 const FAST_MS = 2000;
 const SLOW_MS = 5000;
 const SLOW_AFTER_MS = 30_000;
+const VIDEO_FAST_MS = 3000;
+const VIDEO_SLOWEST_MS = 10_000;
+const VIDEO_SLOWEST_AFTER_MS = 120_000;
+
+/** Poll interval given elapsed time and whether any pending item is a video. */
+export function pollIntervalMs(elapsedMs: number, hasVideo: boolean): number {
+  if (!hasVideo) return elapsedMs > SLOW_AFTER_MS ? SLOW_MS : FAST_MS;
+  if (elapsedMs > VIDEO_SLOWEST_AFTER_MS) return VIDEO_SLOWEST_MS;
+  if (elapsedMs > SLOW_AFTER_MS) return SLOW_MS;
+  return VIDEO_FAST_MS;
+}
 
 /**
  * Polls GET /jobs while the library has pending items, applying status/media
- * updates to the store. Backs off 2s → 5s after 30s; stops when none pending.
+ * updates to the store. Backs off 2s → 5s after 30s (image) or
+ * 3s → 5s after 30s → 10s after 2min (video); stops when none pending.
  */
 @Injectable({ providedIn: 'root' })
 export class JobPoller {
@@ -46,14 +58,12 @@ export class JobPoller {
   }
 
   private schedule(): void {
-    const interval = Date.now() - this.startedAt > SLOW_AFTER_MS ? SLOW_MS : FAST_MS;
+    const elapsed = Date.now() - this.startedAt;
+    const delay = pollIntervalMs(elapsed, this.store.pendingVideoCount() > 0);
     this.timer = setTimeout(async () => {
       await this.tick();
-      if (this.store.pendingIds().length > 0) {
-        this.schedule();
-      } else {
-        this.stop();
-      }
-    }, interval);
+      if (this.store.pendingIds().length > 0) this.schedule();
+      else this.stop();
+    }, delay);
   }
 }

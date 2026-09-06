@@ -36,6 +36,22 @@
   white-space: nowrap;
 }
 
+.toast-view {
+  flex: 0 0 auto;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;

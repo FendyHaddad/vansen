@@ -6,7 +6,18 @@
 
     <div class="panel-grid">
       <div class="preview">
-        <img [cachedSrc]="item().mediaUrl" [cacheKey]="item().id" [alt]="item().prompt" />
+        @if (item().kind === 'video') {
+          <video
+            class="preview-video"
+            controls
+            playsinline
+            preload="metadata"
+            [poster]="item().thumbUrl ?? null"
+            [src]="item().mediaUrl"
+          ></video>
+        } @else {
+          <img [cachedSrc]="item().mediaUrl" [cacheKey]="item().id" [alt]="item().prompt" />
+        }
       </div>
 
       <div class="meta">
@@ -28,6 +39,12 @@
             <dt>Created</dt>
             <dd>{{ item().createdAt | date: 'medium' }}</dd>
           </div>
+          @if (item().kind === 'video') {
+            <div>
+              <dt>Length</dt>
+              <dd>{{ item().durationS ?? item().settings.durationS }}s</dd>
+            </div>
+          }
         </dl>
 
         @if (item().parentId) {
@@ -68,6 +85,14 @@
               <ng-icon name="lucidePencil" size="15" />
               Edit →
             </button>
+          }
+          @if (item().kind === 'video' && item().status === 'done') {
+            @if (canExtend()) {
+              <button type="button" class="action" [disabled]="busy()" (click)="extend.emit(item())">Extend →</button>
+            }
+            @if (canEditVideo()) {
+              <button type="button" class="action" [disabled]="busy()" (click)="editVideo.emit(item())">Edit →</button>
+            }
           }
           <button
             type="button"

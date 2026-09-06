@@ -1,9 +1,17 @@
 @if (toast(); as t) {
-  <button type="button" class="toast" (click)="onClick()">
+  <div
+    class="toast"
+    role="button"
+    tabindex="0"
+    (click)="onClick()"
+    (keydown.enter)="onClick()"
+    (keydown.space)="onClick()"
+  >
     <ng-icon [name]="icon(t.notification)" size="15" class="toast-icon" />
     <span class="toast-title">{{ t.notification.title }}</span>
     @if (t.extra > 0) {
       <span class="toast-extra">(+{{ t.extra }} more)</span>
     }
-  </button>
+    <button type="button" class="toast-view" (click)="onView($event)">View</button>
+  </div>
 }

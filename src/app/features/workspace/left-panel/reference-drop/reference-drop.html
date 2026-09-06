@@ -1,0 +1,28 @@
+<div class="ref-slots">
+  @for (v of visible(); track v.index) {
+    <div class="ref-slot" [class.ref-slot-filled]="!!v.slot">
+      <span class="ref-slot-label">{{ v.label }}</span>
+      @if (v.slot; as slot) {
+        <div class="ref-preview">
+          <img [src]="slot.url" alt="" />
+          <button type="button" class="ref-clear" (click)="clear(v.index)" aria-label="Remove reference">
+            <ng-icon name="lucideX" size="12" />
+          </button>
+        </div>
+      } @else {
+        <label class="ref-drop" (dragover)="allowDrop($event)" (drop)="onDrop(v.index, $event)">
+          @if (uploadingIndex() === v.index) {
+            <span class="spinner"></span>
+          } @else {
+            <ng-icon name="lucideImagePlus" size="16" />
+            <span>Drop or click</span>
+          }
+          <input type="file" accept="image/*" class="ref-file-input" (change)="onFileInput(v.index, $event)" />
+        </label>
+      }
+    </div>
+  }
+</div>
+@if (error()) {
+  <p class="ref-error">{{ error() }}</p>
+}

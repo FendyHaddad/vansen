@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@hono/hono@*": "4.12.30",
     "jsr:@std/assert@*": "1.0.19",
+    "jsr:@std/encoding@*": "1.0.11",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@supabase/supabase-js@2": "2.110.7",
     "npm:@apple/app-store-server-library@1.6.0": "1.6.0",
@@ -11,6 +12,7 @@
     "npm:@supabase/postgrest-js@2.110.7": "2.110.7",
     "npm:@supabase/realtime-js@2.110.7": "2.110.7",
     "npm:@supabase/storage-js@2.110.7": "2.110.7",
+    "npm:aws4fetch@1.0.20": "1.0.20",
     "npm:fflate@0.8.2": "0.8.2",
     "npm:stripe@17": "17.7.0"
   },
@@ -23,6 +25,9 @@
       "dependencies": [
         "jsr:@std/internal"
       ]
+    },
+    "@std/encoding@1.0.11": {
+      "integrity": "e7cef2f0b3153bccc17431e7c864a1de03a4b6d9647389c43e08aaa775d37385"
     },
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
@@ -115,6 +120,9 @@
     },
     "asynckit@0.4.0": {
       "integrity": "sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q=="
+    },
+    "aws4fetch@1.0.20": {
+      "integrity": "sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g=="
     },
     "base64url@3.0.1": {
       "integrity": "sha512-ir1UPr3dkwexU7FdV8qBBbNDRUhMmIekYMFZfi+C/sLNnRESKPl23nB9b2pltqfOQNnGzsDdId90AEtG5tCx4A=="

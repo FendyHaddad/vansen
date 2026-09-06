@@ -55,7 +55,17 @@
   edit-expand|edit-bg` in `EDIT_TOOLS` (model-families.ts): FIXED retail prices
   ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,
   fal FLUX-fill (mask as data URI) + BiRefNet, kill-switch rows in `models`.
-  Expand = client pads canvas 25%/side + border mask. Video = Phase 4b, locked teaser.
+  Expand = client pads canvas 25%/side + border mask.
+  Video (Phase 4b, code-complete): five families veo/omni (Google, no cancel), kling/seedance (fal), runway
+  (direct) in `_shared/providers/`; modes t2v/i2v/ref2v/keyframes/extend/edit gated by
+  `capabilities.modes`; Pro-only; caps = 3 pending videos + $40/day provider spend
+  (`VIDEO_DAILY_CAP_USD`). Files stream to Cloudflare R2 (`_shared/storage/`, secrets R2_*),
+  posters are client-captured JPEGs via `POST /generations/:id/thumb`. Cancel =
+  `POST /jobs/:id/cancel` (fal queued-only, runway any). Stale sweep: video 30 min.
+  Secrets: RUNWAY_API_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+  Rollout pending as of 2026-09-06: migration `0016_video.sql` not yet applied, secrets not
+  set, R2 bucket + CORS not created, `api` not redeployed, and per-family `models.enabled`
+  live smoke not run — code is complete but nothing is live yet.
 - Studio expansion (2026-07-11): 17 filter presets (new: fade/noir/matte/tealorange/
   goldenhour/crossprocess/infrared/bleach/duotone/clarity; duotone takes colorA/colorB,
   clarity precomputes blurred luminance), Dehaze (dark-channel prior, `ops/dehaze.ts`) +

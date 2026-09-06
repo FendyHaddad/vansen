@@ -90,4 +90,40 @@ describe('GenerationStore.applyJobUpdates notifications', () => {
     store.applyJobUpdates([gen('a', 'pending'), gen('zz', 'done')]);
     expect(notifMock.addMany).not.toHaveBeenCalled();
   });
+
+  it('cancel posts to /jobs/:id/cancel, marks the item cancelled and returns refunded credits', async () => {
+    const store = await makeWith([gen('g1', 'pending', 40)]);
+    apiMock.post.mockResolvedValue({ refundedCredits: 40, credits: { plan: 100, pack: 0 } });
+    const refunded = await store.cancel('g1');
+    expect(apiMock.post).toHaveBeenCalledWith('/jobs/g1/cancel', {});
+    expect(refunded).toBe(40);
+    expect(store.byId('g1')?.status).toBe('failed');
+    expect(store.byId('g1')?.error).toBe('cancelled');
+    expect(store.byId('g1')?.job).toBeUndefined();
+    expect(ledgerMock.setCredits).toHaveBeenCalledWith({ plan: 100, pack: 0 });
+  });
+
+  it('pendingVideoCount counts only pending videos', async () => {
+    const store = await makeWith([
+      { ...gen('v1', 'pending'), kind: 'video' as const },
+      { ...gen('v2', 'done'), kind: 'video' as const },
+      gen('i1', 'pending'),
+    ]);
+    expect(store.pendingVideoCount()).toBe(1);
+  });
+
+  it('setThumb patches thumbUrl', async () => {
+    const store = await makeWith([{ ...gen('v1', 'done'), kind: 'video' as const }]);
+    store.setThumb('v1', 'https://t/v1.jpg');
+    expect(store.byId('v1')?.thumbUrl).toBe('https://t/v1.jpg');
+  });
+
+  it('applyJobUpdates carries job progress on still-pending items', async () => {
+    const store = await makeWith([{ ...gen('v1', 'pending'), kind: 'video' as const }]);
+    store.applyJobUpdates([
+      { ...gen('v1', 'pending'), kind: 'video', job: { progress: 0.4, phase: 'rendering', cancellable: true, expectedS: 96, startedAt: 'x' } },
+    ]);
+    expect(store.byId('v1')?.job?.progress).toBe(0.4);
+    expect(notifMock.addMany).not.toHaveBeenCalled();
+  });
 });

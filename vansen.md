@@ -163,6 +163,32 @@ stub with a ledger (`core/ledger/ledger-service.ts`) that mirrors the future
 - Purge is permanent — no grace period beyond the paid period itself. Warn user in UI
   before period end that library will be deleted if they don't renew.
 
+### 7. Video (Phase 4b)
+
+- Pro-only: the Video tab is locked for Studio/free users (click → upgrade dialog);
+  Studio-preview local tools are unaffected.
+- Five families: Veo 3.1 (Google, standard/fast/lite), Gemini Omni Flash 1.1 (Google),
+  Kling 3.0 Pro (fal), Runway Gen-4.5 (Runway direct), Seedance 2.5 (fal).
+- Modes, gated per family: text→video (t2v), image→video (i2v), reference→video
+  (ref2v, up to 3 references), keyframes (first + last frame), extend (continue a
+  finished clip), edit (multi-turn edit, Omni only). Aspect ratios `16:9 | 9:16 | 1:1`;
+  hidden for i2v and keyframes (ratio follows the input frame).
+- Storage: video output always goes to Cloudflare R2 (`generations.storage_backend =
+  'r2'`), never Supabase Storage — images stay on Supabase Storage. Poster frames are
+  captured client-side (seek to 0.5 s, canvas, JPEG) and uploaded once per generation;
+  library falls back to a dark tile + play icon until the poster lands.
+- Waiting UX (the user may leave the page — a notification fires on completion):
+  phase labels `Queued`, `Rendering`, `Saving`, `Done`; the progress bar eases to 90 %
+  and then reads "Almost there…"; "You can leave this page. We'll notify you when
+  it's ready."; past twice the expected time it reads "Taking longer than usual —
+  still working."; the browser tab title prefixes `(n) Rendering…`; a top-bar chip
+  reads "Rendering N video(s)".
+- Cancel: available where the provider supports it (fal while queued, Runway any
+  time); Veo/Omni jobs cannot be cancelled once started. Cancelling or any provider/
+  timeout failure refunds credits exactly once.
+- Caps: 3 concurrent pending video jobs per user, and a $40/day provider-spend cap
+  per user (rolling 24 h) — both return a 429 with a clear toast, not a silent fail.
+
 ## Security
 
 - Supabase RLS on every user-facing table (jobs, ledger, library).
@@ -231,11 +257,23 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
   spartan already provides; copy them in, style via Tailwind + CSS variables.
 
-## Status (2026-09-05)
+## Status (2026-09-06)
 
-Deployed: `api` v41 (2026-08-14, in sync with backend HEAD), `stripe-webhook` v12,
-`appstore-webhook` v2. Gates green: `ng build` clean, 197 vitest + 19 deno tests. Recent
-commits (07-24 → 09-05) are UI/auth fixes only: left panel, auth flow, buttons, misc.
+Deployed: `api` v41 (2026-08-14, in sync with backend HEAD apart from Video — see below),
+`stripe-webhook` v12, `appstore-webhook` v2. Gates green: `ng build` clean, vitest + deno
+tests (counts in `docs/superpowers/punchlist.md`). Recent commits (07-24 → 09-05) are
+UI/auth fixes plus AI Sharpen; Video (Phase 4b) is code-complete this session but not
+yet rolled out.
+
+**Video (Phase 4b) — code complete, rollout pending (2026-09-06):** five families
+(Veo 3.1, Gemini Omni Flash 1.1, Kling 3.0 Pro, Runway Gen-4.5, Seedance 2.5),
+full mode matrix, R2 storage, waiting UX, caps and refunds all implemented per
+`docs/superpowers/specs/2026-09-05-video-generation-phase4b-design.md`. Still pending
+(user, needs Cloudflare/Supabase credentials + a live Pro account): apply migration
+`0016_video.sql`; set secrets `RUNWAY_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET`; create the R2 bucket + CORS; redeploy `api`; enable
+each family in `models` one at a time and smoke it live. See
+`docs/superpowers/punchlist.md` for the itemized rollout list.
 
 **Open items (carry-forward):**
 - Stripe still TEST mode; live keys flip once bank authorization clears.
@@ -245,9 +283,12 @@ commits (07-24 → 09-05) are UI/auth fixes only: left panel, auth flow, buttons
   (`docs/superpowers/punchlist.md`).
 - Leaked-password protection waits on Supabase Pro upgrade.
 - Not started: i18n (en + ms), session cap / account-sharing heuristics, dispatch rate
-  limit, daily spend alarm, CI. Video = Phase 4b locked teaser. Denoise / Colorize need
-  offline ONNX export + self-host.
+  limit, daily spend alarm, CI. Denoise / Colorize need offline ONNX export + self-host.
 - Legal pages are AI-drafted; attorney review (Malaysia + EU/US) outstanding.
+- Known scope reductions in Video: "From library" picker for video reference slots was
+  removed (needs gateway `referenceIds` support, see `reference-drop.ts`); the
+  `provider_blocked` client copy ("Provider declined this prompt. Credits refunded.")
+  is a placeholder pending a wording decision.
 
 **AI Sharpen shipped (2026-09-05)** (spec `docs/superpowers/specs/2026-09-05-ai-sharpen-design.md`):
 Pro rail tool `aisharpen` → `core/editing/engines/deblur-engine.ts`, NAFNet GoPro deblur ONNX

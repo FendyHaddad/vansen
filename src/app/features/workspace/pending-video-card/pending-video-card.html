@@ -1,0 +1,18 @@
+<div class="pv">
+  <div class="pv-top">
+    <span class="pv-phase">{{ phase() }}{{ queueAhead() }}</span>
+    @if (eta()) {
+      <span class="pv-eta">{{ eta() }}</span>
+    }
+  </div>
+  <div class="pv-bar" role="progressbar" [attr.aria-valuenow]="percent()" aria-valuemin="0" aria-valuemax="100">
+    <div class="pv-bar-fill" [style.--p]="progress()"></div>
+  </div>
+  <p class="pv-note">You can leave this page. We'll notify you when it's ready.</p>
+  @if (cancellable()) {
+    <button type="button" class="pv-cancel" (click)="onCancel($event)">
+      <ng-icon name="lucideX" size="12" />
+      Cancel · refund {{ item().priceCredits }} cr
+    </button>
+  }
+</div>

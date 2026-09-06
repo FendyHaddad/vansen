@@ -174,6 +174,34 @@
   color: white;
 }
 
+.video-tile {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.video-tile img,
+.video-dark {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-dark {
+  background: linear-gradient(180deg, #202020, #0e0e0e);
+}
+
+.video-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
 .op-tag {
   position: absolute;
   top: 8px;
@@ -358,6 +386,11 @@
 .failed-sub {
   font-size: 0.6875rem;
   color: var(--muted-foreground);
+}
+
+/* User-stopped render: neutral, no retry — not an error state. */
+.gen-cancelled .failed-sub {
+  font-size: 0.75rem;
 }
 
 .failed-retry {

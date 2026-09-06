@@ -65,6 +65,24 @@
 
     <div class="pref-item">
       <div class="pref-text">
+        <label hlmLabel for="prefVideoMode">Default video mode</label>
+        <p class="muted small">What the video rail starts on.</p>
+      </div>
+      <select
+        id="prefVideoMode"
+        class="pref-field pref-select"
+        (change)="setVideoMode($any($event.target).value)"
+      >
+        @for (m of videoModes; track m[0]) {
+          <option [value]="m[0]" [selected]="prefs().defaultVideoMode === m[0]">{{ m[1] }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="pref-item">
+      <div class="pref-text">
         <label hlmLabel for="prefAspect">Default aspect ratio</label>
         <p class="muted small">Used when the model supports it.</p>
       </div>

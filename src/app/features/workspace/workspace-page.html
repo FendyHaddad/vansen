@@ -24,6 +24,8 @@
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
         (managePersonasRequested)="openPersonaManager()"
+        (upgradeRequested)="upgradePlan()"
+        (pickVideoRequested)="videoPickerOpen.set(true)"
       />
     </div>
 
@@ -51,6 +53,7 @@
         }
       </div>
       <div class="topbar-right">
+        <app-rendering-chip [count]="pendingVideoCount()" />
         <app-notification-bell data-tour="bell" (open)="onOpened($event)" />
         @if (mode() === 'library' && studioActive()) {
           <label class="upload-btn" [class.is-uploading]="uploading()">
@@ -213,6 +216,7 @@
           (retry)="onRetry($event)"
           (deleted)="onDeleteMany($event)"
           (promptPicked)="usePrompt($event)"
+          (cancel)="onCancel($event)"
         />
       }
     </main>
@@ -235,6 +239,15 @@
 
   @if (personaManagerOpen()) {
     <app-persona-manager (dismissed)="personaManagerOpen.set(false)" />
+  }
+
+  @if (videoPickerOpen()) {
+    <app-video-picker-dialog
+      [items]="generations()"
+      [familyId]="rail().familyId()"
+      (picked)="onVideoPicked($event)"
+      (closed)="videoPickerOpen.set(false)"
+    />
   }
 
   @if (planChange(); as target) {
@@ -263,6 +276,8 @@
       (edit)="onEdit($event)"
       (deleted)="onDeleted($event)"
       (openParent)="onOpened($event)"
+      (extend)="onVideoFollowUp($event, 'extend')"
+      (editVideo)="onVideoFollowUp($event, 'edit')"
     />
   }
 

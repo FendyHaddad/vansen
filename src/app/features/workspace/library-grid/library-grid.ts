@@ -1,9 +1,20 @@
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  OnDestroy,
+  output,
+  signal,
+} from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideCheck,
   lucideDownload,
   lucidePencil,
+  lucidePlay,
   lucideSparkles,
   lucideTrash2,
   lucideVideo,
@@ -12,6 +23,8 @@ import {
 } from '@ng-icons/lucide';
 import { GenerationItem } from '../../../core/generations/generation-store';
 import { CachedSrc } from '../../../core/media/cached-src';
+import { PosterService } from '../../../core/media/poster-service';
+import { PendingVideoCard } from '../pending-video-card/pending-video-card';
 
 export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
 
@@ -20,12 +33,13 @@ export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
   templateUrl: './library-grid.html',
   styleUrl: './library-grid.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, CachedSrc],
+  imports: [NgIcon, CachedSrc, PendingVideoCard],
   providers: [
     provideIcons({
       lucideCheck,
       lucideDownload,
       lucidePencil,
+      lucidePlay,
       lucideSparkles,
       lucideTrash2,
       lucideVideo,
@@ -34,7 +48,9 @@ export type LibraryFilter = 'all' | 'image' | 'video' | 'edit' | 'upscale';
     }),
   ],
 })
-export class LibraryGrid {
+export class LibraryGrid implements OnDestroy {
+  readonly poster = inject(PosterService);
+
   readonly items = input.required<GenerationItem[]>();
   /** Item ids with an action in flight — their buttons show a spinner and stay disabled. */
   readonly busyIds = input<Set<string>>(new Set());
@@ -52,6 +68,22 @@ export class LibraryGrid {
   readonly promptPicked = output<string>();
   /** Ids to delete — one card, or a whole multi-select batch. */
   readonly deleted = output<string[]>();
+  readonly cancel = output<string>();
+
+  /** Ticking clock the pending-video cards read for elapsed/eta — kept here
+   * (not per-card) so every card re-renders off one shared interval. */
+  readonly now = signal(Date.now());
+  private readonly clock = setInterval(() => this.now.set(Date.now()), 1000);
+
+  /** Kick off poster generation for every video item as it renders — the
+   * service dedupes, so this is safe to run on every items() change. */
+  private readonly posterEffect = effect(() => {
+    for (const item of this.items()) this.poster.ensure(item);
+  });
+
+  ngOnDestroy(): void {
+    clearInterval(this.clock);
+  }
 
   /** Multi-select mode: cards toggle a checkbox instead of opening. */
   readonly selectMode = signal(false);

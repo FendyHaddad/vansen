@@ -1,6 +1,7 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../api/api-service';
 import {
+  CancelJobResponse,
   CreateGenerationRequest,
   CreateGenerationResponse,
   GenerationDto,
@@ -118,6 +119,29 @@ export class GenerationStore {
     return this.itemsSig()
       .filter((i) => i.status === 'pending')
       .map((i) => i.id);
+  }
+
+  readonly pendingVideoCount = computed(
+    () => this.itemsSig().filter((i) => i.status === 'pending' && i.kind === 'video').length,
+  );
+
+  async cancel(id: string): Promise<number> {
+    const res = await this.api.post<CancelJobResponse>(`/jobs/${id}/cancel`, {});
+    this.itemsSig.update((list) =>
+      // Cancelled, not failed: the grid reads `error` to say so instead of
+      // offering a retry for something the user deliberately stopped.
+      list.map((i) =>
+        i.id === id ? { ...i, status: 'failed' as const, error: 'cancelled', job: undefined } : i
+      ),
+    );
+    this.ledger.setCredits(res.credits);
+    void this.persist();
+    return res.refundedCredits;
+  }
+
+  setThumb(id: string, thumbUrl: string): void {
+    this.itemsSig.update((list) => list.map((i) => (i.id === id ? { ...i, thumbUrl } : i)));
+    void this.persist();
   }
 
   /** Merge poll results (status flips, media urls) into the store. */

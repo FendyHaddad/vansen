@@ -7,6 +7,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    readonly details: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -122,6 +123,6 @@ export class ApiService {
       `[api] ${method} ${path} — ${response.status} ${code}: ${message}`,
       parsed ?? '(no body)',
     );
-    throw new ApiError(code, message, response.status);
+    throw new ApiError(code, message, response.status, parsed?.error ?? {});
   }
 }

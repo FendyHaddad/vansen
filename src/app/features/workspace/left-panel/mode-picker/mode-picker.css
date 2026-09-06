@@ -1,0 +1,56 @@
+/* Section shell, tokens matched to option-group so this reads like its
+ * neighbours — component encapsulation means those styles don't reach in
+ * here, so they are repeated. Unlike option-group's single-row .og (label +
+ * one trigger), this group wraps a whole row of chips, so .og stacks the
+ * head above the chips instead of placing them side by side. */
+.og {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.og-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+
+.og-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.mode-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mode-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+
+.mode-chip:hover {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+
+.mode-chip-on {
+  background: var(--foreground);
+  color: var(--background);
+  border-color: var(--foreground);
+}
