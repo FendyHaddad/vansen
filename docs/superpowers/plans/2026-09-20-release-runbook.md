@@ -57,7 +57,7 @@ rows that have no owner to restore. **It is forward-only.**
 
 ---
 
-## 2. Set the secrets
+## 2. Set the secrets — **manifest secrets DONE 2026-09-22**
 
 Set each in the Supabase dashboard (Edge Functions → Secrets) or via
 `supabase secrets set`. **Never print a secret value and never write one into
@@ -128,7 +128,7 @@ check the expiry separately.
 
 ---
 
-## 4. Deploy the functions
+## 4. Deploy the functions — **DONE 2026-09-22** (api v51, stripe-webhook v21, appstore-webhook v11)
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && supabase functions deploy api --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad
@@ -193,18 +193,41 @@ never by hand-editing an applied one, and never by explaining it away.
 
 ## 6. Backfills and reconciliation
 
+The plan's command was wrong on three counts and is corrected here: the script
+is `backfill-thumbnails.**ts**`, it runs on **Deno** (so it shares the gateway's
+one pinned decoder rather than a second Node implementation that could disagree
+with it), and it has no `--dry-run` — its flags are `--batch`, `--max`, `--rps`
+and `--json`.
+
+Find out how much work there is first, which needs no credentials:
+
 ```bash
-cd /Users/user/IdeaProjects/vansen && node scripts/backfill-thumbnails.mjs --limit 100 --dry-run
+cd /Users/user/IdeaProjects/vansen && supabase db query --linked "select count(*) filter (where thumb_path is null) as needs_thumb, count(*) as total from public.generations where status='done' and coalesce(media_path,'') <> '';"
 ```
 
-Read the output before running for real, then run in batches.
+Then, with the service-role key held only in the shell that runs it:
 
 ```bash
-cd /Users/user/IdeaProjects/vansen && node scripts/storage-inventory.mjs && node scripts/billing-reconcile.mjs
+cd /Users/user/IdeaProjects/vansen && read -rs "?SUPABASE_SERVICE_ROLE_KEY: " K && export SUPABASE_SERVICE_ROLE_KEY="$K" SUPABASE_URL=https://bnorhcxhvxydkgvcxjad.supabase.co && deno run --allow-env --allow-net --node-modules-dir=none scripts/backfill-thumbnails.ts --max 50 && node scripts/storage-inventory.mjs && node scripts/billing-reconcile.mjs; unset SUPABASE_SERVICE_ROLE_KEY K
 ```
+
+`--node-modules-dir=none` is not optional: the repository root has a
+`package.json`, which puts Deno in manual mode and makes it hunt for npm
+dependencies in `node_modules` instead of its own cache. Without it the script
+dies on `@supabase/realtime-js` before it reads a single row.
+
+`storage-inventory` only demands the `R2_*` variables when an object actually
+lives on R2; while every row in `storage_objects` is `backend = 'supabase'` it
+needs nothing more than the two above.
 
 Expected: zero orphans, zero leaks, zero unfulfilled purchases. **Any non-zero
 result stops the rollout.** These scripts report; they never delete.
+
+The billing half can also be run without any credential, because it is one RPC:
+
+```bash
+cd /Users/user/IdeaProjects/vansen && supabase db query --linked "select count(*) from public.fn_paid_unfulfilled(now() - interval '7 days');"
+```
 
 ---
 

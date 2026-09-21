@@ -41,6 +41,6 @@ enabled = false
 
 # The local mailbox. Password-reset and signup-confirmation links land here,
 # which is the only way to verify the recovery flow without sending real mail.
-[inbucket]
+[local_smtp]
 enabled = true
 port = 54324

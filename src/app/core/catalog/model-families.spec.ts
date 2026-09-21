@@ -29,7 +29,9 @@ describe('model families', () => {
 
   it('nano banana tiers: fast flat, standard by resolution, pro premium', () => {
     const nb = familyById('nano-banana')!;
-    expect(nb.providerCost({ version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.039);
+    // Nano Banana 2 Lite: 1120 tokens at $30/1M = $0.0336 for a 1K image.
+    // Was 0.039 for gemini-2.5-flash-image, which Google shut down 2026-10-02.
+    expect(nb.providerCost({ version: 'fast', aspectRatio: '1:1' })).toBeCloseTo(0.0336);
     expect(
       nb.providerCost({ version: 'standard', aspectRatio: '1:1', resolution: '1K' }),
     ).toBeCloseTo(0.067);
@@ -50,9 +52,15 @@ describe('model families', () => {
     expect(
       gpt.providerCost({ version: '2', aspectRatio: '1:1', quality: 'high', resolution: '1K' }),
     ).toBeCloseTo(0.211);
+    // Version '1' was withdrawn from the offer on 2026-09-22. The 2.5 models
+    // replace it, and their figures are measured from OpenAI's own calculator
+    // (196 tokens at $30/1M for low at 1024x1024) rather than estimated.
     expect(
-      gpt.providerCost({ version: '1', aspectRatio: '1:1', quality: 'low', resolution: '1K' }),
-    ).toBeCloseTo(0.011);
+      gpt.providerCost({ version: '2.5-flare', aspectRatio: '1:1', quality: 'low', resolution: '1K' }),
+    ).toBeCloseTo(0.00588);
+    expect(
+      gpt.providerCost({ version: '2.5-sunburst', aspectRatio: '1:1', quality: 'high', resolution: '1K' }),
+    ).toBeCloseTo(0.05268);
     expect(
       gpt.providerCost({ version: '2', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
     ).toBeCloseTo(0.0123, 3);
@@ -78,6 +86,8 @@ describe('model families', () => {
   it('defaultSettings picks sensible defaults per axis', () => {
     const gpt = familyById('gpt-image')!;
     const s = defaultSettings(gpt);
+    // Deliberately NOT the newest: 2.5 is offered and badged "Latest", but the
+    // default stays on the version that has actually been run in production.
     expect(s.version).toBe('2');
     expect(s.quality).toBe('medium');
     expect(s.aspectRatio).toBe(gpt.capabilities.aspectRatios[0]);

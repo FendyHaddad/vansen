@@ -54,7 +54,7 @@ Deno.test('rejects an unknown version', () => {
     resolution: '1K',
   });
   assertEquals(result?.field, 'version');
-  assertEquals(result?.allowed, ['1', '1.5', '2']);
+  assertEquals(result?.allowed, ['1.5', '2', '2.5-flare', '2.5-sunburst']);
 });
 
 Deno.test('rejects an unknown resolution', () => {

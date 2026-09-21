@@ -40,7 +40,7 @@ Deno.test('each version calls a different model url', async () => {
   await googleAdapter.submit(ctx({ aspectRatio: '1:1', version: 'pro', resolution: '1K' }));
   cap.restore();
   assertNotEquals(cap.calls[0].url, cap.calls[1].url);
-  assertEquals(cap.calls[0].url.includes('gemini-2.5-flash-image'), true);
+  assertEquals(cap.calls[0].url.includes('gemini-3.1-flash-lite-image'), true);
   assertEquals(cap.calls[1].url.includes('gemini-3-pro-image'), true);
 });
 

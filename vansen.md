@@ -269,9 +269,10 @@ true at this revision; the dated evidence for every line is in
 `docs/superpowers/plans/2026-09-20-release-evidence.md`, and the ordered
 deployment procedure is `docs/superpowers/plans/2026-09-20-release-runbook.md`.
 
-Deployed: `api` v49, `job-worker` v8, `cleanup-worker` v7 (all 2026-09-21). `stripe-webhook` and
-`appstore-webhook` are **still the versions from before P2 rewrote them** — a
-redeploy is the first item in the runbook. Production schema is at **`0025`** — `0025_release_telemetry.sql` was applied
+Deployed 2026-09-22 from commit `c4a6953`: `api` **v51** (first version carrying
+`/manifest` and the quotable error id), `stripe-webhook` **v21** and
+`appstore-webhook` **v11** — both had been stale since July, two months before
+P2 rewrote them. `job-worker` v9, `cleanup-worker` v8 unchanged. Production schema is at **`0025`** — `0025_release_telemetry.sql` was applied
 2026-09-22 and `fn_check_alerts()` runs clean against the live database with
 nothing firing.
 

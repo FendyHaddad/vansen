@@ -10,8 +10,11 @@ function norm(familyId: string, settings: Record<string, unknown>, op = 'generat
   });
 }
 
-Deno.test('THE BUG: gpt-image v1 and v2-at-4K must not send the same request', () => {
-  const v1 = norm('gpt-image', { aspectRatio: '1:1', version: '1', quality: 'medium', resolution: '1K' });
+Deno.test('THE BUG: gpt-image v1.5 and v2-at-4K must not send the same request', () => {
+  // Was version '1' until 2026-09-22, when it was withdrawn from the offer.
+  // 1.5 carries the same shape of the bug: it is capped at 1K, so a 4K
+  // selection on it must not silently become the same request as a real 4K.
+  const v1 = norm('gpt-image', { aspectRatio: '1:1', version: '1.5', quality: 'medium', resolution: '1K' });
   const v2 = norm('gpt-image', { aspectRatio: '1:1', version: '2', quality: 'medium', resolution: '4K' });
   const family = familyById('gpt-image')!;
   const priceV1 = quote(v1, family).credits;
@@ -50,7 +53,7 @@ Deno.test('seedream exposes only verified differentiating resolutions', () => {
 Deno.test('CONTROL: nano-banana already maps version and resolution', () => {
   const fast = norm('nano-banana', { aspectRatio: '1:1', version: 'fast', resolution: '1K' });
   const pro = norm('nano-banana', { aspectRatio: '1:1', version: 'pro', resolution: '4K' });
-  assertEquals(fast.providerModel, 'gemini-2.5-flash-image');
+  assertEquals(fast.providerModel, 'gemini-3.1-flash-lite-image');
   assertEquals(pro.providerModel, 'gemini-3-pro-image');
   assertEquals(fast.providerSettings.image_size, '1K');
   assertEquals(pro.providerSettings.image_size, '4K');

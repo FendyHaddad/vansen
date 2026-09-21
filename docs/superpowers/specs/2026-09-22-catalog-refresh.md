@@ -1,0 +1,190 @@
+# Catalog refresh — provider costs audited against published sources
+
+Checked 2026-09-22. Every figure below was read from the provider's own page on
+that date, and the source is named. Where I could not read a published figure I
+have written **unverified** rather than an estimate — three earlier numbers in
+this session turned out to be repeated from files instead of checked against the
+running system, and that is the habit this document exists to break.
+
+Our figures come from `providerCost` in `src/app/core/catalog/model-families.ts`
+and the slugs from `supabase/functions/_shared/provider-capabilities.json`.
+
+---
+
+## 1. What we actually call
+
+| Family | Provider | Model slug in our code |
+|---|---|---|
+| `nano-banana` | Google direct | `gemini-3.1-flash-image` (standard), `gemini-3-pro-image` (pro), `gemini-2.5-flash-image` (fast) |
+| `gpt-image` | OpenAI direct | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1` |
+| `flux` | fal | `fal-ai/flux-2` |
+| `seedream` | fal | `fal-ai/bytedance/seedream/v4/text-to-image` |
+| `kling` | fal | `fal-ai/kling-video/v3/pro/*` |
+| `seedance` | fal | `bytedance/seedance-2.5/*` |
+| `veo`, `omni` | Google direct | — |
+| `runway` | **nothing** | adapter exists; `RUNWAY_API_KEY` never set; family `enabled = false` |
+| `upscaler`, `persona`, `edit-*` | fal | — |
+
+## 2. Our cost versus the published cost
+
+Source **G** = `https://ai.google.dev/gemini-api/docs/pricing`
+Source **F** = the model's own page on `https://fal.ai/models/...`
+Source **O** = `https://platform.openai.com/docs/guides/image-generation`
+
+| Family / tier | Ours | Published | Src | |
+|---|---|---|---|---|
+| veo standard + audio, 720p/1080p | $0.40/s | $0.40/s | G | ✅ |
+| veo standard + audio, 4K | $0.60/s | $0.60/s | G | ✅ |
+| veo fast, 720p / 1080p / 4K | $0.10 / $0.12 / $0.30 | $0.10 / $0.12 / $0.30 | G | ✅ |
+| veo lite, 720p / 1080p | $0.05 / $0.08 | $0.05 / $0.08 | G | ✅ |
+| nano standard 1K / 2K / 4K | $0.067 / $0.101 / $0.151 | $0.067 / $0.101 / $0.151 | G | ✅ |
+| nano pro 1K-2K / 4K | $0.134 / $0.24 | $0.134 / $0.24 | G | ✅ |
+| nano fast | $0.039 | **model deprecated** | G | ⚠️ §3 |
+| seedream | $0.03/image | "$0.03 per image" | F | ✅ |
+| kling audio off / on / voice | $0.112 / $0.168 / $0.196 per s | $0.112 / $0.168 / $0.196 | F | ✅ |
+| seedance 480p / 720p | $0.2205 / $0.4730 per s | $0.2205 / $0.4730 | F | ✅ |
+| flux 1 / 2 / 4 MP | $0.03 / $0.06 / $0.12 | fal bills **$0.012 per megapixel** = $0.012 / $0.024 / $0.048 | F | ⚠️ §4 |
+| gpt-image v2 low / med / high | $0.006 / $0.053 / $0.211 | OpenAI bills **per token**, not per image | O | ❓ §5 |
+| upscaler, persona, `edit-*` | $0.04 / $0.035 / $2.00 / $0.05 | not checked | — | ❓ |
+
+**Nine of eleven checkable values are exactly right.** Veo's nine-way rate
+table, both current Nano Banana tiers, Seedream, Kling and Seedance match their
+published rates to the last digit. Whoever built this table did it carefully.
+
+## 3. Urgent: `nano-banana` fast points at a model Google shuts down on 2026-10-02
+
+Google's pricing page carries this warning verbatim on `gemini-2.5-flash-image`:
+
+> deprecated and will be shut down on October 2, 2026; migrate to Gemini 3.1
+> Flash Image or Gemini 3.1 Flash Lite Image to avoid service disruption
+
+That is **ten days from today**, and `nano-banana` is enabled in production. On
+that date every request on the `fast` tier starts failing. The refund path will
+catch it and customers will be made whole, but they will see a model that
+simply stops working.
+
+The fix is one line in `provider-capabilities.json`: repoint `fast` to
+`gemini-3.1-flash-lite-image` (Nano Banana 2 Lite), then re-check its rate,
+bump `CATALOG_VERSION`, `npm run sync-shared`, and redeploy `api`. **This should
+happen before anything else in this document.**
+
+## 4. FLUX: a deliberate 2.5× markup, not an error
+
+fal's `fal-ai/flux-2` page states: "Your request will cost $0.012 per
+megapixel." Our tiers charge as though the provider cost were $0.03/$0.06/$0.12
+— 2.5× the real rate — and then apply the 40% margin on top of that.
+
+This is **intentional and documented**: `provider-capabilities.json` says "fal
+quotes $0.012 per megapixel on the flux-2 model page… Retail does NOT track it;
+the flat tiers below are the deliberate price."
+
+So it is not a defect. But it is exactly the decision the owner deferred on
+2026-09-22, and it should be settled knowingly: at the true provider cost, a 1MP
+FLUX image would be 2 credits instead of 5.
+
+## 5. GPT Image: the one table whose shape is wrong
+
+OpenAI no longer prices image models per image. `gpt-image-2.5-sunburst` and
+`-flare` bill per token — $30.00/1M image output, $8.00/1M image input,
+$5.00/1M text input — and the token count varies by quality and size. A flat
+per-image table cannot express that.
+
+Measured from OpenAI's own calculator, GPT Image 2.5 at 1024×1024:
+
+| Quality | Output tokens | Cost |
+|---|---|---|
+| low | 196 | $0.00588 |
+| medium | 439 | $0.01317 |
+| high | 1,756 | $0.05268 |
+| xhigh | 3,122 | $0.09366 |
+| max | 7,024 | $0.21072 |
+
+Our `gpt-image` v2 row reads $0.006 / $0.053 / $0.211 for low / medium / high.
+Those are, to three decimal places, GPT Image **2.5's** low / **high** / **max**.
+That may be coincidence, or our "medium" may be charging four times what medium
+actually costs. **I could not load `gpt-image-2`'s own token table to settle it,
+so this stays unverified.** It needs one real generation with `usage` read back
+from the response — which is the only way to know, and costs about a cent.
+
+Also: **GPT Image 2.5 exists and we do not offer it.** It is on OpenAI's own
+pricing page, so no third party is involved.
+
+## 6. Runway, compared honestly
+
+Runway Dev is a **model router** reselling other providers at $0.01/credit
+(`https://docs.dev.runwayml.com/guides/pricing/`). We have never had a key, so
+none of this is in use.
+
+| Model | Ours, direct | Runway | Verdict |
+|---|---|---|---|
+| Veo 3.1 standard + audio | $0.40/s (Google) | 40 cr/s = $0.40/s | identical |
+| Veo 3.1 fast + audio | $0.10/s (Google) | 15 cr/s = $0.15/s | **Google 33% cheaper** |
+| Gemini Omni Flash | $0.10/s, $0.15 at 1080p | 10 cr/s = $0.10/s flat | Runway cheaper at 1080p only |
+| Nano Banana Pro 1K | $0.134 (Google) | `gemini_image3_pro` 20 cr = $0.20 | **Google 33% cheaper** |
+| Seedream | $0.03 (fal, v4) | `seedream5_pro` 5 cr = $0.05 | fal cheaper (different version) |
+| Kling 3.0 Pro | $0.112–0.196/s (fal) | not offered | fal only |
+| Seedance 2.5 480p | $0.2205/s (fal) | 20 cr/s = $0.20/s | Runway 9% cheaper |
+| Seedance 2.5 720p | $0.4730/s (fal) | 30 cr/s = $0.30/s | **Runway 37% cheaper** |
+| Seedance 2.5 1080p | $1.164/s (fal) | 68 cr/s = $0.68/s | **Runway 42% cheaper** |
+
+**Conclusion: do not switch.** Going direct beats the reseller everywhere except
+Seedance. That single exception is real and large, and I cannot explain it —
+a reseller undercutting its own supplier by 42% is either a subsidy, a different
+underlying tier, or a difference in what "per second" counts (Runway bills
+output seconds plus input and reference seconds, with an 80-credit minimum).
+It would need a real invoice on both sides to settle, and it only matters if
+video is ever switched on. Not worth acting on now.
+
+## 7. What is genuinely missing from the catalog
+
+| | Status |
+|---|---|
+| GPT Image 2.5 (`sunburst`, `flare`) | on OpenAI directly; we offer 2 / 1.5 / 1 |
+| Seedance 2.5 at 1080p | fal sells it at $1.164/s; we expose only 480p and 720p |
+| Sora 2 / Sora 2 Pro video | OpenAI, $0.10–$0.70/s; not offered |
+| Seedream 5 | exists (seen on Runway's list); we are on v4 — **unverified on fal** |
+| FLUX 3 | on fal, but its blurb describes a **video** model, not an image one — **unverified**, do not assume it replaces FLUX.2 |
+| MiniMax H3 / H3 Max | **declined by the owner, 2026-09-22** |
+
+## 8. Recommended order
+
+1. **Repoint `nano-banana` fast off the deprecated model.** Ten days. Everything else can wait.
+2. Read `usage` from one real `gpt-image-2` generation and fix that table from measurement.
+3. Add GPT Image 2.5 as a version on the existing `gpt-image` family.
+4. Settle the FLUX price knowingly (owner deferred).
+5. Verify Seedream 5 and what FLUX 3 actually is before touching either.
+
+---
+
+## 9. Applied 2026-09-22
+
+| Change | Detail |
+|---|---|
+| `nano-banana` **fast** repointed | `gemini-2.5-flash-image` → `gemini-3.1-flash-lite-image`; cost $0.039 → **$0.0336** (1120 tokens at $30/1M, Google's published figure). Averts the 2026-10-02 shutdown |
+| `gpt-image` **1 removed** | owner decision; the offer is now 1.5, 2, 2.5 Flare, 2.5 Sunburst |
+| `gpt-image` **2.5 added** | `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst`, costs measured from OpenAI's calculator: low $0.00588, medium $0.01317, high $0.05268 |
+| `CATALOG_VERSION` | `2026-09-21.1` → `2026-09-22.1`; fingerprint `-1059c67b` → `-43a774f1` |
+
+### One thing that had to be fixed to do this safely
+
+`FamilyOption.tag` was doing two jobs: it rendered the badge on the chip **and**
+`defaultSettings` picked the option tagged exactly `'Latest'` as the default.
+Labelling 2.5 as the latest model therefore silently moved every new generation
+onto it — a model with no smoke behind it, on a family that is live.
+
+The two meanings are now separate: `tag` is display only, and a new `isDefault`
+flag chooses the default. 2.5 Flare carries the `Latest` badge because it is;
+version `2` carries `isDefault` because it is the one that has actually run in
+production. When someone smokes a 2.5 generation, move the flag.
+
+### Still open after this change
+
+- The `gpt-image` **2** and **1.5** cost rows remain unverified (§5). One real
+  generation with `usage` read back settles them.
+- The 2.5 models' **4K/2K size rule is assumed**, carried over from
+  `gpt-image-2`. Smoke a non-1K request before trusting it.
+- Nano Banana 2 Lite's published figure covers **1K only**. Our `fast` tier is
+  documented as 1K-only and charges flat, so this is consistent — but if `fast`
+  is ever allowed above 1K the rate must be rechecked.
+- `npm run verify` is green, but **this does not reach customers until `api` is
+  redeployed**, and the new Dart fixture must be handed to the mobile repo.

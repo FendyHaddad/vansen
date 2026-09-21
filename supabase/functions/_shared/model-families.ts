@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-21.1';
+export const CATALOG_VERSION = '2026-09-22.1';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -17,8 +17,17 @@ export interface FamilyOption {
   value: string;
   label: string;
   tooltip: string;
-  /** Small highlight tag rendered on the chip, e.g. "Latest". Also marks the default. */
+  /** Small highlight tag rendered on the chip, e.g. "Latest". Display only. */
   tag?: string;
+  /**
+   * The option `defaultSettings` picks. Separate from `tag` on purpose: until
+   * 2026-09-22 the badge WAS the default marker, so adding a newer model moved
+   * every new generation onto it as a side effect of labelling it. The newest
+   * model and the one we are willing to put in front of someone by default are
+   * different questions — a model with no smoke behind it can be offered
+   * without being the thing everyone gets.
+   */
+  isDefault?: boolean;
 }
 
 export interface GenerationSettings {
@@ -134,12 +143,26 @@ const GPT_QUALITY_TOOLTIPS: Record<string, string> = {
   high: 'Maximum compute per image — best textures and text rendering. Not a resolution setting.',
 };
 
-// Provider cost (square, ~1K output) by version and quality — OpenAI published per-image pricing.
-// v2 at 4K multiplies ×2.05 (ratio from Runway's published credit table — verify exact token math).
+/**
+ * Provider cost per image (square, ~1K output) by version and quality.
+ *
+ * The 2.5 rows are measured, not estimated: OpenAI's own calculator reports
+ * 196 / 439 / 1756 output tokens for low / medium / high at 1024x1024, billed
+ * at $30 per 1M image output tokens (platform.openai.com/docs/guides/image-generation,
+ * read 2026-09-22).
+ *
+ * The '2' and '1.5' rows are NOT verified. They are flat per-image figures,
+ * but OpenAI bills images per token, so a flat table cannot be right in shape —
+ * and '2' happens to equal 2.5's low/high/max rather than its low/medium/high,
+ * which is either coincidence or a tier shift nobody has checked. Settling it
+ * needs one real generation with `usage` read back from the response. Until
+ * then these stay as they were rather than being replaced by a better guess.
+ */
 const GPT_COST: Record<string, Record<string, number>> = {
+  '2.5-sunburst': { low: 0.00588, medium: 0.01317, high: 0.05268 },
+  '2.5-flare': { low: 0.00588, medium: 0.01317, high: 0.05268 },
   '2': { low: 0.006, medium: 0.053, high: 0.211 },
   '1.5': { low: 0.009, medium: 0.034, high: 0.133 },
-  '1': { low: 0.011, medium: 0.042, high: 0.167 },
 };
 
 /** Margin baked into the credit charge table. 1 credit = $0.01 of Studio retail. */
@@ -232,7 +255,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         {
           value: 'fast',
           label: 'Fast',
-          tooltip: 'Gemini 2.5 Flash Image — quickest and cheapest, ~1K output only.',
+          tooltip: 'Gemini 3.1 Flash Lite Image — quickest and cheapest, ~1K output only.',
         },
         {
           value: 'standard',
@@ -256,7 +279,10 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       maskInput: false,
     },
     providerCost: (s) => {
-      if (s.version === 'fast') return 0.039;
+      // Nano Banana 2 Lite: 1120 tokens for a 1K image at $30/1M image output
+      // tokens. Repointed here on 2026-09-22 — the previous model,
+      // gemini-2.5-flash-image, is shut down by Google on 2026-10-02.
+      if (s.version === 'fast') return 0.0336;
       if (s.version === 'pro') return s.resolution === '4K' ? 0.24 : 0.134;
       return { '1K': 0.067, '2K': 0.101, '4K': 0.151 }[s.resolution ?? '1K'] ?? 0.067;
     },
@@ -270,13 +296,23 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     blurb: 'Quality dial for compute effort; v2 adds true 4K and masked edits.',
     capabilities: {
       versions: [
-        { value: '1', label: '1', tooltip: 'Original GPT Image, ~1K output.' },
         { value: '1.5', label: '1.5', tooltip: 'Previous generation, ~1K output.' },
         {
           value: '2',
           label: '2',
+          isDefault: true,
+          tooltip: 'GPT Image 2. Any resolution up to 3840px, masked editing.',
+        },
+        {
+          value: '2.5-flare',
+          label: '2.5 Flare',
           tag: 'Latest',
-          tooltip: 'Newest GPT Image. Any resolution up to 3840px, masked editing.',
+          tooltip: 'Fastest 2.5 model — high-quality everyday generation.',
+        },
+        {
+          value: '2.5-sunburst',
+          label: '2.5 Sunburst',
+          tooltip: 'Most capable 2.5 model — for edits where precision matters most.',
         },
       ],
       aspectRatios: AR_IMAGE,
@@ -586,7 +622,9 @@ export function resolutionsFor(family: ModelFamily, aspectRatio: string): Family
 
 export function defaultSettings(family: ModelFamily): GenerationSettings {
   const c = family.capabilities;
-  const defaultVersion = c.versions?.find((v) => v.tag === 'Latest') ?? c.versions?.[0];
+  const defaultVersion = c.versions?.find((v) => v.isDefault)
+    ?? c.versions?.find((v) => v.tag === 'Latest')
+    ?? c.versions?.[0];
   const base: GenerationSettings = {
     version: defaultVersion?.value,
     aspectRatio: c.aspectRatios[0],
