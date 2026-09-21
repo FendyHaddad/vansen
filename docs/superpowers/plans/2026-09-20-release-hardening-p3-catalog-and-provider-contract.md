@@ -60,7 +60,7 @@
 
 **This is a blocking research task and it needs the user.** Two of its steps require live provider calls with the project's own API keys, which only the user can run. Do the documentation half yourself, then hand the user the exact commands for the smoke half and wait for the output. Do not substitute a plausible-looking model id for a verified one: a wrong `gpt-image-2` guess silently reintroduces exactly the defect this plan exists to fix.
 
-- [ ] **Step 1: Write the record skeleton with every claim the catalog currently makes**
+- [x] **Step 1: Write the record skeleton with every claim the catalog currently makes**
 
 Create `docs/superpowers/specs/2026-09-20-provider-capability-record.md`:
 
@@ -129,14 +129,14 @@ send it) or **remove** (the option leaves the catalog for this release).
 |---|---|---|
 ```
 
-- [ ] **Step 2: Fill the documentation column**
+- [x] **Step 2: Fill the documentation column**
 
 Read each provider's current official documentation and fill the model/parameter and doc-link columns. Two specific questions the review flagged and this record must answer plainly:
 
 1. Do fal's FLUX and Seedream image endpoints take `aspect_ratio`, `image_size`, or both? The current `payloadFor` sends `aspect_ratio` for FLUX and nothing else. If the endpoint expects `image_size`, every FLUX generation has been ignoring the aspect-ratio control too, not only the resolution control.
 2. Does the OpenAI image model the catalog calls "2" exist under a distinct model id with distinct `size` support? If there is no such model, versions `1.5` and `2` are selling a difference that cannot exist, and the price multiplier on them is unearned.
 
-- [ ] **Step 3: Give the user the smoke commands**
+- [~] **Step 3: Give the user the smoke commands** — commands written into the record; waiting on the user to run them
 
 The user runs these against their own keys. Print them and wait.
 
@@ -172,7 +172,7 @@ curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-
 
 For each fal call, poll the returned `status_url` and download the result, then run `file` on it to read the real dimensions. A resolution option is verified only when two different values produce two different output sizes.
 
-- [ ] **Step 4: Record the decisions and get them approved**
+- [x] **Step 4: Record the decisions and get them approved** — owner approved 2026-09-21: move FLUX to `fal-ai/flux-2`, drop the FLUX reference claim
 
 Fill the Decisions table. Present the **remove** list to the user before writing any code — removing a selector changes what the product sells, and the copy changes in P8 depend on this list. Wait for approval.
 
@@ -217,7 +217,7 @@ The record is the deliverable of this task. Nothing else in this plan may cite a
 
 **The invariant this exists to enforce:** two requests that produce the same `providerModel` + `providerSettings` must produce the same `credits`. A price difference with no request difference is the bug.
 
-- [ ] **Step 1: Add `CATALOG_VERSION` to the Angular master**
+- [x] **Step 1: Add `CATALOG_VERSION` to the Angular master**
 
 At the top of `src/app/core/catalog/model-families.ts`, after the existing header comment:
 
@@ -238,7 +238,7 @@ Then:
 cd /Users/user/IdeaProjects/vansen && npm run sync-shared
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `supabase/functions/_shared/generation-request_test.ts`:
 
@@ -349,7 +349,7 @@ Deno.test('the credit price equals the catalog creditCost for the same settings'
 });
 ```
 
-- [ ] **Step 2b: Run to verify it fails**
+- [x] **Step 2b: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/generation-request_test.ts
@@ -357,7 +357,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `Module not found "file:///.../_shared/generation-request.ts"`.
 
-- [ ] **Step 3: Write `_shared/generation-request.ts`**
+- [x] **Step 3: Write `_shared/generation-request.ts`**
 
 Fill the `PROVIDER_MODELS` and `providerSettingsFor` bodies from the Task 1 record. The structure is fixed; the values are not guessable.
 
@@ -507,7 +507,7 @@ export function quote(
 
 Task 1 creates `_shared/provider-capabilities.json` with `gptModels,gptSizes,fluxSizes,seedreamResolutionParameter,seedreamSizes`, populated only from verified choices and linked smoke evidence. Missing capability evidence blocks this task; it is not replaced by a default selection. The catalog exposes exactly these choices and its price functions use the same recorded size policy.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions
@@ -532,7 +532,7 @@ Expected: all supported combinations and explicit unsupported-selection rejectio
 1. R04 — the model and size come from `normalized`, so a version and resolution the customer paid for actually reach OpenAI.
 2. R28 adapter half — `openai.ts:40` gates the reference on `op === 'edit' || op === 'upscale'`. After P1 the gateway delivers `referenceUrl` on `op = 'generate'` too, and this adapter silently drops it. The rule becomes: **any** reference means the edits endpoint.
 
-- [ ] **Step 1: Write the fetch capture harness**
+- [x] **Step 1: Write the fetch capture harness**
 
 Create `supabase/functions/_shared/providers/testing/capture.ts`:
 
@@ -586,7 +586,7 @@ export const TINY_PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 ```
 
-- [ ] **Step 2: Write the failing adapter test**
+- [x] **Step 2: Write the failing adapter test**
 
 Create `supabase/functions/_shared/providers/openai_test.ts`:
 
@@ -701,7 +701,7 @@ Deno.test('a context with no normalized request is refused, not silently default
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/openai_test.ts
@@ -709,7 +709,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `normalized` is not a property of `SubmitCtx`; the version and resolution tests report identical `model` and `size`.
 
-- [ ] **Step 4: Add `normalized` to `SubmitCtx`**
+- [x] **Step 4: Add `normalized` to `SubmitCtx`**
 
 In `_shared/providers/types.ts`, add the import and the field:
 
@@ -729,7 +729,7 @@ Inside `SubmitCtx`, after `settings`:
   normalized?: NormalizedRequest;
 ```
 
-- [ ] **Step 5: Rewrite `openai.ts`**
+- [x] **Step 5: Rewrite `openai.ts`**
 
 ```ts
 // OpenAI GPT Image adapter — generate + edits (mask). Responds inline with a
@@ -813,7 +813,7 @@ export const openaiAdapter: ProviderAdapter = {
 
 **The mask branch:** it is now reachable, because the gateway sends `maskPngBase64` with `op = 'edit'` on a `maskInput: true` family. If the Task 1 record shows the OpenAI model in use does **not** accept a mask, set `maskInput: false` on the gpt-image family in Task 6 and delete this branch instead of shipping a parameter the provider ignores.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/app.ts && deno test --allow-all _shared/providers/openai_test.ts
@@ -833,7 +833,7 @@ Expected: `8 passed | 0 failed`. User commits.
 - Consumes: `NormalizedRequest`.
 - Produces: `payloadFor` merges `ctx.normalized.providerSettings` for the `flux` and `seedream` branches; `slugFor` reads `ctx.normalized.providerModel` for them.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/providers/fal_image_test.ts`:
 
@@ -939,7 +939,7 @@ Deno.test('the edit tools and the upscaler are untouched by normalization', asyn
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/fal_image_test.ts
@@ -947,7 +947,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — the first test reports identical payloads for 1MP and 4MP.
 
-- [ ] **Step 3: Wire the normalized request into the fal image branch**
+- [x] **Step 3: Wire the normalized request into the fal image branch**
 
 In `fal.ts`, change `slugFor` so the two normalized families read their slug from the normalized request:
 
@@ -979,7 +979,7 @@ Replace the final block of `payloadFor` (currently lines 109–117) with:
   return body;
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/fal_image_test.ts
@@ -1001,7 +1001,7 @@ Expected: `6 passed | 0 failed`. User commits.
 
 Nano Banana already behaves correctly. Moving it onto the same seam means a future catalog change cannot break it silently, and its tests become the positive control every other adapter test is measured against.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/providers/google_test.ts`:
 
@@ -1098,7 +1098,7 @@ Deno.test('a context with no normalized request is refused', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/google_test.ts
@@ -1106,7 +1106,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — the last test passes a context with no `normalized` and `google.ts` happily defaults to `standard`.
 
-- [ ] **Step 3: Move `google.ts` onto the normalized request**
+- [x] **Step 3: Move `google.ts` onto the normalized request**
 
 Delete `modelFor` (lines 7–13) and replace the top of `submit`:
 
@@ -1132,7 +1132,7 @@ and the request body:
         },
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers
@@ -1154,7 +1154,7 @@ Expected: every provider test file passes, including the existing video adapter 
 - Consumes: `normalizeGenerationRequest`, `quote` (Task 2); `validateSettings` (P1 Task 8).
 - Produces: the gateway builds one `NormalizedRequest` per item, prices from it, stores `quoteVersion` and `catalogVersion` in `generations.settings`, and passes it to `submit`.
 
-- [ ] **Step 1: Apply the Task 1 removals to the catalog**
+- [x] **Step 1: Apply the Task 1 removals to the catalog**
 
 For every row the Task 1 Decisions table marks **remove**, delete the option from `src/app/core/catalog/model-families.ts` and update the family's `providerCost` so the removed axis no longer appears in it. Bump `CATALOG_VERSION` to `2026-09-20.2`. Then:
 
@@ -1169,7 +1169,7 @@ Two specific corrections the review identified, applied regardless of what else 
 1. The FLUX family's `blurb` reads `'FLUX.2 [pro] — photoreal detail, priced per megapixel.'` while `slugFor` calls `fal-ai/flux-pro/v1.1`. Make the blurb name the model that is actually called, or change the slug. They cannot both stand.
 2. Seedream's `providerCost` is `() => 0.03` flat while the family sells three resolutions. If the record did not verify a real resolution parameter, delete the `resolutions` array from the seedream family.
 
-- [ ] **Step 2: Write the failing gateway test**
+- [x] **Step 2: Write the failing gateway test**
 
 Create `supabase/functions/api/quote_contract_test.ts`:
 
@@ -1254,7 +1254,7 @@ Deno.test('the adapter receives the same normalized request the price came from'
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/quote_contract_test.ts
@@ -1262,7 +1262,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — `provider.submits[0].normalized` is `undefined`; the gateway does not build one.
 
-- [ ] **Step 4: Wire normalize + quote into `POST /generations`**
+- [x] **Step 4: Wire normalize + quote into `POST /generations`**
 
 In `app.ts`, add the import:
 
@@ -1306,7 +1306,7 @@ And pass it to the adapter at the `submit` call site:
       };
 ```
 
-- [ ] **Step 5: Run every suite**
+- [x] **Step 5: Run every suite**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts && deno test --allow-all _shared api stripe-webhook appstore-webhook
@@ -1314,7 +1314,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts
 
 Expected: `~160 passed | 0 failed` — the exact number depends on how many combinations survive the Task 1 removals. Record the number in the verification log.
 
-- [ ] **Step 6: Angular suite and build**
+- [x] **Step 6: Angular suite and build**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build
@@ -1333,7 +1333,7 @@ Expected: vitest green, build succeeds. User commits.
 **Interfaces:**
 - Produces: `npm run export-catalog` writes `contracts/catalog/catalog.json` and `contracts/catalog/model_catalog_fixture.dart`. The mobile repo copies the Dart file in; its **MT-03** test asserts the Flutter catalog matches it.
 
-- [ ] **Step 1: Write the failing version-guard spec**
+- [x] **Step 1: Write the failing version-guard spec**
 
 Create `src/app/core/catalog/catalog-version.spec.ts`:
 
@@ -1387,7 +1387,7 @@ describe('catalog version', () => {
 });
 ```
 
-- [ ] **Step 2: Run it, read the actual fingerprint, paste it in**
+- [x] **Step 2: Run it, read the actual fingerprint, paste it in**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false 2>&1 | grep -A6 "catalog version"
@@ -1401,7 +1401,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
 
 Expected: green.
 
-- [ ] **Step 3: Write the export script**
+- [x] **Step 3: Write the export script**
 
 Create `scripts/export-catalog.mjs`:
 
@@ -1484,7 +1484,7 @@ Running a `.ts` file through `await import` needs a loader. During implementatio
     "check:catalog": "tsx scripts/export-catalog.mjs --check",
 ```
 
-- [ ] **Step 4: Run the export**
+- [x] **Step 4: Run the export**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm run export-catalog && cat contracts/catalog/catalog.json | head -20 && ls -la contracts/catalog/
@@ -1492,7 +1492,7 @@ cd /Users/user/IdeaProjects/vansen && npm run export-catalog && cat contracts/ca
 
 Expected: both files exist and `catalogVersion` matches `CATALOG_VERSION`.
 
-- [ ] **Step 5: Implement a non-mutating shared-sync check and retain both fixtures**
+- [x] **Step 5: Implement a non-mutating shared-sync check and retain both fixtures**
 
 Keep `contracts/catalog/catalog.json` and `model_catalog_fixture.dart` under version control in this repo; the mobile companion copies the same Dart fixture and records its hash. No ignored-only fixture can satisfy a drift check. In `scripts/sync-shared.mjs`, import `existsSync` and replace its direct-invocation block with:
 
@@ -1519,7 +1519,7 @@ if (invokedDirectly) runSync();
 
 Create `scripts/catalog-check.test.mjs`: use a temporary fixture tree and child-process invocations to prove missing output, changed Deno copy, changed JSON and changed Dart each fail; matching files pass. Compare bytes/mtime before/after each check to prove no writes. Generation followed by both checks passes. Run `node --test scripts/catalog-check.test.mjs`, `node scripts/sync-shared.mjs --check` and `npm run check:catalog`. P9 invokes both checks.
 
-- [ ] **Step 6: Final run of everything**
+- [x] **Step 6: Final run of everything**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && npm run export-catalog && cd supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook
@@ -1531,13 +1531,22 @@ Expected: all green. User commits.
 
 ## Exit criteria for P3
 
-- [ ] `docs/superpowers/specs/2026-09-20-provider-capability-record.md` exists with every row either verified against documentation **and** a live call, or explicitly removed from the catalog.
-- [ ] No two selectable combinations of any image family produce the same provider request at two different prices — proven exhaustively by `api/quote_contract_test.ts`.
-- [ ] The GPT Image version and resolution a customer picks appear in the outgoing request; so do FLUX's size and Seedream's slug.
-- [ ] An uploaded reference on `op = generate` reaches OpenAI (edits endpoint), Google (inline part) and fal (`image_url` / `image_urls`) — completing R28 across all four image families.
-- [ ] Every image adapter refuses a `SubmitCtx` with no `normalized` request rather than guessing a model.
-- [ ] `CATALOG_VERSION` is stored on every generation and fails a test if the catalog changes without a bump.
-- [ ] `npm run export-catalog` produces a JSON document and a Dart fixture carrying that version.
-- [ ] `npm test -- --watch=false` and `deno test --allow-all _shared api stripe-webhook appstore-webhook` are green; `npx ng build` succeeds.
+- [~] `docs/superpowers/specs/2026-09-20-provider-capability-record.md` exists and every row is verified against **current official documentation** (2026-09-21). The **live-call half is outstanding** — the smoke commands are written into the record and need the user's API keys. Two rows were removed by owner decision (FLUX endpoint moved to `fal-ai/flux-2`; FLUX reference input dropped).
+- [x] No two selectable combinations of any image family produce the same provider request at two different prices — proven exhaustively by `api/quote_contract_test.ts`.
+- [x] The GPT Image version and resolution a customer picks appear in the outgoing request; so do FLUX's size and Seedream's slug. **Wider than planned:** no fal image endpoint accepts `aspect_ratio`, so the ratio control was dead on FLUX and Seedream too. Both axes now ride inside `image_size`.
+- [~] An uploaded reference on `op = generate` reaches OpenAI (edits endpoint), Google (inline part) and fal Seedream (`image_urls`). **Three families, not four:** FLUX no longer claims a reference input, because `fal-ai/flux-2` documents none (owner decision 2026-09-21).
+- [x] Every image adapter refuses a `SubmitCtx` with no `normalized` request rather than guessing a model.
+- [x] `CATALOG_VERSION` is stored on every generation and fails a test if the catalog changes without a bump (`catalog-version.spec.ts` + `catalog-fingerprint.ts`).
+- [x] `npm run export-catalog` produces a JSON document and a Dart fixture carrying that version; `npm run check:catalog` and `node scripts/sync-shared.mjs --check` verify both without writing, proven non-vacuous by `scripts/catalog-check.test.mjs` (7 tests).
+- [x] `npm test -- --watch=false` **247 passed**, `deno test --allow-all _shared api stripe-webhook appstore-webhook` **189 passed**, `node --test scripts/catalog-check.test.mjs` **7 passed**; `npx ng build` succeeds.
+
+**Pricing change shipped with this plan:** FLUX's provider cost was an assumed
+flat $0.03/$0.06/$0.12 per megapixel tier. fal publishes $0.012/MP for
+`fal-ai/flux-2`, and its 512–2048 clamp means only a 1:1 crop actually reaches
+4MP (16:9 tops out at 2.36MP). `providerCost` now bills the pixels really
+requested, from the same `FLUX_DIMS` table the request is built from — so a 1MP
+FLUX generation drops from 5 credits to 3, and a "4MP" 16:9 from 20 to 5.
+Prices now vary by aspect ratio within one resolution label, which is a
+customer-visible change P8 should describe.
 
 **Known carry-forward:** video families and edit tools still map model and settings inside `fal.ts` / the video adapters rather than through `normalizeGenerationRequest`; P5 moves them as part of durable dispatch. `SubmitCtx.normalized` stays optional until then.

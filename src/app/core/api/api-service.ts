@@ -115,6 +115,10 @@ export class ApiService {
 
   /** Parses the uniform error body, logs, and throws a friendly ApiError on failure. */
   private async handle<T>(method: string, path: string, response: Response): Promise<T> {
+    // 204 (POST /errors) and any other empty success: there is no JSON to parse.
+    if (response.ok && (response.status === 204 || response.headers.get('content-length') === '0')) {
+      return undefined as T;
+    }
     if (response.ok) return (await response.json()) as T;
     const parsed = await response.json().catch(() => null);
     const code = parsed?.error?.code ?? 'unknown';

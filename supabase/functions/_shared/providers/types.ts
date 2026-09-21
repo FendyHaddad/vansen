@@ -1,6 +1,8 @@
 // Provider adapter contract. Server-only (not synced from Angular).
 import type { VideoMode } from '../model-families.ts';
 
+import type { NormalizedRequest } from '../generation-request.ts';
+
 export type ProviderName = 'google' | 'openai' | 'fal' | 'runway';
 export type JobPhase = 'queued' | 'rendering';
 
@@ -9,6 +11,13 @@ export interface SubmitCtx {
   op: string;
   prompt: string;
   settings: Record<string, unknown>;
+  /**
+   * The versioned request the quote was computed from. Image adapters REQUIRE
+   * it: deriving the model or size from raw settings is what let a customer pay
+   * for a 4K v2 render and receive a 1K v1 one. Optional only so the video
+   * adapters, which are normalized in P5, keep compiling.
+   */
+  normalized?: NormalizedRequest;
   /** Signed URL of a stored upload or parent generation, for image-to-image / edits. */
   referenceUrl?: string;
   /** Base64 PNG mask for GPT edits. */

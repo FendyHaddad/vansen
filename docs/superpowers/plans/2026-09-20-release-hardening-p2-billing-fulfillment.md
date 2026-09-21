@@ -63,7 +63,7 @@
 
 **Blocking dependency — read this before starting.** Tasks 1 and 2 need a **local** Supabase stack (`supabase start`) to run the SQL tests. If Docker or the Supabase CLI is unavailable on this machine, stop and tell the user: the money path is the one place where a fake database is not sufficient proof, and this plan does not substitute a TypeScript approximation for it. Every other task in this plan runs without it.
 
-- [ ] **Step 1: Confirm the local stack is available**
+- [x] **Step 1: Confirm the local stack is available**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && supabase start && supabase status
@@ -77,7 +77,7 @@ export VANSEN_LOCAL_DB="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 If this fails, stop and report. Do not point any command in this plan at `bnorhcxhvxydkgvcxjad`.
 
-- [ ] **Step 2: Move the fakes**
+- [x] **Step 2: Move the fakes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && mkdir -p _shared/testing && git mv api/testing/fakes.ts _shared/testing/fakes.ts
@@ -85,7 +85,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && mkdir -p _shared/testin
 
 In `_shared/testing/fakes.ts`, delete the `testDeps`, `fakeAdapter` and `fakeModeration` definitions and their imports of `../app.ts` and `../_shared/providers/types.ts` — those are api-specific and move back in the next step. Keep `Row`, `FakeError`, `FakeResult`, `TEST_USER`, `OTHER_USER`, `FakeQuery`, `StoredObject`, `FakeStorage` and `FakeDb`.
 
-- [ ] **Step 3: Re-create `api/testing/fakes.ts` as a thin layer**
+- [x] **Step 3: Re-create `api/testing/fakes.ts` as a thin layer**
 
 ```ts
 // api-specific test doubles. The database/storage fakes live in _shared so the
@@ -100,7 +100,7 @@ import type { CheckResult, ProviderAdapter, SubmitCtx } from '../_shared/provide
 // ... fakeAdapter, fakeModeration and testDeps, exactly as P1 Task 2 Step 5 wrote them ...
 ```
 
-- [ ] **Step 4: Run the whole edge suite to prove the move changed nothing**
+- [x] **Step 4: Run the whole edge suite to prove the move changed nothing**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts && deno test --allow-all _shared api
@@ -108,7 +108,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts
 
 Expected: `105 passed | 0 failed` — the same count as the end of P1.
 
-- [ ] **Step 5: Write the failing SQL integration test**
+- [x] **Step 5: Write the failing SQL integration test**
 
 Create `supabase/tests/billing_transactions.sql`:
 
@@ -167,7 +167,7 @@ end $$;
 rollback;
 ```
 
-- [ ] **Step 6: Run it to verify it fails**
+- [x] **Step 6: Run it to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/tests/billing_transactions.sql
@@ -196,7 +196,7 @@ Expected: FAIL — `ERROR: function public.fn_apply_fulfillment(...) does not ex
   ```
   Return shape: `{applied: bool, replay: bool, reason: text|null, credits: {plan:int, pack:int}, entitlement: text|null}`.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0018_billing_fulfillment.sql`:
 
@@ -407,7 +407,7 @@ grant execute on function public.fn_paid_unfulfilled(timestamptz) to service_rol
 
 Note the `fn_credits_json` helper is referenced above its own definition. That is fine — plpgsql resolves function calls at execution time, and both objects exist by the end of the migration.
 
-- [ ] **Step 1a: Persist delivery attempts separately from atomic money effects**
+- [x] **Step 1a: Persist delivery attempts separately from atomic money effects**
 
 Add `billing_deliveries(source,event_id,business_txn_id,user_id,verified_at,attempts,last_error,next_attempt_at,resolved_at)`, unique `(source,event_id)`, service-only RLS. Insert/update this verified receipt inbox BEFORE invoking fulfillment; its existence never suppresses a retry. Catch failures outside the money transaction, increment attempts and record a safe code; acknowledge only after the effect or a verified rejection is durable. A transaction rollback must leave a retryable inbox row, never a committed applied marker.
 
@@ -421,7 +421,7 @@ Add SQL/route regressions before implementing:
 - Valid zero-dollar discounted create/renewal receives the full D1 grant; unrelated zero-dollar invoice does not.
 - A valid zero-delta reset does not trigger `fn_paid_unfulfilled(now() - interval '1 day')`; a failed verified delivery does.
 
-- [ ] **Step 2: Apply it locally and run the first two assertions**
+- [x] **Step 2: Apply it locally and run the first two assertions**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/migrations/0018_billing_fulfillment.sql && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/tests/billing_transactions.sql
@@ -429,7 +429,7 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1
 
 Expected: `CREATE TABLE` / `CREATE FUNCTION` lines, then `DO` and `ROLLBACK` with no assertion failure.
 
-- [ ] **Step 3: Add the remaining SQL cases**
+- [x] **Step 3: Add the remaining SQL cases**
 
 Insert these `do $$ … $$;` blocks into `supabase/tests/billing_transactions.sql` before the closing `rollback;`, each with its own synthetic user id:
 
@@ -525,7 +525,7 @@ begin
 end $$;
 ```
 
-- [ ] **Step 4: Run the full SQL suite**
+- [x] **Step 4: Run the full SQL suite**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/tests/billing_transactions.sql
@@ -533,7 +533,7 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1
 
 Expected: one `DO` line per block, then `ROLLBACK`, with no `ERROR`.
 
-- [ ] **Step 5: Prove the concurrency claim with two real sessions**
+- [x] **Step 5: Prove the concurrency claim with two real sessions**
 
 The advisory lock is the whole point of the design, so it gets a test that actually races. Create `supabase/tests/billing_concurrency.sh`:
 
@@ -572,7 +572,7 @@ test "$ROWS" = "1" || { echo "FAIL: expected 1 applied transaction, got $ROWS"; 
 echo "OK: concurrent delivery granted once"
 ```
 
-- [ ] **Step 6: Run the race test**
+- [x] **Step 6: Run the race test**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && chmod +x supabase/tests/billing_concurrency.sh && ./supabase/tests/billing_concurrency.sh
@@ -617,7 +617,7 @@ Expected: `OK: concurrent delivery granted once`. User commits.
   ```
   `applyFulfillment` **throws** on any RPC error. Callers translate a throw into a 5xx so the provider retries; they never swallow it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/billing-fulfillment_test.ts`:
 
@@ -710,7 +710,7 @@ Deno.test('isDuplicateKey distinguishes 23505 from operational errors', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/billing-fulfillment_test.ts
@@ -718,7 +718,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `Module not found "file:///.../_shared/billing-fulfillment.ts"`.
 
-- [ ] **Step 3: Write `_shared/billing-fulfillment.ts`**
+- [x] **Step 3: Write `_shared/billing-fulfillment.ts`**
 
 ```ts
 // The only path from verified provider money to a credit balance.
@@ -785,7 +785,7 @@ export function isDuplicateKey(error: { code?: string } | null): boolean {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/billing-fulfillment_test.ts
@@ -822,7 +822,7 @@ Expected: `5 passed | 0 failed`. User commits.
 
 For subscription mirror-only writes, check the returned database error and use a server-side ordering condition on verified provider event/current period; a late webhook cannot reactivate a revoked/newer entitlement. Include this in the same per-user lock as fulfillment.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/stripe-webhook/handler_test.ts`:
 
@@ -1002,7 +1002,7 @@ Deno.test('a canceled subscription never grants', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all stripe-webhook/handler_test.ts
@@ -1010,7 +1010,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all s
 
 Expected: FAIL — `Module not found "file:///.../stripe-webhook/handler.ts"`.
 
-- [ ] **Step 3: Write `stripe-webhook/handler.ts`**
+- [x] **Step 3: Write `stripe-webhook/handler.ts`**
 
 Move the existing helpers (`invoiceSubscriptionId`, `periodEndIso`, `planFor`) across unchanged, then:
 
@@ -1219,7 +1219,7 @@ export function createStripeWebhook(deps: StripeWebhookDeps): (req: Request) => 
 }
 ```
 
-- [ ] **Step 4: Rewrite `stripe-webhook/index.ts` as composition**
+- [x] **Step 4: Rewrite `stripe-webhook/index.ts` as composition**
 
 ```ts
 // Production composition for the Stripe webhook. Behaviour lives in handler.ts.
@@ -1251,7 +1251,7 @@ const handler = createStripeWebhook({
 Deno.serve(handler);
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check stripe-webhook/index.ts && deno test --allow-all stripe-webhook
@@ -1280,7 +1280,7 @@ Expected: `12 passed | 0 failed`. User commits.
 
 **The defect being removed:** `iap-grants.ts:28–31` inserts an `iaptx:<transactionId>` marker and returns `false` on **any** insert error, then does the grant with no marker cleanup. A grant that throws after the marker lands is never retried, because the next delivery sees the marker and returns early. `appstore-webhook/index.ts:44` compounds it by deleting only the `notificationUUID` row on failure, leaving the `iaptx:` marker in place. The marker is deleted outright; `billing_transactions` replaces it with a marker that is written in the same transaction as the money.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/appstore-webhook/handler_test.ts`:
 
@@ -1409,7 +1409,7 @@ Deno.test('a status-only notification updates the mirror without granting', asyn
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all appstore-webhook/handler_test.ts
@@ -1417,7 +1417,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — `Module not found "file:///.../appstore-webhook/handler.ts"`.
 
-- [ ] **Step 3: Rewrite `applyIapTransaction` and `clawBackIap` in `_shared/iap-grants.ts`**
+- [x] **Step 3: Rewrite `applyIapTransaction` and `clawBackIap` in `_shared/iap-grants.ts`**
 
 Replace lines 1–80 with:
 
@@ -1553,7 +1553,7 @@ The subscription refund carries the known product plan and expires the entitleme
 
 **Receipt and response contract:** Verify signature, app/bundle/environment, product, account token, expiry and revocation before granting. Pass the decoded `revocationDate` into `IapTransaction`. Compare expiry to the injected current clock, not the webhook event's historical timestamp. Keep a separate verified event time for ordering. No fabricated 30-day expiry. Replace nested outcome ternaries above with `if (result.replay)`, `if (!result.applied)`, then return applied. Routes map applied/replay to 200, rejected to a readable 422, operational exceptions to 503 `retry_later`; `retry_later` is an HTTP outcome, never a successful `IapResult`. App Store notification rejection may be acknowledged only after its reason is durable. Test expired, revoked, missing expiry, wrong account, unknown product and database failure for both webhook and `/iap/verify`, including no entitlement activation.
 
-- [ ] **Step 4: Write `appstore-webhook/handler.ts`**
+- [x] **Step 4: Write `appstore-webhook/handler.ts`**
 
 ```ts
 // App Store Server Notifications v2 consumer, mirroring stripe-webhook.
@@ -1651,7 +1651,7 @@ export function createAppstoreWebhook(deps: AppstoreWebhookDeps): (req: Request)
 }
 ```
 
-- [ ] **Step 5: Rewrite `appstore-webhook/index.ts` as composition**
+- [x] **Step 5: Rewrite `appstore-webhook/index.ts` as composition**
 
 ```ts
 // Production composition for the App Store webhook. Behaviour lives in handler.ts.
@@ -1669,7 +1669,7 @@ Deno.serve(createAppstoreWebhook({
 }));
 ```
 
-- [ ] **Step 6: Make `/iap/verify` tri-state**
+- [x] **Step 6: Make `/iap/verify` tri-state**
 
 In `supabase/functions/api/app.ts`, replace the body of `POST /iap/verify` after the ownership check:
 
@@ -1708,7 +1708,7 @@ Note the response shape changes from `{granted: boolean, credits}` to `{outcome,
     });
 ```
 
-- [ ] **Step 7: Run every edge test**
+- [x] **Step 7: Run every edge test**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts stripe-webhook/index.ts appstore-webhook/index.ts && deno test --allow-all _shared api stripe-webhook appstore-webhook
@@ -1730,7 +1730,7 @@ Expected: `128 passed | 0 failed` (105 from P1 + 5 fulfillment + 12 stripe + 6 a
 
 **Why:** `/billing/lane` currently only *advises* the client. A mobile build (or anyone sending `x-vansen-client: ios`) can call `/billing/subscribe` and be sold through Stripe in a storefront where Apple requires in-app purchase. The lane must be enforced where the money starts, and an unknown platform or storefront must not read as Android/US.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/api/billing_lane_test.ts`:
 
@@ -1820,7 +1820,7 @@ Deno.test('GET /billing/lane refuses to guess an unknown storefront', async () =
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/billing_lane_test.ts
@@ -1828,7 +1828,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — the iOS requests are not refused; the first three tests report a non-403 status or a `billing_failed` from the empty Stripe fake.
 
-- [ ] **Step 3: Add `requireWebLane` and apply it**
+- [x] **Step 3: Add `requireWebLane` and apply it**
 
 Inside `createApp` in `app.ts`, next to `clientOf`:
 
@@ -1869,7 +1869,7 @@ app.get('/billing/lane', (c) => {
 });
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api stripe-webhook appstore-webhook _shared
@@ -1889,7 +1889,7 @@ Expected: `134 passed | 0 failed`. User commits.
 - Consumes: `fn_paid_unfulfilled` (Task 2).
 - Produces: a printed report and a non-zero exit code when anything is unfulfilled. **It changes nothing.**
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Create `scripts/billing-reconcile.mjs`:
 
@@ -1941,7 +1941,7 @@ if (rows.length > 0) {
 }
 ```
 
-- [ ] **Step 2: Register it**
+- [x] **Step 2: Register it**
 
 In `package.json`, add to `scripts`:
 
@@ -1957,7 +1957,51 @@ cd /Users/user/IdeaProjects/vansen && SUPABASE_URL="http://127.0.0.1:54321" SUPA
 
 Expected: `Unfulfilled: 0` and exit code 0.
 
-- [ ] **Step 4: Run every suite once more**
+**NOT RUN — blocked.** `supabase start` does not work on this repo (`0008_age_gate`
+and `0008_credit_plans` share the version prefix `0008`), so there is no local
+PostgREST for `createClient().rpc()` to reach. What was verified instead, and is
+everything the script does apart from the HTTP hop: both guard clauses (missing env
+→ exit 2; `--days 0` → exit 2), and that `fn_paid_unfulfilled` is executable by
+`service_role` only (`authenticated` and `anon` denied). The RPC itself is covered
+by SQL cases 8–10 — a healthy period reports nothing, a zero-delta renewal is not
+mistaken for a missing grant, and a stuck delivery is reported then stops once
+settled. First real run belongs in Task 8 Step 3, against staging.
+
+### Finding during Task 7: a second fulfillment path was still live
+
+`POST /billing/reconcile` in `api/app.ts` — user-callable, the fallback for a
+dropped `checkout.session.completed` — was still granting through the legacy
+`fn_grant_pack`, and was paying out `session.metadata.pack_credits` verbatim.
+Two defects, both introduced or widened by this plan:
+
+1. **Double grant.** `fn_apply_fulfillment` writes `stripe_ref = 'stripe:<id>'`;
+   `fn_grant_pack` writes the bare `<id>`. Before P2 both paths used the bare id,
+   so the `stripe_ref` UNIQUE index made them idempotent with each other. Changing
+   the ref format silently removed that, and nothing else stopped the route from
+   re-granting a pack the webhook had already settled.
+2. **Trusting a written grant value**, which this plan forbids outright.
+
+Fixed in two places:
+
+- `api/app.ts`: the route now settles through `applyFulfillment` on the same
+  business transaction id (the session id) as the webhook, so whichever path
+  arrives second sees a replay. The grant is recomputed with `packCredits` from
+  the catalogued dollar size and the plan in force; `pack_credits` is never read.
+  New `catalogPackCredits` helper; covered by `api/billing_reconcile_test.ts` (9
+  tests, mutation-proven — restoring the metadata read fails the catalog test).
+- `0018_billing_fulfillment.sql`: `fn_apply_fulfillment` now also refuses money
+  the PRE-P2 path already credited, matching `stripe_ref` against the bare
+  `p_txn_id` (legacy stripe packs) and `'iap:' || p_txn_id` (legacy Apple
+  grants), returning `replay` with reason `legacy_ledger_ref`. Without this,
+  every pre-P2 pack and Apple grant was re-grantable once. SQL case 11 covers
+  it; it failed against the unpatched function.
+
+This makes the plan's **known carry-forward** better than written: `fn_grant_pack`
+now genuinely has no callers, and neither does `fn_cycle_reset` — its two
+remaining mentions are comments, and the one in `app.ts` is now stale. Both stay
+in place until P9 confirms no deployed function version references them.
+
+- [x] **Step 4: Run every suite once more**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook && cd .. && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f tests/billing_transactions.sql && ./tests/billing_concurrency.sh
@@ -1971,9 +2015,15 @@ Expected: vitest `242 passed`; deno `134 passed`; SQL clean; `OK: concurrent del
 
 This task runs no new code. It is the manual evidence that must exist before the exit criteria are claimed, and its results belong in the P9 release runbook.
 
+**STATUS: BLOCKED — not run.** No staging project exists, and the plan is explicit
+that a test-mode webhook must not be pointed at production data. Step 1 (the log
+skeleton) is done: `docs/superpowers/plans/2026-09-20-billing-verification-log.md`,
+with every row recorded as **not run** plus the reason, and two rows added for the
+`POST /billing/reconcile` path found above. Steps 2–3 wait on the P9 staging deploy.
+
 **Prerequisite:** Stripe test keys and a test-mode webhook endpoint pointed at the deployed `stripe-webhook` function. Apple sandbox for the IAP half. Deploying to a staging project is a P9 step; if no staging project exists, stop and tell the user — do not point a test-mode webhook at production data.
 
-- [ ] **Step 1: Record the scenario matrix**
+- [x] **Step 1: Record the scenario matrix**
 
 Create `docs/superpowers/plans/2026-09-20-billing-verification-log.md` with a table to fill in, one row per scenario and columns for date, actor, expected, observed, and evidence link:
 
@@ -2009,15 +2059,15 @@ Expected: `Unfulfilled: 0`. A non-zero result blocks the exit criteria. User com
 
 ## Exit criteria for P2
 
-- [ ] Replaying any Stripe or Apple delivery grants exactly once, proven by the SQL suite and by resending a real test-mode event.
-- [ ] Two simultaneous deliveries of the same invoice produce one ledger entry and one applied transaction (`billing_concurrency.sh`).
-- [ ] A failure at any point leaves no marker that would cause the retry to be skipped; the retry succeeds and grants once.
-- [ ] A launch-coupon invoice grants the full plan credits, matching `vansen.md` §5 (D1).
-- [ ] A late delivery of an older billing period is refused with `stale_period` and never moves entitlement backwards.
-- [ ] A pack amount mismatch answers 500 and leaves no consumed event id.
-- [ ] An iOS client in a non-lane-A storefront, or with no storefront header, cannot start a Stripe checkout.
-- [ ] `POST /iap/verify` answers `applied`, `already_applied`, or HTTP 503 `retry_later` — never a success that hides a lost grant.
-- [ ] `npm run reconcile:billing` reports zero unfulfilled transactions and has changed nothing.
-- [ ] `deno test --allow-all _shared api stripe-webhook appstore-webhook` reports 134 passing; `npm test -- --watch=false` reports 242 passing.
+- [~] Replaying any Stripe or Apple delivery grants exactly once — **proven by the SQL suite** (cases 1–2, 5, 11) and the webhook tests; the test-mode resend half is blocked with Task 8.
+- [x] Two simultaneous deliveries of the same invoice produce one ledger entry and one applied transaction (`billing_concurrency.sh`).
+- [x] A failure at any point leaves no marker that would cause the retry to be skipped; the retry succeeds and grants once.
+- [x] A launch-coupon invoice grants the full plan credits, matching `vansen.md` §5 (D1).
+- [x] A late delivery of an older billing period is refused with `stale_period` and never moves entitlement backwards.
+- [x] A pack amount mismatch answers 500 and leaves no consumed event id.
+- [x] An iOS client in a non-lane-A storefront, or with no storefront header, cannot start a Stripe checkout.
+- [x] `POST /iap/verify` answers `applied`, `already_applied`, or HTTP 503 `retry_later` — never a success that hides a lost grant.
+- [~] `npm run reconcile:billing` reports zero unfulfilled transactions and has changed nothing — guards and grants verified; the run itself is blocked with Task 7 Step 3 / Task 8 Step 3.
+- [x] `deno test --allow-all _shared api stripe-webhook appstore-webhook` reports **152 passing** (plan estimated 134; Task 7 added 9 reconcile-route tests); `npm test -- --watch=false` reports **246 passing** (plan estimated 242).
 
 **Known carry-forward:** `fn_cycle_reset` and `fn_grant_pack` still exist and are still granted to `service_role`; nothing calls them after this plan. Leave them in place until P9 confirms no deployed function references them, then drop them in a dedicated migration — dropping a function that a still-deployed older function version calls would break fulfillment mid-rollout.

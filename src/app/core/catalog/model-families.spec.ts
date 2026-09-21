@@ -173,8 +173,10 @@ describe('credit pricing', () => {
     // provider $0.03 → $0.05 retail → 5 credits
     expect(creditCost(seedream, defaultSettings(seedream))).toBe(5);
     const flux = familyById('flux')!;
-    // provider $0.03 (1MP) → 5 credits
-    expect(creditCost(flux, defaultSettings(flux))).toBe(5);
+    // FLUX.2 bills per megapixel: 1024x1024 = 1.048 MP x $0.012 = $0.0126
+    // provider -> $0.021 retail -> 3 credits. The old 5 came from an assumed
+    // flat $0.03 that fal never charged (capability record, 2026-09-21).
+    expect(creditCost(flux, defaultSettings(flux))).toBe(3);
   });
 
   it('always yields a positive integer for every family/default', () => {

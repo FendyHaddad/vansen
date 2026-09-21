@@ -1,84 +1,138 @@
-// The only credit-granting code for iap-source money. Idempotency:
-//  - webhook_events 'iaptx:<transactionId>' marker: first writer wins across
-//    BOTH appstore-webhook and POST /iap/verify (blocks the replay-refill
-//    exploit on fn_cycle_reset, which is a snap-to-grant, not an insert).
-//  - fn_grant_pack / fn_iap_clawback additionally bounce on stripe_ref UNIQUE.
+// The only credit-granting code for iap-source money.
+//
+// Idempotency lives entirely in fn_apply_fulfillment, keyed on the Apple
+// transaction id, inside the same transaction as the grant. The old
+// 'iaptx:<transactionId>' marker in webhook_events is GONE: it was written
+// before the grant and never cleaned up, so any failure after the marker and
+// before the grant lost the customer's credits permanently.
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { PLAN_CREDITS } from './model-families.ts';
 import { IAP_PRODUCTS, iapGrant, iapPlanFor } from './iap-products.ts';
+import { applyFulfillment } from './billing-fulfillment.ts';
 
 export interface IapTransaction {
   productId: string;
   transactionId: string;
   originalTransactionId: string;
   expiresDate?: number;
+  revocationDate?: number;
   appAccountToken?: string;
 }
 
+export type IapOutcome = 'applied' | 'already_applied' | 'rejected';
+
+function iapOutcome(result: { replay: boolean; applied: boolean }): IapOutcome {
+  if (result.replay) return 'already_applied';
+  if (!result.applied) return 'rejected';
+  return 'applied';
+}
+
+export interface IapResult {
+  outcome: IapOutcome;
+  credits: { plan: number; pack: number } | null;
+}
+
+/** Throws on any operational failure so the caller answers 5xx and Apple retries. */
 export async function applyIapTransaction(
   admin: SupabaseClient,
   userId: string,
   tx: IapTransaction,
-): Promise<boolean> {
+  eventAt = new Date().toISOString(),
+  nowMs = Date.now(),
+): Promise<IapResult> {
   const product = IAP_PRODUCTS[tx.productId];
   if (!product) {
     console.error('unknown iap product', tx.productId, tx.transactionId);
-    return false;
+    return { outcome: 'rejected', credits: null };
   }
-  const { error: dupe } = await admin
-    .from('webhook_events')
-    .insert({ id: `iaptx:${tx.transactionId}`, type: 'iap_transaction' });
-  if (dupe) return false;
+
+  if (tx.revocationDate) return { outcome: 'rejected', credits: null };
+  // Expiry is judged against the CURRENT clock, never the notification's own
+  // historical timestamp, and a subscription with no expiry is refused rather
+  // than given a fabricated 30-day period.
+  const subscriptionExpired = product.kind === 'subscription' &&
+    (!tx.expiresDate || tx.expiresDate <= nowMs);
+  if (subscriptionExpired) return { outcome: 'rejected', credits: null };
 
   if (product.kind === 'subscription') {
-    await upsertIapSubscription(admin, userId, product.plan, tx);
-    const { error } = await admin.rpc('fn_cycle_reset', {
-      p_user: userId,
-      p_grant: PLAN_CREDITS[product.plan],
+    const periodEnd = new Date(tx.expiresDate!).toISOString();
+    const result = await applyFulfillment(admin, {
+      source: 'apple',
+      businessTxnId: tx.transactionId,
+      userId,
+      kind: 'subscription_grant',
+      plan: product.plan,
+      credits: PLAN_CREDITS[product.plan],
+      periodEnd,
+      eventAt,
+      entitlement: {
+        plan: product.plan,
+        status: 'active',
+        current_period_end: periodEnd,
+        iap_original_transaction_id: tx.originalTransactionId,
+      },
     });
-    if (error) throw error;
-    return true;
+    return { outcome: iapOutcome(result), credits: result.credits };
   }
 
   const plan = await currentPlan(admin, userId);
-  const { error } = await admin.rpc('fn_grant_pack', {
-    p_user: userId,
-    p_credits: iapGrant(tx.productId, plan),
-    p_stripe_ref: `iap:${tx.transactionId}`,
+  const result = await applyFulfillment(admin, {
+    source: 'apple',
+    businessTxnId: tx.transactionId,
+    userId,
+    kind: 'pack_grant',
+    credits: iapGrant(tx.productId, plan),
+    eventAt,
   });
-  if (error) throw error;
-  return true;
+  return { outcome: iapOutcome(result), credits: result.credits };
 }
 
 export async function clawBackIap(
   admin: SupabaseClient,
   userId: string,
   tx: IapTransaction,
+  eventAt = new Date().toISOString(),
 ): Promise<void> {
-  if (iapPlanFor(tx.productId)) {
-    await setIapSubscriptionStatus(admin, tx.originalTransactionId, 'expired');
-    const { error } = await admin.rpc('fn_cycle_reset', { p_user: userId, p_grant: 0 });
-    if (error) throw error;
+  const refundedPlan = iapPlanFor(tx.productId);
+  if (refundedPlan) {
+    await applyFulfillment(admin, {
+      source: 'apple',
+      businessTxnId: `refund:${tx.transactionId}`,
+      userId,
+      kind: 'subscription_grant',
+      plan: refundedPlan,
+      credits: 0,
+      eventAt,
+      entitlement: {
+        plan: refundedPlan,
+        status: 'expired',
+        current_period_end: eventAt,
+      },
+    });
     return;
   }
-  // Claw back exactly what the original grant wrote (rate may have changed since).
+  // Claw back exactly what the original grant wrote (rates may have changed).
   const { data: grant } = await admin
     .from('ledger_entries')
     .select('amount_credits')
-    .eq('stripe_ref', `iap:${tx.transactionId}`)
+    .eq('stripe_ref', `apple:${tx.transactionId}`)
     .maybeSingle();
   if (!grant) {
     console.error('refund for unknown iap grant', tx.transactionId);
     return;
   }
-  const { error } = await admin.rpc('fn_iap_clawback', {
-    p_user: userId,
-    p_credits: grant.amount_credits,
-    p_ref: `iap-refund:${tx.transactionId}`,
+  await applyFulfillment(admin, {
+    source: 'apple',
+    businessTxnId: `refund:${tx.transactionId}`,
+    userId,
+    kind: 'clawback',
+    credits: Number(grant.amount_credits),
+    eventAt,
   });
-  if (error) throw error;
 }
 
+/** Never reactivates a closed account: only a row that already exists for this
+ * original transaction is moved, and a failed write is raised, not swallowed. */
 export async function setIapSubscriptionStatus(
   admin: SupabaseClient,
   originalTransactionId: string,
@@ -88,7 +142,7 @@ export async function setIapSubscriptionStatus(
     .from('subscriptions')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('iap_original_transaction_id', originalTransactionId);
-  if (error) throw error;
+  if (error) throw new Error(`iap_status_update_failed ${error.message}`);
 }
 
 export async function findUserByOriginalTransaction(
@@ -103,34 +157,12 @@ export async function findUserByOriginalTransaction(
   return data?.user_id ?? null;
 }
 
-async function upsertIapSubscription(
-  admin: SupabaseClient,
-  userId: string,
-  plan: 'studio' | 'pro',
-  tx: IapTransaction,
-): Promise<void> {
-  const periodEnd = tx.expiresDate
-    ? new Date(tx.expiresDate).toISOString()
-    : new Date(Date.now() + 30 * 86400 * 1000).toISOString();
-  const { error } = await admin.from('subscriptions').upsert(
-    {
-      user_id: userId,
-      plan,
-      status: 'active',
-      current_period_end: periodEnd,
-      iap_original_transaction_id: tx.originalTransactionId,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' },
-  );
-  if (error) throw error;
-}
-
 async function currentPlan(admin: SupabaseClient, userId: string): Promise<'studio' | 'pro'> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('subscriptions')
     .select('plan')
     .eq('user_id', userId)
     .maybeSingle();
+  if (error) throw new Error(`iap_plan_lookup_failed ${error.message}`);
   return data?.plan === 'pro' ? 'pro' : 'studio';
 }

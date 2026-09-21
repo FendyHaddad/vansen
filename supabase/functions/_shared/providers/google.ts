@@ -4,14 +4,6 @@
 import { CheckResult, ProviderAdapter, SubmitCtx } from './types.ts';
 import { GOOGLE_API_BASE, googleHeaders } from './google-common.ts';
 
-/** Nano Banana version → Gemini image model id. */
-function modelFor(ctx: SubmitCtx): string {
-  const version = String(ctx.settings.version ?? 'standard');
-  if (version === 'fast') return 'gemini-2.5-flash-image';
-  if (version === 'pro') return 'gemini-3-pro-image';
-  return 'gemini-3.1-flash-image';
-}
-
 async function referenceInline(referenceUrl?: string): Promise<Record<string, unknown> | null> {
   if (!referenceUrl) return null;
   const res = await fetch(referenceUrl);
@@ -27,14 +19,17 @@ export const googleAdapter: ProviderAdapter = {
   provider: 'google',
 
   async submit(ctx: SubmitCtx) {
-    const model = modelFor(ctx);
+    // Nano Banana was already correct; moving it onto the same seam as the
+    // other adapters means a future catalog change cannot break it silently.
+    const n = ctx.normalized;
+    if (!n) throw new Error('google: normalized request is required');
+    const model = n.providerModel;
     const parts: unknown[] = [{ text: ctx.prompt }];
     const ref = await referenceInline(ctx.referenceUrl);
     if (ref) parts.push(ref);
 
-    const responseFormat: Record<string, unknown> = {};
-    if (ctx.settings.resolution) responseFormat.image_size = String(ctx.settings.resolution);
-    if (ctx.settings.aspectRatio) responseFormat.aspect_ratio = String(ctx.settings.aspectRatio);
+    // Exactly the axes the quote was computed from — no re-derivation here.
+    const responseFormat: Record<string, unknown> = n.providerSettings;
 
     const res = await fetch(`${GOOGLE_API_BASE}/models/${model}:generateContent`, {
       method: 'POST',

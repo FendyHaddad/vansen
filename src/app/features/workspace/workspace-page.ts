@@ -33,6 +33,7 @@ import { ApiError } from '../../core/api/api-service';
 import { clearAllCaches } from '../../core/api/local-cache';
 import { MediaCache } from '../../core/media/media-cache';
 import { GenerationOp } from '../../core/enums';
+import { referenceRoutingFor } from './reference-routing';
 import { EditSession } from '../../core/editing/edit-session';
 import { editToolById } from '../../core/catalog/model-families';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
@@ -350,26 +351,20 @@ export class WorkspacePage {
 
   async onGenerate(req: GenerateRequest): Promise<void> {
     if (this.generating()) return;
-    // Personas are generate-only; the server routes them to its own family.
-    // Video never becomes an Edit op — its modes live in settings.mode instead.
-    const isImageEdit =
-      req.settings.mode === undefined &&
-      !!(req.referenceId || req.referenceUploadId) &&
-      !req.personaId;
-    const op = isImageEdit ? GenerationOp.Edit : GenerationOp.Generate;
+    const routing = referenceRoutingFor(req);
     this.generating.set(true);
     try {
       await this.store.create({
         familyId: req.family.id,
-        op,
+        op: routing.op,
         prompt: req.prompt,
         style: req.style ?? undefined,
         personaId: req.personaId ?? undefined,
         trendId: req.trendId ?? undefined,
         settings: req.settings,
         batch: req.batch,
-        parentId: req.videoParentId ?? req.referenceId ?? undefined,
-        referenceUploadId: req.referenceUploadId ?? undefined,
+        parentId: routing.parentId,
+        referenceUploadId: routing.referenceUploadId,
         referencePaths: req.referencePaths,
       });
       this.rail().setReference(null);

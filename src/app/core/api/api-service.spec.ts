@@ -90,4 +90,20 @@ describe('ApiService', () => {
     const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
     expect(headers['x-vansen-client']).toBe('web');
   });
+
+  it('accepts a successful empty response', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 })) as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await expect(api.post('/errors', { message: 'test' })).resolves.toBeUndefined();
+  });
+
+  it('still throws on an error response with an empty body', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 502 })) as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await expect(api.post('/errors', { message: 'test' })).rejects.toBeInstanceOf(ApiError);
+  });
 });

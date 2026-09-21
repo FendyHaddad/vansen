@@ -24,7 +24,7 @@ export type ChangeWhen = 'now' | 'period_end';
  * Confirms a Studio <-> Pro switch before any money moves.
  *
  * Exists because the switch is not intuitive on its own: plan credits do not
- * carry across (fn_cycle_reset SETS the balance to the new grant), so someone
+ * carry across (fn_apply_fulfillment SETS the balance to the new grant), so someone
  * upgrading mid-cycle silently loses whatever Studio credits they had left.
  * The dialog says that in words before they commit, and doubles as the reminder
  * for a change booked at renewal.

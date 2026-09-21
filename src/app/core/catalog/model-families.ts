@@ -1,3 +1,12 @@
+/**
+ * Catalog version. Bump on ANY change to a family's id, options, prices or
+ * provider mapping. Clients send it back with a request so the server can tell
+ * a stale composer's quote from a current one, and the Dart fixture in the
+ * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
+ * hash changes without a bump.
+ */
+export const CATALOG_VERSION = '2026-09-20.2';
+
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
 export type VideoMode = 't2v' | 'i2v' | 'ref2v' | 'keyframes' | 'extend' | 'edit';
@@ -58,6 +67,40 @@ export interface ModelFamily {
 }
 
 const AR_IMAGE = ['1:1', '3:4', '4:3', '16:9', '9:16'];
+
+/**
+ * FLUX.2 (`fal-ai/flux-2`) takes `image_size` as `{width, height}` with BOTH
+ * edges clamped to 512–2048, and bills per megapixel. The clamp means only 1:1
+ * actually reaches 4MP — 16:9 tops out at 2.36MP — so the price is computed
+ * from the pixels we will really ask for, never from the label. Keyed
+ * `aspectRatio:resolution`; the same table drives the provider request in
+ * `_shared/generation-request.ts`, so a price can never describe a size we do
+ * not send.
+ */
+export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
+  '1:1:1MP': { width: 1024, height: 1024 },
+  '4:3:1MP': { width: 1152, height: 864 },
+  '3:4:1MP': { width: 864, height: 1152 },
+  '16:9:1MP': { width: 1344, height: 756 },
+  '9:16:1MP': { width: 756, height: 1344 },
+  '1:1:2MP': { width: 1448, height: 1448 },
+  '4:3:2MP': { width: 1632, height: 1224 },
+  '3:4:2MP': { width: 1224, height: 1632 },
+  '16:9:2MP': { width: 1888, height: 1062 },
+  '9:16:2MP': { width: 1062, height: 1888 },
+  '1:1:4MP': { width: 2048, height: 2048 },
+  '4:3:4MP': { width: 2048, height: 1536 },
+  '3:4:4MP': { width: 1536, height: 2048 },
+  '16:9:4MP': { width: 2048, height: 1152 },
+  '9:16:4MP': { width: 1152, height: 2048 },
+};
+
+/** fal's published FLUX.2 rate (provider capability record, 2026-09-21). */
+export const FLUX_USD_PER_MP = 0.012;
+
+export function fluxDims(s: GenerationSettings): { width: number; height: number } {
+  return FLUX_DIMS[`${s.aspectRatio ?? '1:1'}:${s.resolution ?? '1MP'}`] ?? FLUX_DIMS['1:1:1MP'];
+}
 const AR_VIDEO = ['16:9', '9:16', '1:1'];
 
 /** Hard ceiling on provider spend for video per user per rolling 24 h. */
@@ -221,18 +264,27 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Black Forest Labs',
     logo: '/logos/bfl.svg',
     kind: 'image',
-    blurb: 'FLUX.2 [pro] — photoreal detail, priced per megapixel.',
+    blurb: 'FLUX.2 — photoreal detail, billed per megapixel.',
     capabilities: {
       aspectRatios: AR_IMAGE,
       resolutions: [
-        { value: '1MP', label: '1MP', tooltip: '~1024×1024 pixels. FLUX bills per megapixel.' },
-        { value: '2MP', label: '2MP', tooltip: '~1448×1448 pixels equivalent.' },
-        { value: '4MP', label: '4MP', tooltip: '~2048×2048 pixels equivalent.' },
+        { value: '1MP', label: '1MP', tooltip: '~1 megapixel, e.g. 1024×1024.' },
+        { value: '2MP', label: '2MP', tooltip: '~2 megapixels, e.g. 1448×1448.' },
+        {
+          value: '4MP',
+          label: '4MP',
+          tooltip: 'Largest FLUX.2 renders: 2048×2048 square. Wider crops are capped at 2048px on the long edge, so they land below 4MP — and cost proportionally less.',
+        },
       ],
-      imageInput: true,
+      // fal-ai/flux-2 documents no reference-image input (capability record,
+      // 2026-09-21), so the family no longer offers one.
+      imageInput: false,
       maskInput: false,
     },
-    providerCost: (s) => ({ '1MP': 0.03, '2MP': 0.06, '4MP': 0.12 }[s.resolution ?? '1MP'] ?? 0.03),
+    providerCost: (s) => {
+      const { width, height } = fluxDims(s);
+      return FLUX_USD_PER_MP * ((width * height) / 1_000_000);
+    },
   },
   {
     id: 'seedream',

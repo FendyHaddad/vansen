@@ -1017,7 +1017,7 @@ Expected: `Check` lines with no errors, then `62 passed | 0 failed`. User commit
 - Consumes: nothing.
 - Produces: `ApiService.post()` resolves to `undefined` for a 204 instead of rejecting.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `src/app/core/api/api-service.spec.ts` (inside the existing top-level `describe`):
 
@@ -1030,7 +1030,7 @@ it('accepts a successful empty response', async () => {
 
 If the file has no `TestBed.configureTestingModule` in a `beforeEach`, copy the arrangement used by the file's existing tests verbatim rather than inventing one.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -1038,7 +1038,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
 
 Expected: FAIL — the new test rejects with a `SyntaxError` from `response.json()` on an empty body.
 
-- [ ] **Step 3: Handle 204 in `handle`**
+- [x] **Step 3: Handle 204 in `handle`**
 
 In `src/app/core/api/api-service.ts`, replace line 118:
 
@@ -1056,7 +1056,7 @@ with:
     if (response.ok) return (await response.json()) as T;
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -1085,7 +1085,7 @@ Expected: `240 passed`, 42 files. User commits.
   ```
   Callers switch on `state`. `{ state: 'allowed' }` for genuinely empty input (no text and no image) is intentional — there is nothing to moderate — but Task 5 makes it impossible for a required image check to reach that branch with an undefined URL.
 
-- [ ] **Step 0: Upgrade the shared moderation fake in this task**
+- [x] **Step 0: Upgrade the shared moderation fake in this task**
 
 Task 2 characterizes the old `flagged` API. Replace its `FakeModeration` and implementation in `api/testing/fakes.ts` when introducing the three-state contract. Task 5 imports this replacement:
 
@@ -1112,7 +1112,7 @@ export function fakeModeration(): FakeModeration {
 }
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/moderation_test.ts`:
 
@@ -1206,7 +1206,7 @@ Deno.test('genuinely empty input is allowed without calling the api', async () =
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/moderation_test.ts
@@ -1214,7 +1214,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — six of eight assertions report `"allowed"`/`{flagged:false}` where `"unavailable"` is expected.
 
-- [ ] **Step 3: Rewrite `_shared/moderation.ts`**
+- [x] **Step 3: Rewrite `_shared/moderation.ts`**
 
 ```ts
 // Universal moderation gate — runs on every prompt and every image BEFORE any
@@ -1285,7 +1285,7 @@ export async function moderate(input: { text?: string; imageUrl?: string }): Pro
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/moderation_test.ts
@@ -1293,7 +1293,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: `8 passed | 0 failed`.
 
-- [ ] **Step 5: Expect the gateway to stop compiling — that is the point**
+- [x] **Step 5: Expect the gateway to stop compiling — that is the point**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/app.ts
@@ -1318,7 +1318,7 @@ Expected: FAIL — `Property 'flagged' does not exist on type 'ModerationDecisio
 - 422 `content_policy` (prompt) → `This prompt violates our content policy.` (unchanged)
 - 422 `content_policy` (image) → `This image violates our content policy.` (unchanged)
 
-- [ ] **Step 1: Write the failing route tests**
+- [x] **Step 1: Write the failing route tests**
 
 Create `supabase/functions/api/moderation_routes_test.ts`:
 
@@ -1466,7 +1466,7 @@ Deno.test('thumb: poster is moderated before it is stored', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/moderation_routes_test.ts
@@ -1474,7 +1474,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL to type-check (`Property 'flagged' does not exist`) — the same failure `deno check` reported at the end of Task 4.
 
-- [ ] **Step 3: Add the shared helpers inside `createApp` in `app.ts`**
+- [x] **Step 3: Add the shared helpers inside `createApp` in `app.ts`**
 
 Insert beside `recordStrike`; replace that function with the checked version below:
 
@@ -1589,7 +1589,7 @@ Add `import type { ModerationDecision } from './_shared/moderation.ts';` to the 
   }
 ```
 
-- [ ] **Step 4: Rewrite the prompt check in `POST /generations`**
+- [x] **Step 4: Rewrite the prompt check in `POST /generations`**
 
 Replace the current block (evidence L1136–1141):
 
@@ -1615,7 +1615,7 @@ with:
   }
 ```
 
-- [ ] **Step 5: Rewrite the video reference check in `prepareVideo`**
+- [x] **Step 5: Rewrite the video reference check in `prepareVideo`**
 
 Replace the loop (evidence L992–1001):
 
@@ -1650,7 +1650,7 @@ with:
   return prep;
 ```
 
-- [ ] **Step 6: Rewrite `POST /uploads` to check its own storage write**
+- [x] **Step 6: Rewrite `POST /uploads` to check its own storage write**
 
 Replace evidence L1667–1684:
 
@@ -1668,7 +1668,7 @@ Replace evidence L1667–1684:
   return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
 ```
 
-- [ ] **Step 7: Rewrite the `/edits/save` and `/library/import` scratch blocks**
+- [x] **Step 7: Rewrite the `/edits/save` and `/library/import` scratch blocks**
 
 In `POST /edits/save`, replace evidence L1926–1937:
 
@@ -1711,7 +1711,7 @@ In `POST /library/import`, replace evidence L1991–2002 with the same shape, us
   if (!importCheck.ok) return importCheck.response;
 ```
 
-- [ ] **Step 8: Moderate the video poster in `POST /generations/:id/thumb`**
+- [x] **Step 8: Moderate the video poster in `POST /generations/:id/thumb`**
 
 After the JPEG sniff (evidence L1706) and before `storageFor(backend).put(...)`, insert:
 
@@ -1735,7 +1735,7 @@ After the JPEG sniff (evidence L1706) and before `storageFor(backend).put(...)`,
   if (!posterCheck.ok) return posterCheck.response;
 ```
 
-- [ ] **Step 9: Run the moderation route tests**
+- [x] **Step 9: Run the moderation route tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/moderation_routes_test.ts
@@ -1743,7 +1743,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: `7 passed | 0 failed`.
 
-- [ ] **Step 10: Run the full edge suite and type-check**
+- [x] **Step 10: Run the full edge suite and type-check**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts stripe-webhook/index.ts appstore-webhook/index.ts && deno test --allow-all _shared api
@@ -1780,7 +1780,7 @@ Expected: `77 passed | 0 failed` (62 + 8 moderation unit + 7 moderation route). 
   ): Promise<OwnedUpload | ReferenceError>;
   ```
 
-- [ ] **Step 1: Confirm the deployed migration inventory before adding a file**
+- [x] **Step 1: Confirm the deployed migration inventory before adding a file**
 
 Ask the user to run this in the Supabase SQL editor for project `bnorhcxhvxydkgvcxjad` and paste the result:
 
@@ -1790,7 +1790,7 @@ select name from supabase_migrations.schema_migrations order by version;
 
 Record the answer in the plan's execution log. Do not create `0017_*` until you have confirmed that `0016_video.sql` either is applied or is queued ahead of this one; if `0016` is still unapplied, this file must be applied after it and the executor must say so in the commit message. Never renumber an applied migration.
 
-- [ ] **Step 2: Write the failing dimension-sniffing test**
+- [x] **Step 2: Write the failing dimension-sniffing test**
 
 Create `supabase/functions/_shared/image-size_test.ts`:
 
@@ -1833,7 +1833,7 @@ Deno.test('truncated png returns null rather than guessing', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/image-size_test.ts
@@ -1841,7 +1841,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `Module not found "file:///.../_shared/image-size.ts"`.
 
-- [ ] **Step 4: Write `_shared/image-size.ts`**
+- [x] **Step 4: Write `_shared/image-size.ts`**
 
 ```ts
 // Pixel dimensions straight from the file header — no decoding, so a
@@ -1904,7 +1904,7 @@ export function imageSize(bytes: Uint8Array): ImageSize | null {
 }
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/image-size_test.ts
@@ -1912,7 +1912,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: `4 passed | 0 failed`.
 
-- [ ] **Step 6: Write the failing resolver test**
+- [x] **Step 6: Write the failing resolver test**
 
 Create `supabase/functions/api/services/reference-resolver_test.ts`:
 
@@ -1974,7 +1974,7 @@ Deno.test('a persona photo cannot be used as a generation reference', async () =
 });
 ```
 
-- [ ] **Step 7: Run to verify it fails**
+- [x] **Step 7: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/reference-resolver_test.ts
@@ -1982,7 +1982,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — `Module not found "file:///.../api/services/reference-resolver.ts"`.
 
-- [ ] **Step 8: Write `api/services/reference-resolver.ts`**
+- [x] **Step 8: Write `api/services/reference-resolver.ts`**
 
 ```ts
 // One owner check for every path a caller can name. The service-role client
@@ -2036,7 +2036,7 @@ export async function resolveOwnedUpload(
 }
 ```
 
-- [ ] **Step 9: Run to verify it passes**
+- [x] **Step 9: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/reference-resolver_test.ts
@@ -2044,7 +2044,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: `6 passed | 0 failed`.
 
-- [ ] **Step 10: Write the migration**
+- [x] **Step 10: Write the migration**
 
 Create `supabase/migrations/0017_upload_registry.sql`:
 
@@ -2075,7 +2075,7 @@ create index uploads_user_idx on public.uploads (user_id, created_at desc);
 alter table public.uploads enable row level security;
 ```
 
-- [ ] **Step 11: Register uploads and enforce a pixel ceiling in `POST /uploads`**
+- [x] **Step 11: Register uploads and enforce a pixel ceiling in `POST /uploads`**
 
 Add to the module-scope constants in `app.ts`:
 
@@ -2139,7 +2139,7 @@ Rewrite the body of `POST /uploads` after the `sniffImage` guard:
   return c.json({ uploadId: path, url: signed?.signedUrl ?? '' });
 ```
 
-- [ ] **Step 12: Route every reference through the resolver**
+- [x] **Step 12: Route every reference through the resolver**
 
 Add this helper inside `createApp`, next to `moderationFailure`:
 
@@ -2193,7 +2193,7 @@ Persona photos are uploaded through the same `POST /uploads` route, so add a `pu
   }
 ```
 
-- [ ] **Step 13: Add the route tests**
+- [x] **Step 13: Add the route tests**
 
 Create `supabase/functions/api/reference_ownership_test.ts`:
 
@@ -2297,7 +2297,7 @@ Deno.test('a pending parent cannot be used as an image reference', async () => {
 });
 ```
 
-- [ ] **Step 14: Make the parent check strict enough to pass the third test**
+- [x] **Step 14: Make the parent check strict enough to pass the third test**
 
 Replace the image-parent lookup in `POST /generations` (evidence L1151–1159):
 
@@ -2317,7 +2317,7 @@ Replace the image-parent lookup in `POST /generations` (evidence L1151–1159):
   referenceUrl = parentReference;
 ```
 
-- [ ] **Step 14a: Add the real database ownership/RLS gate**
+- [x] **Step 14a: Add the real database ownership/RLS gate**
 
 Create `supabase/tests/upload_ownership.sql`. Seed synthetic users A/B in a disposable local Supabase stack and pending/allowed/blocked uploads with all required columns: `purpose, path, mime, bytes, width, height`. Under A's authenticated JWT claims, B's rows/objects must be unreadable; A cannot mark an upload allowed, rewrite ownership, or bypass purpose checks; anon cannot read/mutate the registry. Exercise service-role writes separately. Roll back fixtures.
 
@@ -2333,7 +2333,7 @@ end $$;
 
 Run `psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/upload_ownership.sql`. Add real gateway integration cases for owned allowed, foreign, deleted, unmoderated and wrong-purpose IDs; rejection must precede charge and dispatch. Missing DB is blocked, never a fake-only PASS. Inject moderator/signing throws in scratch-route tests and assert cleanup is attempted on every exit. P6 makes failed cleanup durable; retain error evidence until then.
 
-- [ ] **Step 15: Run everything**
+- [x] **Step 15: Run everything**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts && deno test --allow-all _shared api
@@ -2356,7 +2356,7 @@ Expected: `90 passed | 0 failed` (77 + 4 image-size + 6 resolver + 3 reference-o
 
 **Why this is a blocker:** today `workspace-page.ts` sets `op = edit` whenever any reference is present, an uploaded reference produces no `parentId`, and the gateway rejects `edit` without `parentId` at evidence L1047–1048 with `invalid_parent`. Uploading a reference image therefore fails for every image family before a charge is taken.
 
-- [ ] **Step 1: Write the failing gateway test**
+- [x] **Step 1: Write the failing gateway test**
 
 Create `supabase/functions/api/reference_contract_test.ts`:
 
@@ -2468,7 +2468,7 @@ Deno.test('edit without a parent is still rejected', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/reference_contract_test.ts
@@ -2476,7 +2476,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — the four family tests report `referenceUrl` as `undefined` (the reference is signed today only when the path happens to exist, with no ownership check and no `imageInput` check), and `reference_unsupported` does not exist.
 
-- [ ] **Step 3: Resolve the uploaded reference through the registry**
+- [x] **Step 3: Resolve the uploaded reference through the registry**
 
 Replace the reference block in `POST /generations` (evidence L1148–1163, as amended by Task 6 Step 14) with:
 
@@ -2502,7 +2502,7 @@ Replace the reference block in `POST /generations` (evidence L1148–1163, as am
 
 The `invalid_parent` guard at evidence L1047–1048 stays exactly as it is: `edit` and `upscale` still require a parent. What changes is that the client stops sending `edit` for an uploaded reference.
 
-- [ ] **Step 4: Write the failing client test**
+- [x] **Step 4: Write the failing client test**
 
 Append to `src/app/features/workspace/workspace-page.spec.ts` (match the file's existing TestBed arrangement):
 
@@ -2549,7 +2549,7 @@ it('still sends a library reference as an edit', async () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify it fails**
+- [x] **Step 5: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -2557,7 +2557,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
 
 Expected: FAIL — the first new test reports `op` as `edit`.
 
-- [ ] **Step 6: Fix the client op selection**
+- [x] **Step 6: Fix the client op selection**
 
 In `src/app/features/workspace/workspace-page.ts`, replace lines 353–359:
 
@@ -2584,7 +2584,7 @@ with:
     const op = isImageEdit ? GenerationOp.Edit : GenerationOp.Generate;
 ```
 
-- [ ] **Step 7: Run both suites**
+- [x] **Step 7: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared api
@@ -2613,7 +2613,7 @@ Expected: vitest `242 passed`; deno `96 passed | 0 failed` (90 + 6 reference-con
 
 **Why:** `sanitizeSettings` only checks types and lengths, so `version: 'wat'` or `resolution: '9K'` reaches `providerCost`, falls through to a default price, and is charged. `durationS` accepts any value in `(0, 60]` regardless of what the family supports.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/api/services/request-validation_test.ts`:
 
@@ -2690,7 +2690,7 @@ Deno.test('rejects audio on a family whose audio is not selectable', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/request-validation_test.ts
@@ -2698,7 +2698,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — `Module not found "file:///.../api/services/request-validation.ts"`.
 
-- [ ] **Step 3: Write `api/services/request-validation.ts`**
+- [x] **Step 3: Write `api/services/request-validation.ts`**
 
 ```ts
 // The catalog is the contract. sanitizeSettings() proves a value is a
@@ -2747,7 +2747,7 @@ export function validateSettings(family: ModelFamily, settings: GenerationSettin
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/request-validation_test.ts
@@ -2755,7 +2755,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: `8 passed | 0 failed`.
 
-- [ ] **Step 5: Write the failing route test**
+- [x] **Step 5: Write the failing route test**
 
 Create `supabase/functions/api/settings_validation_test.ts`:
 
@@ -2800,7 +2800,7 @@ Deno.test('an unsupported resolution is refused before charge and before dispatc
 });
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/settings_validation_test.ts
@@ -2808,7 +2808,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — status is 200; the request is charged at the `?? 0.03` fallback price.
 
-- [ ] **Step 7: Wire validation into `POST /generations`**
+- [x] **Step 7: Wire validation into `POST /generations`**
 
 Add the import to `app.ts`:
 
@@ -2830,7 +2830,7 @@ Extract catalog-family resolution from the outer `else` into a helper with guard
 
 Validation runs before `creditCost(family, settings)` on the next lines, so a rejected axis can never be priced.
 
-- [ ] **Step 8: Run everything**
+- [x] **Step 8: Run everything**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts stripe-webhook/index.ts appstore-webhook/index.ts && deno test --allow-all _shared api
@@ -2838,7 +2838,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts
 
 Expected: `105 passed | 0 failed` (96 + 8 validation unit + 1 validation route).
 
-- [ ] **Step 9: Run the Angular suite and a production build**
+- [x] **Step 9: Run the Angular suite and a production build**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build
@@ -2850,13 +2850,13 @@ Expected: `242 passed`, 42 files; build succeeds. User commits.
 
 ## Exit criteria for P1
 
-- [ ] Every gateway route can be exercised with `createApp(testDeps())` and `app.request(...)`; no test opens a socket or touches a real database.
-- [ ] `deno test --allow-all _shared api` reports 105 passing; `npm test -- --watch=false` reports 242 passing; `npx ng build` succeeds.
-- [ ] A missing OpenAI key, a 503, a timeout, a malformed body, a failed scratch write and a failed signing step all return 503 `moderation_unavailable` with no charge, no dispatch and no strike.
-- [ ] A foreign upload path, a quarantine path, an unregistered path, an unmoderated upload and a persona photo are all refused as an image reference, with zero signing, charging or adapter calls.
-- [ ] Uploading a reference and generating produces exactly one charge and one adapter call carrying `referenceUrl`, for all four image families.
-- [ ] A video poster crosses the same moderation gate as any other user image.
-- [ ] An axis value the selected family does not offer returns 400 `invalid_settings` before pricing.
-- [ ] `supabase/migrations/0017_upload_registry.sql` exists, is additive, and has NOT been applied to production by this plan.
+- [x] Every gateway route can be exercised with `createApp(testDeps())` and `app.request(...)`; no test opens a socket or touches a real database.
+- [x] `deno test --allow-all _shared api` reports 105 passing; `npm test -- --watch=false` reports 242 passing; `npx ng build` succeeds.
+- [x] A missing OpenAI key, a 503, a timeout, a malformed body, a failed scratch write and a failed signing step all return 503 `moderation_unavailable` with no charge, no dispatch and no strike.
+- [x] A foreign upload path, a quarantine path, an unregistered path, an unmoderated upload and a persona photo are all refused as an image reference, with zero signing, charging or adapter calls.
+- [x] Uploading a reference and generating produces exactly one charge and one adapter call carrying `referenceUrl`, for all four image families.
+- [x] A video poster crosses the same moderation gate as any other user image.
+- [x] An axis value the selected family does not offer returns 400 `invalid_settings` before pricing.
+- [x] `supabase/migrations/0017_upload_registry.sql` exists, is additive, and has NOT been applied to production by this plan.
 
 **Known carry-forward (not P1's job):** `openai.ts` still ignores a reference on `generate` (P3 Task 3); the gateway still has no request idempotency key and still inserts jobs outside the charge transaction (P5); `fn_fail_job` is still an unconditional update (P4); the 24-hour video spend read is still outside the charge lock (P5).

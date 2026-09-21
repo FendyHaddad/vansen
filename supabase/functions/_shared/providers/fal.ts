@@ -56,6 +56,9 @@ export function videoPayloadFor(ctx: SubmitCtx): Record<string, unknown> {
   return payload;
 }
 
+/** Families whose model id comes from the normalized request, not a literal here. */
+const NORMALIZED_FAMILIES = ['flux', 'seedream'];
+
 /** familyId (+ op/reference) → fal model slug. */
 function slugFor(ctx: SubmitCtx): string {
   if (VIDEO_FAMILIES.has(ctx.familyId)) return videoSlugFor(ctx);
@@ -63,13 +66,19 @@ function slugFor(ctx: SubmitCtx): string {
   if (ctx.familyId === 'edit-bg') return 'fal-ai/birefnet/v2';
   if (FILL_TOOLS.includes(ctx.familyId)) return 'fal-ai/flux-pro/v1/fill';
   if (ctx.familyId === 'persona') return 'fal-ai/flux-lora';
-  if (ctx.familyId === 'flux') return 'fal-ai/flux-pro/v1.1';
-  if (ctx.familyId === 'seedream') {
-    return ctx.referenceUrl
-      ? 'fal-ai/bytedance/seedream/v4/edit'
-      : 'fal-ai/bytedance/seedream/v4/text-to-image';
+  // flux and seedream carry their slug on the normalized request, so the model
+  // the customer was quoted is the model that gets called.
+  if (!NORMALIZED_FAMILIES.includes(ctx.familyId)) {
+    throw new Error(`fal: no slug for ${ctx.familyId}`);
   }
-  throw new Error(`fal: no slug for ${ctx.familyId}`);
+  if (!ctx.normalized) {
+    throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
+  }
+  // Seedream's reference path is a sibling endpoint, not a different model.
+  if (ctx.familyId === 'seedream' && ctx.referenceUrl) {
+    return 'fal-ai/bytedance/seedream/v4/edit';
+  }
+  return ctx.normalized.providerModel;
 }
 
 /** Our aspect ratios → fal image_size presets (~1MP each). */
@@ -109,12 +118,17 @@ function payloadFor(ctx: SubmitCtx): Record<string, unknown> {
       prompt: ctx.prompt,
     };
   }
-  const body: Record<string, unknown> = { prompt: ctx.prompt, aspect_ratio: aspect };
-  if (ctx.referenceUrl) {
-    // Seedream's edit endpoint takes a list of reference images; others take one.
-    if (ctx.familyId === 'seedream') body.image_urls = [ctx.referenceUrl];
-    else body.image_url = ctx.referenceUrl;
+  if (!ctx.normalized) {
+    throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
   }
+  // Every axis the customer paid for, spelled the way the record verified. No
+  // fal image endpoint accepts `aspect_ratio` — it used to be sent here and
+  // silently dropped, which is why both the ratio and the resolution controls
+  // did nothing. Both now ride inside `image_size`.
+  const body: Record<string, unknown> = { prompt: ctx.prompt, ...ctx.normalized.providerSettings };
+  // Only seedream takes a reference; fal-ai/flux-2 documents no such input, so
+  // a reference is dropped rather than sent under a name the model ignores.
+  if (ctx.familyId === 'seedream' && ctx.referenceUrl) body.image_urls = [ctx.referenceUrl];
   return body;
 }
 

@@ -3,7 +3,7 @@
 //   npm run sync-shared
 // The vitest in src/app/core/shared-sync.spec.ts asserts the copies match.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,12 +37,33 @@ export function transformed(file, root = scriptRoot) {
   return file.transform(code);
 }
 
-const invokedDirectly = process.argv[1] === fileURLToPath(import.meta.url);
-if (invokedDirectly) {
-  const outDir = join(scriptRoot, 'supabase', 'functions', '_shared');
-  mkdirSync(outDir, { recursive: true });
-  for (const file of FILES) {
-    writeFileSync(join(outDir, file.out), transformed(file));
-    console.log(`synced ${file.src} -> supabase/functions/_shared/${file.out}`);
+/**
+ * `--check` verifies the Deno copies without touching them, so CI and the P9
+ * release gate can prove the two trees agree without the very act of checking
+ * hiding the drift it is meant to catch.
+ */
+function assertSharedMatches(output, expected) {
+  if (!existsSync(output) || readFileSync(output, 'utf8') !== expected) {
+    throw new Error(`shared drift: ${output}`);
   }
 }
+
+export function runSync(root = scriptRoot, argv = process.argv) {
+  const checking = argv.includes('--check');
+  const outDir = join(root, 'supabase', 'functions', '_shared');
+  for (const file of FILES) {
+    const output = join(outDir, file.out);
+    const expected = transformed(file, root);
+    if (checking) {
+      assertSharedMatches(output, expected);
+      continue;
+    }
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(output, expected);
+    console.log(`synced ${file.src} -> supabase/functions/_shared/${file.out}`);
+  }
+  if (checking) console.log(`shared copies verified (${FILES.length} files)`);
+}
+
+const invokedDirectly = process.argv[1] === fileURLToPath(import.meta.url);
+if (invokedDirectly) runSync();
