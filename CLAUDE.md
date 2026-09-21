@@ -40,7 +40,7 @@
   `/app/edit/:id` absorbed). Local tools = Canvas2D engine `src/app/core/editing/`
   (worker + fallback; heal = MI-GAN inpainting, MIT, via lazy onnxruntime-web —
   28 MB ONNX model from HuggingFace on first use, cached in Cache Storage
-  `vansen-models`, ort wasm copied to `assets/ort` by angular.json; PatchMatch
+  `vansen-models`, ort wasm from jsDelivr, version pinned to the runtime (see `ortWasmBase()` — the 25.6 MB WebGPU build is over Cloudflare's 25 MB asset cap); PatchMatch
   in `ops/heal.ts` stays as offline fallback — angular.json needs
   externalDependencies crypto/fs/path). More local tools: Studio = rotate/flip/straighten
   (`ops/transform.ts`) + filters (`ops/filters.ts`); Pro-preview (unlocked while testing,

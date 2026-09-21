@@ -105,12 +105,30 @@ export async function acquireOrtSession(
   };
 }
 
+/**
+ * Where onnxruntime's own wasm binaries come from.
+ *
+ * Not our origin: the WebGPU build (ort-wasm-simd-threaded.jsep.wasm) is
+ * 25.6 MB, over Cloudflare's 25 MB per-asset ceiling, so it cannot ship with
+ * the bundle at all. The models themselves already come from a CDN, so this
+ * adds no new class of dependency.
+ *
+ * The version is read from the runtime rather than written here. A literal
+ * would drift from package.json on the first upgrade, and a .wasm that does
+ * not match its .mjs fails at session creation — on the customer's machine,
+ * not in our build.
+ */
+function ortWasmBase(): string {
+  const version = ort.env.versions.web ?? ort.env.versions.common;
+  return `https://cdn.jsdelivr.net/npm/onnxruntime-web@${version}/dist/`;
+}
+
 async function createSession(
   entry: ModelEntry,
   progress: WritableSignal<number | null>,
   providers?: OrtProviders,
 ): Promise<ort.InferenceSession> {
-  ort.env.wasm.wasmPaths = '/assets/ort/';
+  ort.env.wasm.wasmPaths = ortWasmBase();
   const model = await loadModelBytes(entry, progress);
   const eps: OrtProviders = providers ?? ('gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm']);
   return await ort.InferenceSession.create(model, { executionProviders: eps });

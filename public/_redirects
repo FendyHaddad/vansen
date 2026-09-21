@@ -1,4 +1,0 @@
-# SPA fallback: every deep link (/pricing, /reset, /confirm, /app/...) is routed
-# by Angular, not by the host. Static files match first, so /assets/ort/*.wasm
-# and the rest are served normally.
-/*    /index.html   200

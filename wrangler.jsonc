@@ -1,0 +1,13 @@
+{
+  // Static-asset Worker: the Angular bundle is served directly by Cloudflare,
+  // there is no server-side code. All data goes to the Supabase `api` Edge
+  // Function, so nothing here needs a `main` entry point.
+  "name": "vansen",
+  "compatibility_date": "2026-09-22",
+  "assets": {
+    "directory": "./dist/vansen/browser",
+    // Angular owns routing. Without this, /pricing, /reset and /confirm 404 on
+    // a hard refresh — which would break every link we mail out.
+    "not_found_handling": "single-page-application"
+  }
+}
