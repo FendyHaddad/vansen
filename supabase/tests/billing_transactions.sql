@@ -3,9 +3,7 @@
 -- rolled back at the end, so this file never leaves rows behind — but it
 -- creates and destroys users, so it must never be pointed at production.
 --
--- How to run: see the header of supabase/tests/upload_ownership.sql for the
--- local-stack recipe (`supabase start` does not work on this repo — 0008_age_gate
--- and 0008_credit_plans share the version prefix 0008).
+-- How to run: see the header of supabase/tests/upload_ownership.sql.
 begin;
 
 do $$

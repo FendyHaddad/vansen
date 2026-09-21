@@ -1,0 +1,21 @@
+# Local stack only. Nothing here touches the hosted project (ref
+# bnorhcxhvxydkgvcxjad) -- that is configured in the dashboard and in Edge
+# Function secrets.
+
+project_id = "vansen"
+
+[db]
+port = 54322
+major_version = 17
+
+# Logflare plus its Vector sidecar is the heaviest thing in the stack, and it
+# is the first to be OOM-killed on a machine with a small Docker allocation.
+# Nothing local reads it: log analytics is a hosted-dashboard feature.
+[analytics]
+enabled = false
+
+# The local mailbox. Password-reset and signup-confirmation links land here,
+# which is the only way to verify the recovery flow without sending real mail.
+[inbucket]
+enabled = true
+port = 54324

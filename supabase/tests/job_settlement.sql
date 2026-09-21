@@ -1,7 +1,5 @@
 -- One terminal transition per generation, under a real race.
--- LOCAL DATABASE ONLY. See supabase/tests/upload_ownership.sql for the recipe
--- (`supabase start` does not work on this repo — 0008_age_gate and
--- 0008_credit_plans share the version prefix 0008).
+-- LOCAL DATABASE ONLY. See supabase/tests/upload_ownership.sql for the recipe.
 begin;
 
 do $$

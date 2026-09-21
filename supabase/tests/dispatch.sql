@@ -1,7 +1,5 @@
 -- Reservation: one transaction that charges, creates the generation, its job
 -- and its expense record — or leaves nothing behind. LOCAL DATABASE ONLY.
--- (`supabase start` does not work on this repo — 0008_age_gate and
--- 0008_credit_plans share the version prefix 0008.)
 begin;
 
 -- Seeded accounts: each block funds its own user so balances are known.
@@ -33,6 +31,17 @@ returns jsonb language sql as $$
   );
 $$;
 
+-- The payload carries the request snapshot. 0023 made it mandatory — a
+-- generation without one can never be retried and there is no way to add it
+-- afterwards — so every reservation here must supply a real one.
+create or replace function pg_temp.payload()
+returns jsonb language sql as $$
+  select jsonb_build_object('snapshot', jsonb_build_object(
+    'version', 1, 'catalogVersion', '2026-09-20.2',
+    'prompt', 'a cat', 'settings', '{}'::jsonb
+  ));
+$$;
+
 -- 1. A replay returns the ORIGINAL ids, charges once, creates one submission.
 do $$
 declare
@@ -43,9 +52,9 @@ begin
   perform pg_temp.seed_user(v_user, 'reserve1@example.com', 1000);
 
   v_first := public.fn_reserve_generation(
-    v_user, v_key, 'hash-1', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-1', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   v_replay := public.fn_reserve_generation(
-    v_user, v_key, 'hash-1', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-1', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
 
   assert v_first = v_replay, 'replay must return the original persisted IDs';
   assert (select count(*) from public.submissions
@@ -73,10 +82,10 @@ declare
 begin
   perform pg_temp.seed_user(v_user, 'reserve2@example.com', 1000);
   perform public.fn_reserve_generation(
-    v_user, v_key, 'hash-a', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-a', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   begin
     perform public.fn_reserve_generation(
-      v_user, v_key, 'hash-b', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+      v_user, v_key, 'hash-b', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   exception when others then v_raised := sqlerrm;
   end;
   assert v_raised = 'idempotency_conflict', format('expected conflict, got "%s"', v_raised);
@@ -101,7 +110,7 @@ begin
     for each row execute function pg_temp.boom();
   begin
     perform public.fn_reserve_generation(
-      v_user, v_key, 'hash-3', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+      v_user, v_key, 'hash-3', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   exception when others then v_raised := sqlerrm;
   end;
   drop trigger pg_temp_boom on public.jobs;
@@ -124,7 +133,7 @@ declare
 begin
   perform pg_temp.seed_user(v_user, 'reserve4@example.com', 1000);
   v_out := public.fn_reserve_generation(
-    v_user, v_key, 'hash-4', pg_temp.items(3, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-4', pg_temp.items(3, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   assert jsonb_array_length(v_out->'generationIds') = 3;
   select count(*), coalesce(sum(reserved_usd), 0) into v_rows, v_sum
     from public.provider_expenses where user_id = v_user;
@@ -145,7 +154,7 @@ begin
   insert into public.ledger_entries (user_id, type, bucket, amount_credits, note)
   values (v_user, 'pack_purchase', 'pack', 100, 'test pack seed');
   perform public.fn_reserve_generation(
-    v_user, v_key, 'hash-5', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-5', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   assert (select charged_plan from public.generations where user_id = v_user) = 30;
   assert (select charged_pack from public.generations where user_id = v_user) = 10;
 end $$;
@@ -161,12 +170,12 @@ begin
   for i in 1..3 loop
     perform public.fn_reserve_generation(
       v_user, gen_random_uuid(), 'hash-v' || i, pg_temp.items(1, 'video', 100),
-      pg_temp.quote(100, 0.6), '{}'::jsonb);
+      pg_temp.quote(100, 0.6), pg_temp.payload());
   end loop;
   begin
     perform public.fn_reserve_generation(
       v_user, gen_random_uuid(), 'hash-v4', pg_temp.items(1, 'video', 100),
-      pg_temp.quote(100, 0.6), '{}'::jsonb);
+      pg_temp.quote(100, 0.6), pg_temp.payload());
   exception when others then v_raised := sqlerrm;
   end;
   assert v_raised = 'too_many_jobs', format('expected too_many_jobs, got "%s"', v_raised);
@@ -185,7 +194,7 @@ begin
   -- One reservation that eats almost the whole daily budget, then refunded.
   v_out := public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-7a', pg_temp.items(1, 'video', 100),
-    pg_temp.quote(100, 39.5), '{}'::jsonb);
+    pg_temp.quote(100, 39.5), pg_temp.payload());
   v_job := (v_out->'jobIds'->>0)::uuid;
   perform public.fn_settle_job(v_job, 'failed', null, null, '{}'::jsonb, 'provider refused');
   assert (select status from public.generations
@@ -194,7 +203,7 @@ begin
   begin
     perform public.fn_reserve_generation(
       v_user, gen_random_uuid(), 'hash-7b', pg_temp.items(1, 'video', 100),
-      pg_temp.quote(100, 1.0), '{}'::jsonb);
+      pg_temp.quote(100, 1.0), pg_temp.payload());
   exception when others then v_raised := sqlerrm;
   end;
   assert v_raised = 'daily_cap', format('expected daily_cap, got "%s"', v_raised);
@@ -210,7 +219,7 @@ begin
   update public.subscriptions set plan = 'owner' where user_id = v_user;
   perform public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-8', pg_temp.items(1, 'image', 0),
-    pg_temp.quote(0, 0.012), '{}'::jsonb);
+    pg_temp.quote(0, 0.012), pg_temp.payload());
   assert (select count(*) from public.jobs where user_id = v_user) = 1;
   assert (select reserved_usd from public.provider_expenses where user_id = v_user) = 0.012;
 end $$;
@@ -225,7 +234,7 @@ begin
   begin
     perform public.fn_reserve_generation(
       v_user, gen_random_uuid(), 'hash-9', pg_temp.items(1, 'image', 40),
-      pg_temp.quote(40, 0.012, 'mystery'), '{}'::jsonb);
+      pg_temp.quote(40, 0.012, 'mystery'), pg_temp.payload());
   exception when others then v_raised := sqlerrm;
   end;
   assert v_raised = 'unknown_provider', format('expected unknown_provider, got "%s"', v_raised);
@@ -299,11 +308,11 @@ declare
 begin
   perform pg_temp.seed_user(v_user, 'reserve12@example.com', 40);
   v_first := public.fn_reserve_generation(
-    v_user, v_key, 'hash-12', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-12', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   assert (select plan_credits from public.fn_balances(v_user)) = 0, 'the seed must be spent';
 
   v_replay := public.fn_reserve_generation(
-    v_user, v_key, 'hash-12', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), '{}'::jsonb);
+    v_user, v_key, 'hash-12', pg_temp.items(1, 'image', 40), pg_temp.quote(40, 0.012), pg_temp.payload());
   assert v_first = v_replay, 'a broke account must still get its own result back';
 end $$;
 
@@ -318,7 +327,7 @@ begin
   perform pg_temp.seed_user(v_user, 'lease13@example.com', 10000);
   v_out := public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-13', pg_temp.items(1, 'image', 40),
-    pg_temp.quote(40, 0.012), '{}'::jsonb);
+    pg_temp.quote(40, 0.012), pg_temp.payload());
   v_job := (v_out->'jobIds'->>0)::uuid;
 
   select count(*) into v_claims from public.fn_claim_jobs(50) where id = v_job;
@@ -370,7 +379,7 @@ begin
   perform pg_temp.seed_user(v_user, 'lease14@example.com', 10000);
   v_out := public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-14', pg_temp.items(1, 'image', 40),
-    pg_temp.quote(40, 0.012), '{}'::jsonb);
+    pg_temp.quote(40, 0.012), pg_temp.payload());
   v_job := (v_out->'jobIds'->>0)::uuid;
   perform public.fn_claim_jobs(50);
   select lease_token into v_token from public.jobs where id = v_job;
@@ -399,7 +408,7 @@ begin
   perform pg_temp.seed_user(v_user, 'sweep15@example.com', 10000);
   v_out := public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-15', pg_temp.items(1, 'image', 40),
-    pg_temp.quote(40, 0.012), '{}'::jsonb);
+    pg_temp.quote(40, 0.012), pg_temp.payload());
   v_job := (v_out->'jobIds'->>0)::uuid;
   perform public.fn_claim_jobs(50);
   select lease_token into v_token from public.jobs where id = v_job;
@@ -425,7 +434,7 @@ begin
   perform pg_temp.seed_user(v_user, 'sweep16@example.com', 10000);
   v_out := public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-16', pg_temp.items(1, 'image', 40),
-    pg_temp.quote(40, 0.012), '{}'::jsonb);
+    pg_temp.quote(40, 0.012), pg_temp.payload());
   v_job := (v_out->'jobIds'->>0)::uuid;
 
   perform public.fn_fail_job(v_job, 'timeout');
@@ -448,10 +457,10 @@ begin
   perform pg_temp.seed_user(v_user, 'invariant17@example.com', 10000);
   perform public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-17a', pg_temp.items(3, 'image', 40),
-    pg_temp.quote(40, 0.012), '{}'::jsonb);
+    pg_temp.quote(40, 0.012), pg_temp.payload());
   perform public.fn_reserve_generation(
     v_user, gen_random_uuid(), 'hash-17b', pg_temp.items(1, 'video', 100),
-    pg_temp.quote(100, 1.2), '{}'::jsonb);
+    pg_temp.quote(100, 1.2), pg_temp.payload());
 
   select count(*) into v_orphans
     from public.generations g

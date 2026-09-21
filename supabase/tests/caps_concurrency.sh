@@ -54,6 +54,13 @@ quote() {
     'unitProviderCostUsd',$2,'catalogVersion','2026-09-20.2','quoteVersion',1)"
 }
 
+# 0023 made the request snapshot mandatory: a reservation without one is
+# rejected outright, which here looked like every cap passing with zero rows.
+payload() {
+  echo "jsonb_build_object('snapshot', jsonb_build_object(
+    'version',1,'catalogVersion','2026-09-20.2','prompt','p','settings','{}'::jsonb))"
+}
+
 check() {
   local label="$1" expected="$2" actual="$3"
   test "$actual" = "$expected" || {
@@ -69,7 +76,7 @@ cleanup
 seed "$U" 'caps@example.com' 'pro' 100000
 for i in 1 2 3 4; do
   psql "$DB" -q -c "select public.fn_reserve_generation(
-    '$U', gen_random_uuid(), 'h$i', $(items video 100), $(quote 100 0.5), '{}'::jsonb);" \
+    '$U', gen_random_uuid(), 'h$i', $(items video 100), $(quote 100 0.5), $(payload));" \
     >/dev/null 2>&1 &
 done
 wait
@@ -92,7 +99,7 @@ seed "$U" 'caps@example.com' 'pro' 100000
 KEY=$(psql "$DB" -t -A -c "select gen_random_uuid();")
 for i in 1 2; do
   psql "$DB" -q -c "select public.fn_reserve_generation(
-    '$U', '$KEY', 'same-body', $(items image 40), $(quote 40 0.012), '{}'::jsonb);" \
+    '$U', '$KEY', 'same-body', $(items image 40), $(quote 40 0.012), $(payload));" \
     >/dev/null 2>&1 &
 done
 wait

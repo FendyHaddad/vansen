@@ -6,16 +6,11 @@
 -- replay does not write a second snapshot, and that a batch of four shares
 -- one immutable record of the single request that produced them.
 --
--- How to run (no Supabase CLI: `0008_age_gate.sql` and `0008_credit_plans.sql`
--- share the version prefix `0008`, which `supabase start` refuses):
+-- How to run:
 --
---   docker run -d --name vansen-test-db -e POSTGRES_PASSWORD=postgres \
---     -p 55432:5432 public.ecr.aws/supabase/postgres:17.6.1.158
---   for f in supabase/migrations/*.sql; do
---     psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -q -f "$f"; done
+--   supabase start
+--   export VANSEN_LOCAL_DB=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 --   psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/request_snapshots.sql
---
--- where VANSEN_LOCAL_DB=postgresql://supabase_admin:postgres@127.0.0.1:55432/postgres
 --
 -- Every fixture is rolled back: the file runs inside one transaction and ends
 -- with `rollback`.

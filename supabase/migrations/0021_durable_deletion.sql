@@ -1060,9 +1060,10 @@ $$);
 -- auth user. Every five minutes pg_cron pokes the `cleanup-worker` function,
 -- which drains the outbox and finishes closures.
 --
--- Prerequisites are asserted, never skipped. A schedule that silently failed to
--- install would leave a queue of objects a customer has been told are deleted,
--- and closures that never complete — the exact lie this migration removes.
+-- Capabilities are asserted; CONFIGURATION is not. pg_net, pg_cron and vault
+-- must exist or this schedule is a lie. The worker's URL and secret are
+-- per-deployment and absent on a laptop, so the drive function checks for them
+-- on every run and warns in the log instead (0024_worker_drive_guard.sql).
 create extension if not exists pg_net;
 
 do $$
@@ -1078,11 +1079,9 @@ begin
   if to_regclass('vault.decrypted_secrets') is null then
     raise exception 'supabase vault is required: cleanup_worker_url and cleanup_worker_secret live there';
   end if;
-  if not exists (select 1 from vault.decrypted_secrets where name = 'cleanup_worker_url') then
-    raise exception 'vault secret cleanup_worker_url is missing';
-  end if;
-  if not exists (select 1 from vault.decrypted_secrets where name = 'cleanup_worker_secret') then
-    raise exception 'vault secret cleanup_worker_secret is missing';
+  if not exists (select 1 from vault.decrypted_secrets where name = 'cleanup_worker_url')
+     or not exists (select 1 from vault.decrypted_secrets where name = 'cleanup_worker_secret') then
+    raise notice 'cleanup worker vault secrets absent: the drive schedule no-ops until they are set';
   end if;
 end $$;
 

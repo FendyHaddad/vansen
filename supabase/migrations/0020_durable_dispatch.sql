@@ -938,9 +938,12 @@ alter table public.uploads add constraint uploads_purpose_check
 -- durable: every minute, whether or not a single client is connected, pg_cron
 -- pokes the `job-worker` function and it claims, submits, polls and settles.
 --
--- Prerequisites are asserted, never skipped: a schedule that silently failed to
--- install would leave paid work sitting in `ready` with nobody looking at it,
--- which is exactly the failure this whole migration exists to remove.
+-- Capabilities are asserted; CONFIGURATION is not. pg_net, pg_cron and vault
+-- must exist or this schedule is a lie. But the worker's URL and secret are
+-- per-deployment, and a laptop has no worker to call -- demanding them here
+-- made the whole local stack unstartable. The drive function checks for them
+-- on every run and warns in the log instead (0024_worker_drive_guard.sql), so
+-- a deployment that forgot them is still loud, just not at migration time.
 create extension if not exists pg_net;
 
 do $$
@@ -957,11 +960,9 @@ begin
   if to_regclass('vault.decrypted_secrets') is null then
     raise exception 'supabase vault is required: job_worker_url and job_worker_secret live there';
   end if;
-  if not exists (select 1 from vault.decrypted_secrets where name = 'job_worker_url') then
-    raise exception 'vault secret job_worker_url is missing';
-  end if;
-  if not exists (select 1 from vault.decrypted_secrets where name = 'job_worker_secret') then
-    raise exception 'vault secret job_worker_secret is missing';
+  if not exists (select 1 from vault.decrypted_secrets where name = 'job_worker_url')
+     or not exists (select 1 from vault.decrypted_secrets where name = 'job_worker_secret') then
+    raise notice 'job worker vault secrets absent: the drive schedule no-ops until they are set';
   end if;
 end $$;
 

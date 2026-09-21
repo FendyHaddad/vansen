@@ -1,7 +1,6 @@
 -- Durable deletion: the bytes go, the money history stays, and nothing is
 -- reported as removed that has not been removed. LOCAL DATABASE ONLY.
--- (`supabase start` does not work on this repo — 0008_age_gate and
--- 0008_credit_plans share the version prefix 0008.)
+-- See supabase/tests/upload_ownership.sql for the recipe.
 --
 -- Every number asserted here comes from
 -- docs/superpowers/specs/2026-09-20-retention-policy.md (decision D2).
