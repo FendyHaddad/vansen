@@ -26,23 +26,19 @@ function respondImage(): Response {
   return new Response(JSON.stringify({ data: [{ b64_json: TINY_PNG_B64 }] }), { status: 200 });
 }
 
-const BASE = { aspectRatio: '1:1', version: '2', quality: 'medium', resolution: '1K' };
+const BASE = { aspectRatio: '1:1', version: '2.5-flare', quality: 'medium', resolution: '1K' };
 
 Deno.test('the selected version reaches the wire as a distinct model', async () => {
   Deno.env.set('OPENAI_API_KEY', 'test-key');
   const cap = captureFetch(respondImage);
-  await openaiAdapter.submit(ctx({ ...BASE, version: '1.5' }));
-  await openaiAdapter.submit(ctx({ ...BASE, version: '2' }));
   await openaiAdapter.submit(ctx({ ...BASE, version: '2.5-flare' }));
   await openaiAdapter.submit(ctx({ ...BASE, version: '2.5-sunburst' }));
   cap.restore();
-  assertEquals(cap.calls[0].jsonBody?.model, 'gpt-image-1.5');
-  assertEquals(cap.calls[1].jsonBody?.model, 'gpt-image-2');
-  assertEquals(cap.calls[2].jsonBody?.model, 'gpt-image-2.5-flare');
-  assertEquals(cap.calls[3].jsonBody?.model, 'gpt-image-2.5-sunburst');
-  // Four offered versions must be four distinct models on the wire; two
+  assertEquals(cap.calls[0].jsonBody?.model, 'gpt-image-2.5-flare');
+  assertEquals(cap.calls[1].jsonBody?.model, 'gpt-image-2.5-sunburst');
+  // Two offered versions must be two distinct models on the wire; two
   // versions that collapse to one model are two prices for one product.
-  assertEquals(new Set(cap.calls.map((c) => c.jsonBody?.model)).size, 4);
+  assertEquals(new Set(cap.calls.map((c) => c.jsonBody?.model)).size, 2);
 });
 
 Deno.test('the selected resolution reaches the wire as a distinct size', async () => {

@@ -22,6 +22,25 @@ async function urlToBlob(url: string): Promise<Blob> {
   return await res.blob();
 }
 
+/**
+ * One structured line per call with what OpenAI actually billed. The catalog
+ * prices the prompt at PROMPT_TOKEN_ALLOWANCE and a reference image at
+ * GPT_REFERENCE_TOKENS — the second is a documented worst case, not a
+ * measurement, because OpenAI publishes no figure for the 2.5 models. These
+ * lines in the Edge Function log are how that constant gets replaced with a
+ * real number. Nothing here is a secret: token counts, no prompt, no image.
+ */
+function logUsage(
+  endpoint: string,
+  model: string,
+  size: string,
+  quality: string,
+  data: { usage?: unknown },
+) {
+  if (!data.usage) return;
+  console.log(JSON.stringify({ event: 'openai_usage', endpoint, model, size, quality, usage: data.usage }));
+}
+
 async function submitReference(ctx: SubmitCtx, model: string, size: string, quality: string) {
   const form = new FormData();
   form.append('model', model);
@@ -41,6 +60,7 @@ async function submitReference(ctx: SubmitCtx, model: string, size: string, qual
   });
   if (!res.ok) throw new Error(`openai edit ${res.status}: ${await res.text()}`);
   const data = await res.json();
+  logUsage('edits', model, size, quality, data);
   const bytes = base64ToBytes(data.data[0].b64_json);
   return {
     providerRef: 'inline',
@@ -70,6 +90,7 @@ export const openaiAdapter: ProviderAdapter = {
     });
     if (!res.ok) throw new Error(`openai generate ${res.status}: ${await res.text()}`);
     const data = await res.json();
+    logUsage('generations', model, size, quality, data);
     const bytes = base64ToBytes(data.data[0].b64_json);
     return { providerRef: 'inline', inline: { state: 'done' as const, bytes, contentType: 'image/png' } };
   },

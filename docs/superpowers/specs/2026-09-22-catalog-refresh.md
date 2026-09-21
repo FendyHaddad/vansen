@@ -365,3 +365,182 @@ not after the provider rejects it.
 The 655,360 px floor is still a documentation finding. No 16:9 1K generation
 has been run against the live API, before or after the fix, so nothing here
 proves the old size actually failed — only that it violated the published rule.
+
+## 13. Full image-provider audit, 2026-09-22 (second pass, independent of §11)
+
+Every image family's `providerCost` was re-checked against the vendor's live
+page on 2026-09-22, and every cell of the credit ladder was recomputed
+(`creditCost`) to confirm no option sells below cost.
+
+### Costs: all four families match the published price
+
+| Family / option | Ours | Published (live page, 2026-09-22) | |
+|---|---|---|---|
+| nano fast (`gemini-3.1-flash-lite-image`) | $0.0336 | $0.0336 per 1K image | ✅ |
+| nano standard 1K / 2K / 4K | $0.067 / $0.101 / $0.151 | $0.067 / $0.101 / $0.151 | ✅ |
+| nano pro 1K-2K / 4K | $0.134 / $0.24 | $0.134 / $0.24 | ✅ |
+| gpt-image rate 2 / 2.5-flare / 2.5-sunburst | $30/1M | $30/1M | ✅ |
+| gpt-image rate 1.5 | $32/1M | $32/1M | ✅ |
+| gpt-image 1.5 tokens (all 3 sizes × 3 qualities) | GPT15_TOKENS | 272/1056/4160, 408/1584/6240, 400/1568/6208 | ✅ |
+| seedream v4 | $0.03 flat | "$0.03 per image" | ✅ |
+| flux (`fal-ai/flux-2` = FLUX.2 [dev]) | $0.03/0.06/0.12 tiers | $0.012 per MP | deliberate 2.5× (§4) |
+
+GPT_TOKENS spot-checked by driving OpenAI's calculator (developers.openai.com,
+the platform.openai.com URLs now 301 there), 14 cells, all exact:
+
+| model | size | quality | calculator | table |
+|---|---|---|---|---|
+| 2.5 | 1024² | low/med/high/xhigh/max | 196 / 439 / 1,756 / 3,122 / 7,024 | ✅ |
+| 2.5 | 1280×720 | high | 947 | ✅ |
+| 2.5 | 2048² | medium | 892 | ✅ |
+| 2.5 | 2160² | max | 15,358 | ✅ |
+| 2.5 | 3840×2160 | xhigh | 5,930 | ✅ |
+| 2 | 1024² | low/med/high | 196 / 1,756 / 7,024 | ✅ (steps 0/2/4) |
+| 2 | 2048×1536 | medium | 2,223 | ✅ |
+| 2 | 3840×2160 | high | 13,342 | ✅ |
+
+### Margins: no image cell is below cost
+
+272 sellable cells (family × version × ratio × resolution × quality).
+Studio margin 40–68%, Pro margin 25–58%. Minimum is exactly the 40% target
+(ceil rounding only ever raises it). FLUX's real margin is far higher because
+its "cost" input is already the 2.5× tier, not fal's $0.012/MP.
+
+### One real gap: reference images on GPT Image are not priced
+
+`POST /generations` charges `creditCost(family, settings)` and nothing else.
+When a reference image is attached, the OpenAI adapter calls `/images/edits`,
+which bills **image input tokens at $8/1M** on top of output tokens. OpenAI
+documents the input-side surcharge for gpt-image-1 as +4,160 tokens (square)
+or +6,240 (non-square) at high fidelity, and states gpt-image-2 "always
+processes image inputs at high fidelity" so "image input tokens can be higher
+for edit requests". The 2/2.5 figure is not published; the gpt-image-1 figure
+implies **≈ $0.035–0.05 per reference image**, which exceeds the whole
+provider cost of a 2.5 low/medium generation ($0.006–0.013). Every
+reference-driven GPT generation at low or medium is therefore likely sold
+below cost. Measure it from `usage.input_tokens` on one live edit call
+before pricing it; do not guess. Google's input-image tokens are billed at
+$0.50–2.00/1M and are negligible; Seedream edit is flat.
+
+### Versions worth dropping: gpt-image 1.5 and 2
+
+At the same $30/1M rate, GPT Image 2 **medium** = 2.5 **high** (1,756 tokens)
+and 2 **high** = 2.5 **max** (7,024). Version 2 has no quality point that 2.5
+does not offer at the same price with a newer model, and it lacks xhigh.
+Version 1.5 is dearer per token ($32/1M), 1K-only, and every label costs more
+than 2.5's. OpenAI's models page now lists only `gpt-image-2.5-sunburst` and
+`gpt-image-2.5-flare` as image models; 1.5 and 2 are under "Earlier GPT Image
+models". `isDefault` still points at '2'. Recommendation: offer Flare (default)
+and Sunburst only. Tests touching '1.5'/'2': `model-families.spec.ts`,
+`left-panel.spec.ts`, `request-validation_test.ts`, `generation-request_test.ts`,
+`openai_test.ts`.
+
+### Newer models the catalog does not carry (informational)
+
+| Model (fal slug) | Price | Note |
+|---|---|---|
+| `fal-ai/bytedance/seedream/v4.5/text-to-image` | $0.04 flat | |
+| `fal-ai/bytedance/seedream/v5/lite/text-to-image` | $0.035 flat | up to 3072² |
+| `bytedance/seedream/v5/pro/text-to-image` | $0.0675 ≤1536², $0.135 ≤2048² | tentative; max 2048² so no 4K tier |
+| `fal-ai/flux-2-pro` | $0.03 first MP + $0.015/extra MP | |
+| `fal-ai/flux-2-flex` | $0.05/MP in+out | |
+| `fal-ai/flux-2-max` | $0.07 first MP + $0.03/extra MP | |
+| Gemini 3.1 Flash Image 0.5K tier | $0.045 | we start at 1K |
+| Gemini extra ratios 3:2, 2:3, 4:5, 5:4, 21:9 | same price | we offer five ratios |
+
+FLUX 3 exists but is a **video** model ($0.17/s 720p) — not an image gap.
+No OpenAI image model newer than 2.5 exists on the pricing page.
+
+## 14. Applied 2026-09-22 — catalog `2026-09-22.4`
+
+Owner decisions after §13: drop GPT Image 1.5 and 2, default to Flare, carry
+the newer fal models, and stop giving inputs away.
+
+### GPT Image: Flare and Sunburst only
+
+`versions` = `2.5-flare` (default, "Latest") and `2.5-sunburst`. 1.5 and 2 are
+gone from the catalog, `provider-capabilities.json`, the normalizer and the
+adapter. A stale client sending them gets `invalid_settings` on `version`
+before any charge; a retry of an old version-2 generation is "not
+expressible" and refused honestly. `GPT_QUALITY_STEP` is one ladder,
+`GPT15_TOKENS` / `GPT15_RATE` / `gptStandardSizes` / `gptMaxResolution` are
+deleted — there is no standard-size fallback left, so an unknown size key is a
+refusal, never a 1024² render at a 4K price.
+
+### FLUX and Seedream carry versions
+
+| Family | versions | default | notes |
+|---|---|---|---|
+| flux | dev · pro · flex · max | dev | dev keeps the flat 2.5× tiers (owner decision); pro/flex/max are fal's published rate through the 40% margin formula |
+| seedream | 4 · 4.5 · 5-lite · 5-pro | 4 | tiers per version follow each endpoint's pixel window (`versionResolutions`); 5 Pro has its own 1K sizes |
+
+`FLUX_DIMS` was re-cut to multiples of 16 at or under each tier's megapixel
+count in fal units (1344×752, 1440×1440, 1632×1216, 1888×1056). Seedream's
+dimension table moved from the JSON record into the catalog (`SEEDREAM_DIMS`,
+`seedreamDims`) so the offer and the request come from one place, like FLUX.
+The Seedream edit slug is chosen per version in the normalizer from
+`hasReference`; `fal.ts` has no Seedream literal left.
+
+**One thing to look at:** FLUX dev 2MP is 10 credits and FLUX pro 2MP is 8,
+because dev is marked up 2.5× and pro is at the margin formula. Either price
+dev at cost (2/4/8 credits) or accept that Pro undercuts Dev on the panel.
+Not changed here — it is the deferred FLUX price decision.
+
+### Inputs are priced
+
+`ModelFamily.inputCost?(input, settings)` is added next to `providerCost`, and
+`creditCost(family, settings, input)` sums both. The composer passes
+`{ hasReference: !!reference }`; the gateway's `quote()` passes the normalized
+request's `hasReference`. Same function, same inputs, same number.
+
+| Family | prompt | reference image |
+|---|---|---|
+| gpt-image | 800 tokens × $5/1M = $0.004 on every generation | 7,100 tokens × $8/1M = $0.0568 |
+| nano-banana | 800 tokens × text-in rate ($0.25 / $0.50 / $2 per 1M) | 1,120 tokens × the same rate |
+| flux, seedream | free (flat per output) | free (Seedream bills per output; 5 Pro's first input is free) |
+
+`PROMPT_MAX_CHARS = 2000` is now owned by the catalog: the gateway's
+`MAX_PROMPT_LEN` reads it and the composer's textarea gets `maxlength` plus a
+counter from 80%. 800 tokens covers 2000 characters of English (~500) plus the
+style modifier and a persona trigger word; it is priced as a flat allowance so
+the credit price does not jitter while someone types.
+
+`GPT_REFERENCE_TOKENS = 7,100` is the **documented worst case for gpt-image-1
+at high input fidelity** (65 + 129/tile + 6,240 non-square), which the guide
+says gpt-image-2 and later always use. OpenAI publishes no figure for the 2.5
+models. The adapter now logs `{event:'openai_usage', …usage}` on every call;
+read `usage.input_tokens_details.image_tokens` off the first live reference
+generation and replace the constant with the measured number.
+
+### Retail moves (Studio credits, 1:1)
+
+| cell | before | after | why |
+|---|---|---|---|
+| GPT 2.5 low 1K | 1 | 2 | prompt allowance |
+| GPT 2.5 medium 1K | 3 | 3 | — |
+| GPT 2.5 high 1K | 9 | 10 | prompt allowance |
+| GPT 2.5 medium 1K **with reference** | 3 | 13 | image input tokens were free |
+| GPT 2.5 max 4K with reference | 78 | 87 | same |
+| Nano standard 1K | 12 | 12 | input under a tenth of a credit |
+| FLUX pro / flex / max 1MP | — | 5 / 9 / 12 | new |
+| Seedream 4.5 / 5 Lite / 5 Pro 1K / 5 Pro 2K | — | 7 / 6 / 12 / 23 | new |
+
+538 sellable cells (× reference on/off) recomputed: none below cost, Studio
+margin 40–51%.
+
+### Also touched
+
+`catalog-fingerprint.ts` re-recorded (`-30359b52`); `contracts/catalog/*`
+regenerated — **the Dart fixture must be handed to the mobile repo**, whose
+own catalog still offers GPT 1.5 and 2 and no FLUX/Seedream versions. Tests:
+`model-families.spec`, `left-panel.spec`, `request-validation_test`,
+`generation-request_test`, `openai_test`, `fal_image_test`,
+`reference_contract_test`. Deploy `api` (deploy.sh) for any of this to bill.
+
+### Still owed
+
+- Live smoke of one generation on each new endpoint (flux-2-pro/flex/max,
+  seedream 4.5 / 5 lite / 5 pro, and 5 pro edit) — the smoke column above is
+  still empty for all of them.
+- Measure GPT image input tokens from the usage log and replace 7,100.
+- The FLUX dev-vs-pro price inversion.

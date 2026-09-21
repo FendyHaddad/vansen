@@ -2,10 +2,10 @@
 // Do not edit. Regenerate and copy in whenever CATALOG_VERSION changes.
 // ignore_for_file: prefer_single_quotes
 
-const String kCatalogVersion = "2026-09-22.3";
+const String kCatalogVersion = "2026-09-22.4";
 
 const Map<String, dynamic> kCatalogFixture = {
-  "catalogVersion": "2026-09-22.3",
+  "catalogVersion": "2026-09-22.4",
   "studioMargin": 0.4,
   "planCredits": {
     "studio": 1500,
@@ -91,8 +91,6 @@ const Map<String, dynamic> kCatalogFixture = {
       "provider": "OpenAI",
       "capabilities": {
         "versions": [
-          "1.5",
-          "2",
           "2.5-flare",
           "2.5-sunburst"
         ],
@@ -129,7 +127,12 @@ const Map<String, dynamic> kCatalogFixture = {
       "kind": "image",
       "provider": "Black Forest Labs",
       "capabilities": {
-        "versions": null,
+        "versions": [
+          "dev",
+          "pro",
+          "flex",
+          "max"
+        ],
         "resolutions": [
           "1MP",
           "2MP",
@@ -170,7 +173,12 @@ const Map<String, dynamic> kCatalogFixture = {
       "kind": "image",
       "provider": "ByteDance",
       "capabilities": {
-        "versions": null,
+        "versions": [
+          "4",
+          "4.5",
+          "5-lite",
+          "5-pro"
+        ],
         "resolutions": [
           "1K",
           "2K",

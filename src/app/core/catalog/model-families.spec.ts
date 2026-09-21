@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CREDIT_PACKS,
   EDIT_TOOLS,
+  FLUX_DIMS,
   MODEL_FAMILIES,
   PERSONA_GEN,
   PERSONA_SLOTS,
@@ -11,6 +12,10 @@ import {
   VIDEO_DAILY_CAP_USD,
   creditCost,
   defaultSettings,
+  GPT_REFERENCE_TOKENS,
+  PROMPT_TOKEN_ALLOWANCE,
+  providerCostWithInput,
+  seedreamDims,
   editToolById,
   familyById,
   fluxDims,
@@ -55,51 +60,137 @@ describe('model families', () => {
     const RATE = 30 / 1_000_000;
 
     // Every figure below is an output-token count read from OpenAI's own
-    // calculator on 2026-09-22, times the published $30/1M rate.
-    expect(at('2', 'high', '1:1', '1K')).toBeCloseTo(7024 * RATE, 6);
+    // calculator on 2026-09-22 (re-driven cell by cell the same day), times
+    // the published $30/1M rate. Both 2.5 models share one token table.
     expect(at('2.5-flare', 'low', '1:1', '1K')).toBeCloseTo(196 * RATE, 6);
+    expect(at('2.5-flare', 'medium', '1:1', '1K')).toBeCloseTo(439 * RATE, 6);
     expect(at('2.5-sunburst', 'high', '1:1', '1K')).toBeCloseTo(1756 * RATE, 6);
-
-    // The ladders are offset by one notch: GPT Image 2 'medium' and GPT Image
-    // 2.5 'high' are the same 1,756 tokens, and 2 'high' equals 2.5 'max'.
-    expect(at('2', 'medium', '1:1', '1K')).toBeCloseTo(at('2.5-flare', 'high', '1:1', '1K'), 6);
-    expect(at('2', 'high', '1:1', '1K')).toBeCloseTo(at('2.5-flare', 'max', '1:1', '1K'), 6);
+    expect(at('2.5-sunburst', 'max', '1:1', '1K')).toBeCloseTo(at('2.5-flare', 'max', '1:1', '1K'), 6);
 
     // The defect this table replaced: 2K was charged at the 1K price, so a 1:1
     // 2K image sold below cost. It must now cost more than the same image at 1K.
-    expect(at('2', 'high', '1:1', '2K')).toBeCloseTo(14272 * RATE, 6);
-    expect(at('2', 'high', '1:1', '2K')).toBeGreaterThan(at('2', 'high', '1:1', '1K'));
+    expect(at('2.5-flare', 'medium', '1:1', '2K')).toBeCloseTo(892 * RATE, 6);
+    expect(at('2.5-flare', 'max', '1:1', '2K')).toBeCloseTo(14272 * RATE, 6);
+    expect(at('2.5-flare', 'max', '1:1', '2K')).toBeGreaterThan(at('2.5-flare', 'max', '1:1', '1K'));
 
     // Price tracks pixels, so the multiplier is not one number. 4K over 1K is
-    // 2.19x at 1:1 and 1.90x at 16:9 — the flat 2.05x was wrong at both.
-    expect(at('2', 'high', '1:1', '4K') / at('2', 'high', '1:1', '1K')).toBeCloseTo(2.19, 2);
-    expect(at('2', 'high', '16:9', '4K') / at('2', 'high', '16:9', '1K')).toBeCloseTo(3.52, 2);
-
-    // 1.5 is a different generation on a different rate: $32/1M against the
-    // older token table (272/1056/4160 square).
-    expect(at('1.5', 'medium', '1:1', '1K')).toBeCloseTo(1056 * (32 / 1_000_000), 6);
-    expect(at('1.5', 'high', '16:9', '1K')).toBeCloseTo(6208 * (32 / 1_000_000), 6);
+    // 2.19x at 1:1 and 3.52x at 16:9 — the flat 2.05x was wrong at both.
+    expect(at('2.5-flare', 'max', '1:1', '4K') / at('2.5-flare', 'max', '1:1', '1K')).toBeCloseTo(2.19, 2);
+    expect(at('2.5-flare', 'max', '16:9', '4K') / at('2.5-flare', 'max', '16:9', '1K')).toBeCloseTo(3.52, 2);
+    expect(at('2.5-flare', 'xhigh', '16:9', '4K')).toBeCloseTo(5930 * RATE, 6);
   });
 
-  it('gpt image offers 2K and 4K on every version that can render them', () => {
+  it('gpt image offers only the two 2.5 models, Flare by default', () => {
     const gpt = familyById('gpt-image')!;
-    const limits = gpt.capabilities.versionResolutions ?? {};
-    // Only 1.5 is capped. A version missing from the map is unrestricted, so
-    // adding a model cannot silently withhold tiers it supports.
-    expect(limits['1.5']).toEqual(['1K']);
-    for (const version of ['2', '2.5-flare', '2.5-sunburst']) {
-      expect(limits[version]).toBeUndefined();
+    // 1.5 and 2 were withdrawn 2026-09-22: version 2 medium is 2.5 high and
+    // 2 high is 2.5 max at the same rate, so it sold nothing 2.5 does not.
+    expect(gpt.capabilities.versions!.map((v) => v.value)).toEqual(['2.5-flare', '2.5-sunburst']);
+    expect(defaultSettings(gpt).version).toBe('2.5-flare');
+    // Neither version is capped: 2K and 4K everywhere, every quality everywhere.
+    for (const version of ['2.5-flare', '2.5-sunburst']) {
+      expect(resolutionsFor(gpt, '1:1', version).map((r) => r.value)).toEqual(['1K', '2K', '4K']);
+      expect(qualitiesFor(gpt, version).map((q) => q.value)).toEqual([
+        'low', 'medium', 'high', 'xhigh', 'max',
+      ]);
     }
   });
 
-  it('offers xhigh and max on the 2.5 models only', () => {
+  it('prices the prompt on every token-billed generation and a reference on top', () => {
     const gpt = familyById('gpt-image')!;
-    const names = (v: string) => qualitiesFor(gpt, v).map((q) => q.value);
-    expect(names('2.5-flare')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
-    expect(names('2.5-sunburst')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
-    // The guide is explicit that version 2 takes low, medium and high only.
-    expect(names('2')).toEqual(['low', 'medium', 'high']);
-    expect(names('1.5')).toEqual(['low', 'medium', 'high']);
+    const s = { version: '2.5-flare', aspectRatio: '1:1', resolution: '1K', quality: 'low' };
+    const output = gpt.providerCost(s);
+    const prompt = PROMPT_TOKEN_ALLOWANCE * (5 / 1_000_000);
+    const reference = GPT_REFERENCE_TOKENS * (8 / 1_000_000);
+    expect(providerCostWithInput(gpt, s)).toBeCloseTo(output + prompt, 8);
+    expect(providerCostWithInput(gpt, s, { hasReference: true })).toBeCloseTo(
+      output + prompt + reference,
+      8,
+    );
+    // A reference costs more than a low-quality generation does; the credit
+    // price has to move or every reference-driven draft sells below cost.
+    expect(creditCost(gpt, s, { hasReference: true })).toBeGreaterThan(creditCost(gpt, s));
+    expect(creditCost(gpt, s)).toBe(Math.ceil(((output + prompt) / (1 - STUDIO_MARGIN)) * 100));
+  });
+
+  it('flat-priced fal families charge nothing for a reference', () => {
+    const seedream = familyById('seedream')!;
+    const s = { version: '4', aspectRatio: '1:1', resolution: '1K' };
+    expect(creditCost(seedream, s, { hasReference: true })).toBe(creditCost(seedream, s));
+  });
+
+  it('flux tiers follow fal’s published rate per version', () => {
+    const flux = familyById('flux')!;
+    const at = (version: string, resolution: string) => flux.providerCost({ version, aspectRatio: '1:1', resolution });
+    // dev keeps the deliberate flat tiers (owner decision, 2.5x fal's $0.012/MP).
+    expect(at('dev', '1MP')).toBeCloseTo(0.03);
+    expect(at('dev', '4MP')).toBeCloseTo(0.12);
+    // pro: $0.03 first MP + $0.015 per extra; flex $0.05/MP; max $0.07 + $0.03.
+    expect(at('pro', '1MP')).toBeCloseTo(0.03);
+    expect(at('pro', '2MP')).toBeCloseTo(0.045);
+    expect(at('pro', '4MP')).toBeCloseTo(0.075);
+    expect(at('flex', '2MP')).toBeCloseTo(0.1);
+    expect(at('max', '1MP')).toBeCloseTo(0.07);
+    expect(at('max', '4MP')).toBeCloseTo(0.16);
+    expect(defaultSettings(flux).version).toBe('dev');
+  });
+
+  it('every flux size fits its megapixel tier in fal units and is divisible by 16', () => {
+    // fal rounds UP to the nearest megapixel (1,048,576 px), so a 2MP size one
+    // pixel over would bill as 3MP. pro/flex/max also want /16 edges.
+    const tierPx: Record<string, number> = { '1MP': 1, '2MP': 2, '4MP': 4 };
+    for (const [key, { width, height }] of Object.entries(FLUX_DIMS)) {
+      const tier = key.split(':')[2];
+      expect(width * height, key).toBeLessThanOrEqual(tierPx[tier] * 1_048_576);
+      expect(width % 16, key).toBe(0);
+      expect(height % 16, key).toBe(0);
+      expect(width, key).toBeLessThanOrEqual(2048);
+      expect(height, key).toBeLessThanOrEqual(2048);
+    }
+  });
+
+  it('seedream versions price flat per image, 5 Pro by area tier', () => {
+    const sd = familyById('seedream')!;
+    const at = (version: string, resolution: string, aspectRatio = '1:1') =>
+      sd.providerCost({ version, aspectRatio, resolution });
+    expect(at('4', '4K')).toBeCloseTo(0.03);
+    expect(at('4.5', '2K')).toBeCloseTo(0.04);
+    expect(at('5-lite', '2K')).toBeCloseTo(0.035);
+    // 5 Pro: $0.0675 up to 1536² px, $0.135 above. Every 1K size is under,
+    // every 2K size is over.
+    for (const aspectRatio of ['1:1', '4:3', '16:9']) {
+      expect(at('5-pro', '1K', aspectRatio)).toBeCloseTo(0.0675);
+      expect(at('5-pro', '2K', aspectRatio)).toBeCloseTo(0.135);
+    }
+    expect(defaultSettings(sd).version).toBe('4');
+  });
+
+  it('withholds the seedream tiers each endpoint cannot render', () => {
+    const sd = familyById('seedream')!;
+    const tiers = (version: string) => resolutionsFor(sd, '1:1', version).map((r) => r.value);
+    expect(tiers('4')).toEqual(['1K', '2K', '4K']);
+    expect(tiers('4.5')).toEqual(['2K', '4K']);
+    expect(tiers('5-lite')).toEqual(['2K']);
+    expect(tiers('5-pro')).toEqual(['1K', '2K']);
+  });
+
+  it('every seedream size we send is inside its endpoint’s pixel window', () => {
+    const sd = familyById('seedream')!;
+    const windows: Record<string, [number, number]> = {
+      '4': [960 * 960, 4096 * 4096],
+      '4.5': [2560 * 1440, 4096 * 4096],
+      '5-lite': [2560 * 1440, 3072 * 3072],
+      '5-pro': [1_048_576, 4_194_304],
+    };
+    for (const [version, [min, max]] of Object.entries(windows)) {
+      for (const aspectRatio of sd.capabilities.aspectRatios) {
+        for (const { value: resolution } of resolutionsFor(sd, aspectRatio, version)) {
+          const { width, height } = seedreamDims({ version, aspectRatio, resolution });
+          const px = width * height;
+          expect(px, `${version} ${aspectRatio} ${resolution}`).toBeGreaterThanOrEqual(min);
+          expect(px, `${version} ${aspectRatio} ${resolution}`).toBeLessThanOrEqual(max);
+        }
+      }
+    }
   });
 
   it('prices xhigh and max above high on the 2.5 models', () => {
@@ -144,9 +235,7 @@ describe('model families', () => {
   it('defaultSettings picks sensible defaults per axis', () => {
     const gpt = familyById('gpt-image')!;
     const s = defaultSettings(gpt);
-    // Deliberately NOT the newest: 2.5 is offered and badged "Latest", but the
-    // default stays on the version that has actually been run in production.
-    expect(s.version).toBe('2');
+    expect(s.version).toBe('2.5-flare');
     expect(s.quality).toBe('medium');
     expect(s.aspectRatio).toBe(gpt.capabilities.aspectRatios[0]);
   });

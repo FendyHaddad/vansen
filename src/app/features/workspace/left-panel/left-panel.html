@@ -31,8 +31,14 @@
         class="prompt-input"
         placeholder="Describe the {{ mode() }} you want..."
         [value]="prompt()"
+        [attr.maxlength]="promptMaxChars"
         (input)="updatePrompt($any($event.target).value)"
       ></textarea>
+      @if (prompt().length >= promptMaxChars * 0.8) {
+        <span class="prompt-count" [class.prompt-count--full]="prompt().length >= promptMaxChars">
+          {{ prompt().length }} / {{ promptMaxChars }}
+        </span>
+      }
     </div>
 
     @if (mode() === 'image' && family().capabilities.imageInput && !personaActive()) {

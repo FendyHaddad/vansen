@@ -317,6 +317,19 @@
   outline-offset: 1px;
 }
 
+/* Shown only once the prompt nears the cap; the cap is priced, so it is firm. */
+.prompt-count {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  text-align: right;
+  color: var(--muted-foreground);
+}
+
+.prompt-count--full {
+  color: var(--warn);
+}
+
 .insufficient {
   margin-bottom: 12px;
   font-size: 0.75rem;

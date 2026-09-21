@@ -13,6 +13,7 @@ import {
   CATALOG_VERSION,
   CREDIT_PACKS,
   creditCost,
+  PROMPT_MAX_CHARS,
   editToolById,
   familyById,
   type GenerationSettings,
@@ -198,7 +199,9 @@ function sniffImage(bytes: Uint8Array): "png" | "jpg" | "webp" | null {
   return null;
 }
 
-const MAX_PROMPT_LEN = 2000;
+// The catalog owns the cap because it also prices it: every token-billed
+// generation carries PROMPT_TOKEN_ALLOWANCE, sized for a prompt this long.
+const MAX_PROMPT_LEN = PROMPT_MAX_CHARS;
 const AR_PATTERN = /^\d{1,2}:\d{1,2}$/;
 const VIDEO_MODES: ReadonlySet<string> = new Set([
   "t2v",

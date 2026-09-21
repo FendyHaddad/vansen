@@ -27,6 +27,7 @@ import {
   ModelKind,
   VideoMode,
   creditCost,
+  PROMPT_MAX_CHARS,
   defaultSettings,
   familyById,
   personaGenCreditCost,
@@ -197,6 +198,8 @@ export class LeftPanel {
     () => MODEL_FAMILIES.find((f) => f.id === this.familyId()) ?? this.families()[0],
   );
 
+  readonly promptMaxChars = PROMPT_MAX_CHARS;
+
   readonly versionOptions = computed<FamilyOption[] | null>(
     () => this.family().capabilities.versions ?? null,
   );
@@ -280,7 +283,9 @@ export class LeftPanel {
 
   readonly batch = computed(() => this.settings().batch ?? 1);
   readonly unitCredits = computed(() =>
-    this.personaActive() ? personaGenCreditCost() : creditCost(this.family(), this.settings()),
+    this.personaActive()
+      ? personaGenCreditCost()
+      : creditCost(this.family(), this.settings(), { hasReference: !!this.reference() }),
   );
   readonly priceCredits = computed(() => {
     const n = this.mode() === 'video' ? 1 : this.batch();
@@ -482,9 +487,7 @@ export class LeftPanel {
       // Someone who picked the largest size wants the largest size still on
       // offer, not the smallest one in the list.
       if (stale) next.resolution = allowed![allowed!.length - 1]?.value;
-      // Same rule for quality, and it lands well: GPT Image 2.5 'max' and
-      // version 2 'high' are the same 7,024 tokens at 1K, so dropping from a
-      // 2.5 model to version 2 keeps both the intent and the price.
+      // Same rule for quality: the strongest setting still on offer.
       if (staleQuality) next.quality = quals![quals!.length - 1]?.value;
       if (f.kind === 'video' && !videoFamilySupports(f, next.mode ?? 't2v')) next.mode = 't2v';
       if (f.capabilities.audio !== 'selectable') delete next.audio;

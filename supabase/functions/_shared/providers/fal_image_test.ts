@@ -49,7 +49,7 @@ Deno.test('flux: the aspect ratio travels inside image_size, the name the record
   await falAdapter.submit(ctx('flux', { aspectRatio: '16:9', resolution: '1MP' }));
   cap.restore();
   const body = cap.calls[0].jsonBody!;
-  assertEquals(body.image_size, { width: 1344, height: 756 });
+  assertEquals(body.image_size, { width: 1344, height: 752 });
   // fal accepts no aspect_ratio on any image endpoint; sending one is a silent
   // no-op that hid this defect for the whole life of the family.
   assertEquals('aspect_ratio' in body, false);
@@ -59,11 +59,13 @@ Deno.test('flux: calls the endpoint the catalog actually sells', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch(queued);
   await falAdapter.submit(ctx('flux', { aspectRatio: '1:1', resolution: '1MP' }));
+  await falAdapter.submit(ctx('flux', { aspectRatio: '1:1', resolution: '1MP', version: 'max' }));
   cap.restore();
   assertEquals(cap.calls[0].url.endsWith('fal-ai/flux-2'), true);
+  assertEquals(cap.calls[1].url.endsWith('fal-ai/flux-2-max'), true);
 });
 
-Deno.test('seedream: a reference switches to the edit slug', async () => {
+Deno.test('seedream: a reference switches to the edit slug of the SAME version', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch(queued);
   await falAdapter.submit(
@@ -71,8 +73,14 @@ Deno.test('seedream: a reference switches to the edit slug', async () => {
       referenceUrl: 'https://fake.storage/uploads/u/1.png',
     }),
   );
+  await falAdapter.submit(
+    ctx('seedream', { aspectRatio: '1:1', resolution: '2K', version: '5-pro' }, {
+      referenceUrl: 'https://fake.storage/uploads/u/1.png',
+    }),
+  );
   cap.restore();
-  assertEquals(cap.calls[0].url.endsWith('/edit'), true);
+  assertEquals(cap.calls[0].url.endsWith('fal-ai/bytedance/seedream/v4/edit'), true);
+  assertEquals(cap.calls[1].url.endsWith('bytedance/seedream/v5/pro/edit'), true);
   assertEquals(
     (cap.calls[0].jsonBody!.image_urls as string[])[0],
     'https://fake.storage/uploads/u/1.png',

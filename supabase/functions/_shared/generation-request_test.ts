@@ -1,5 +1,5 @@
 import { assertEquals, assertNotEquals } from 'jsr:@std/assert';
-import { familyById } from './model-families.ts';
+import { creditCost, familyById, providerCostWithInput } from './model-families.ts';
 import { normalizeGenerationRequest, quote, QUOTE_VERSION } from './generation-request.ts';
 
 function norm(familyId: string, settings: Record<string, unknown>, op = 'generate') {
@@ -10,22 +10,79 @@ function norm(familyId: string, settings: Record<string, unknown>, op = 'generat
   });
 }
 
-Deno.test('THE BUG: gpt-image v1.5 and v2-at-4K must not send the same request', () => {
-  // Was version '1' until 2026-09-22, when it was withdrawn from the offer.
-  // 1.5 carries the same shape of the bug: it is capped at 1K, so a 4K
-  // selection on it must not silently become the same request as a real 4K.
-  const v1 = norm('gpt-image', { aspectRatio: '1:1', version: '1.5', quality: 'medium', resolution: '1K' });
-  const v2 = norm('gpt-image', { aspectRatio: '1:1', version: '2', quality: 'medium', resolution: '4K' });
+Deno.test('THE BUG: two gpt-image prices must be two different provider requests', () => {
+  // Was 1.5-at-1K against 2-at-4K until both versions were withdrawn on
+  // 2026-09-22. The shape of the bug is version-independent: whatever two
+  // cells price differently must reach the wire as different requests.
+  const a = norm('gpt-image', { aspectRatio: '1:1', version: '2.5-flare', quality: 'medium', resolution: '1K' });
+  const b = norm('gpt-image', { aspectRatio: '1:1', version: '2.5-sunburst', quality: 'medium', resolution: '4K' });
   const family = familyById('gpt-image')!;
-  const priceV1 = quote(v1, family).credits;
-  const priceV2 = quote(v2, family).credits;
-
-  assertNotEquals(priceV1, priceV2, 'precondition: the catalog prices these differently');
+  assertNotEquals(quote(a, family).credits, quote(b, family).credits, 'precondition: priced differently');
   assertNotEquals(
-    JSON.stringify({ m: v1.providerModel, s: v1.providerSettings }),
-    JSON.stringify({ m: v2.providerModel, s: v2.providerSettings }),
+    JSON.stringify({ m: a.providerModel, s: a.providerSettings }),
+    JSON.stringify({ m: b.providerModel, s: b.providerSettings }),
     'two prices must mean two different provider requests',
   );
+  assertEquals(a.providerModel, 'gpt-image-2.5-flare');
+  assertEquals(b.providerModel, 'gpt-image-2.5-sunburst');
+});
+
+Deno.test('a withdrawn gpt-image version is refused, not silently remapped', () => {
+  for (const version of ['1', '1.5', '2']) {
+    let threw = '';
+    try {
+      norm('gpt-image', { aspectRatio: '1:1', version, quality: 'medium', resolution: '1K' });
+    } catch (e) {
+      threw = (e as Error).message;
+    }
+    assertEquals(threw.startsWith('unsupported_version'), true, `${version}: "${threw}"`);
+  }
+});
+
+Deno.test('flux versions reach the wire as distinct endpoints, dev by default', () => {
+  const slugs = ['dev', 'pro', 'flex', 'max'].map(
+    (version) => norm('flux', { aspectRatio: '1:1', resolution: '1MP', version }).providerModel,
+  );
+  assertEquals(slugs, ['fal-ai/flux-2', 'fal-ai/flux-2-pro', 'fal-ai/flux-2-flex', 'fal-ai/flux-2-max']);
+  assertEquals(norm('flux', { aspectRatio: '1:1', resolution: '1MP' }).providerModel, 'fal-ai/flux-2');
+});
+
+Deno.test('seedream versions reach the wire as distinct endpoints, edit when a reference rides along', () => {
+  const family = familyById('seedream')!;
+  const versions = ['4', '4.5', '5-lite', '5-pro'];
+  const resolution = { '4': '1K', '4.5': '2K', '5-lite': '2K', '5-pro': '1K' } as Record<string, string>;
+  const generate = versions.map((version) =>
+    norm('seedream', { aspectRatio: '1:1', version, resolution: resolution[version] }).providerModel);
+  assertEquals(generate, [
+    'fal-ai/bytedance/seedream/v4/text-to-image',
+    'fal-ai/bytedance/seedream/v4.5/text-to-image',
+    'fal-ai/bytedance/seedream/v5/lite/text-to-image',
+    'bytedance/seedream/v5/pro/text-to-image',
+  ]);
+  for (const version of versions) {
+    const n = normalizeGenerationRequest(
+      family,
+      'generate',
+      { aspectRatio: '1:1', version, resolution: resolution[version] } as never,
+      { hasReference: true, hasMask: false },
+    );
+    assertEquals(n.providerModel.endsWith('/edit'), true, version);
+  }
+});
+
+Deno.test('a reference raises the gpt-image quote and leaves a flat-priced family alone', () => {
+  const gpt = familyById('gpt-image')!;
+  const settings = { aspectRatio: '1:1', version: '2.5-flare', quality: 'low', resolution: '1K' } as never;
+  const plain = normalizeGenerationRequest(gpt, 'generate', settings, { hasReference: false, hasMask: false });
+  const withRef = normalizeGenerationRequest(gpt, 'generate', settings, { hasReference: true, hasMask: false });
+  assertEquals(quote(withRef, gpt).credits > quote(plain, gpt).credits, true);
+  assertEquals(quote(withRef, gpt).providerCostUsd > quote(plain, gpt).providerCostUsd, true);
+
+  const seedream = familyById('seedream')!;
+  const sd = { aspectRatio: '1:1', version: '4', resolution: '1K' } as never;
+  const a = normalizeGenerationRequest(seedream, 'generate', sd, { hasReference: false, hasMask: false });
+  const b = normalizeGenerationRequest(seedream, 'generate', sd, { hasReference: true, hasMask: false });
+  assertEquals(quote(a, seedream).credits, quote(b, seedream).credits);
 });
 
 Deno.test('THE BUG: flux resolutions must not send the same request', () => {
@@ -42,10 +99,11 @@ Deno.test('THE BUG: flux resolutions must not send the same request', () => {
 Deno.test('seedream exposes only verified differentiating resolutions', () => {
   const family = familyById('seedream')!;
   const selections = family.capabilities.resolutions?.map((r) => r.value) ?? [];
-  const normalized = selections.map((resolution) => norm('seedream', { aspectRatio: '1:1', resolution }));
+  const normalized = selections.map((resolution) => norm('seedream', { aspectRatio: '1:1', version: '4', resolution }));
   const requests = normalized.map((n) => JSON.stringify(n.providerSettings));
   assertEquals(new Set(requests).size, selections.length);
   for (const n of normalized) {
+    // Flat per image: the quote is the output price alone.
     assertEquals(quote(n, family).providerCostUsd, family.providerCost(n.settings));
   }
 });
@@ -81,7 +139,7 @@ Deno.test('a reference is recorded on generate, not only on edit', () => {
   const n = normalizeGenerationRequest(
     family,
     'generate',
-    { aspectRatio: '1:1', version: '2', quality: 'medium', resolution: '1K' } as never,
+    { aspectRatio: '1:1', version: '2.5-flare', quality: 'medium', resolution: '1K' } as never,
     { hasReference: true, hasMask: false },
   );
   assertEquals(n.hasReference, true);
@@ -101,7 +159,11 @@ Deno.test('the credit price equals the catalog creditCost for the same settings'
       hasMask: false,
     });
     const { credits, providerCostUsd } = quote(n, family);
-    assertEquals(providerCostUsd, family.providerCost(settings as never));
+    // The quote includes the input side (prompt allowance), so it equals the
+    // catalog's own all-in figure, and is never below the bare output price.
+    assertEquals(providerCostUsd, providerCostWithInput(family, settings as never));
+    assertEquals(providerCostUsd >= family.providerCost(settings as never), true, familyId);
+    assertEquals(credits, creditCost(family, settings as never), familyId);
     assertEquals(credits > 0, true, `${familyId} must have a positive price`);
   }
 });
@@ -134,10 +196,10 @@ Deno.test('a fal aspect ratio changes the request, because image_size carries it
   }
 });
 
-Deno.test('gpt-image 2K and 4K are refused on versions that cannot render them', () => {
+Deno.test('an unknown gpt-image size key is refused, never priced from a fallback', () => {
   let threw = '';
   try {
-    norm('gpt-image', { aspectRatio: '1:1', version: '1', quality: 'medium', resolution: '4K' });
+    norm('gpt-image', { aspectRatio: '1:1', version: '2.5-flare', quality: 'medium', resolution: '8K' });
   } catch (e) {
     threw = (e as Error).message;
   }
@@ -152,16 +214,16 @@ Deno.test('gpt-image 2K and 4K are refused on versions that cannot render them',
  * default version of a live family named a size the API does not accept. A
  * table nobody checks against the published rules is how that survives.
  *
- * Rules, from platform.openai.com/docs/guides/image-generation (2026-09-22):
+ * Rules, from developers.openai.com/api/docs/guides/image-generation (2026-09-22):
  * both edges divisible by 16, neither over 3840, aspect between 1:3 and 3:1,
  * total pixels between 655,360 and 8,294,400 inclusive.
  */
 Deno.test('every gpt-image size we can send satisfies the published size rules', async () => {
   const caps = JSON.parse(
     await Deno.readTextFile(new URL('./provider-capabilities.json', import.meta.url)),
-  ) as { gptSizes: Record<string, string>; gptStandardSizes: Record<string, string> };
+  ) as { gptSizes: Record<string, string> };
 
-  const sizes = [...Object.entries(caps.gptSizes), ...Object.entries(caps.gptStandardSizes)];
+  const sizes = Object.entries(caps.gptSizes);
   for (const [key, size] of sizes) {
     const [w, h] = size.split('x').map(Number);
     const pixels = w * h;
@@ -176,9 +238,9 @@ Deno.test('every gpt-image size we can send satisfies the published size rules',
 });
 
 Deno.test('16:9 at 1K sends a size above the pixel floor', () => {
-  const r = norm('gpt-image', { version: '2', aspectRatio: '16:9', resolution: '1K', quality: 'low' });
+  const r = norm('gpt-image', { version: '2.5-flare', aspectRatio: '16:9', resolution: '1K', quality: 'low' });
   assertEquals(r.providerSettings.size, '1280x720');
-  const r2 = norm('gpt-image', { version: '2', aspectRatio: '9:16', resolution: '1K', quality: 'low' });
+  const r2 = norm('gpt-image', { version: '2.5-flare', aspectRatio: '9:16', resolution: '1K', quality: 'low' });
   assertEquals(r2.providerSettings.size, '720x1280');
 });
 

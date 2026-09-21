@@ -1,4 +1,4 @@
-# Punchlist — as of 2026-09-22
+# Punchlist — as of 2026-09-22 (evening refresh)
 
 Superseded in part by the release hardening plans P1–P9. The authoritative record
 of what is proven is
@@ -7,15 +7,21 @@ the deployment procedure is
 [`plans/2026-09-20-release-runbook.md`](plans/2026-09-20-release-runbook.md).
 Where this file and those disagree, those win.
 
-Automated gates at 2026-09-22: 565 vitest, 530 deno, 72 script tests, 11 SQL and
-concurrency gates, production build clean, all against a database reset from
-empty (0001→0025). **`npm run verify` exits 0.** `api` v44 is
-deployed and predates the P9 manifest and error-id work; `stripe-webhook` and
-`appstore-webhook` have not been redeployed since P2 rewrote them. Production
-schema is `0024`; `0025_release_telemetry.sql` is not applied.
+Automated gates at 2026-09-22: 574 vitest, 535 deno, 72 script tests, SQL and
+concurrency gates against a database reset from empty (0001→0025), production
+build clean. **`npm run verify` exits 0** with `VANSEN_LOCAL_DB` set.
 
-Still-open items below that the release documents also track: persona live smoke
-(#2) and the go-live blockers (#4). Item #1 is **done** — see below.
+Production at 2026-09-22 (read from `/manifest` and the function inventory):
+`api` v59 at revision `ebdcbe2`, schema `0025`, catalog `2026-09-22.3`;
+`job-worker` v14 (bundle still carries catalog `2026-09-21.1`), `cleanup-worker`
+v13, `stripe-webhook` v26, `appstore-webhook` v16. Stripe is in TEST mode. All
+five video families are `enabled = false`.
+
+The full ordered list of what is still open, including six release blockers found
+by the post-implementation review, is
+[`plans/post-implementation-review.md`](plans/post-implementation-review.md)
+("Consolidated pending list"). This file keeps only the owner-run items and the
+engineering backlog; it does not repeat those blockers.
 
 ---
 
@@ -53,35 +59,58 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 
 ## 🟡 Engineering backlog (unblocked, unscheduled)
 
-- **Video (Phase 4b) rollout pending (2026-09-06)** — code is complete and gates are
-  green, but nothing is live yet. User actions, in order: apply migration
-  `supabase/migrations/0016_video.sql` (MCP `apply_migration`); set secrets
-  `RUNWAY_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-  `R2_BUCKET`; create Cloudflare R2 bucket `vansen-media` + CORS (see
-  `.superpowers/sdd/task-24-brief.md` Step 1 for the CORS JSON); redeploy
-  `supabase functions deploy api --no-verify-jwt` (api version currently pending
-  redeploy — do not assume a version number until this runs); enable each of the five
-  `models` rows (`veo`, `omni`, `kling`, `runway`, `seedance`) one at a time via MCP
-  `execute_sql` and smoke it live with a Pro account (cheapest settings per family,
-  cancel + refund check, R2 object check) per Step 3 of the task-24 brief. Also carries
-  two open product decisions: whether to bring back a "From library" picker for video
-  reference slots (needs gateway `referenceIds` support — see
-  `src/app/features/workspace/left-panel/reference-drop/reference-drop.ts`), and
-  whether to keep the `provider_blocked` client copy ("Provider declined this prompt.
-  Credits refunded.") or change the wording. Two more open follow-ups: whether poster
-  JPEGs (client-captured, currently never re-submitted to moderation) need a moderation
-  pass of their own; and `left-panel.ts` `hideAspect` currently hides the aspect-ratio
-  chip for every non-t2v video mode (spec only called for hiding it on Kling i2v), so
-  ref2v/keyframes users on families that do support a chosen ratio (veo, seedance) can't
-  set one today — decide whether to narrow `hideAspect` or keep the broader hide.
+- **Video (Phase 4b) rollout pending** — code complete, gates green, every family
+  `enabled = false` (D7). Done since 2026-09-06: `0016_video.sql` applied, R2 bucket
+  `vansen-media` created, the four `R2_*` secrets set, `api` redeployed. Still
+  missing: bucket CORS, the `storage_config.r2_bucket` row, `RUNWAY_API_KEY`, and a
+  live smoke per family (cheapest settings, cancel + refund, R2 object check) from
+  the per-family checklist in the release runbook. Open product decisions carried
+  with it: "From library" picker for video reference slots (needs gateway
+  `referenceIds`, see `reference-drop.ts`); `provider_blocked` copy wording; whether
+  client-captured poster JPEGs need their own moderation pass; whether `left-panel.ts`
+  `hideAspect` should hide the ratio chip for every non-t2v mode or only Kling i2v.
+  Video enablement is out of scope for the current web release.
 - **Abuse controls from spec, not built** — concurrent-session cap / account-sharing
-  heuristics, dispatch rate limit, daily provider-spend alarm (`vansen.md` Security section).
-- **i18n** — spec calls for en + ms; nothing started.
-- **CI** — no pipeline; build/test/deno gates run by hand.
+  heuristics and a dispatch/request-rate limit on the generation and upload routes.
+  The daily provider-spend alarm now exists (`provider_burn` in `0025`).
+- **i18n / D4** — spec calls for en + ms; nothing started. Needs an explicit
+  English-only launch decision or the translation funded
+  (`specs/2026-09-20-launch-locales.md`).
+- **Catalog follow-ups** — price GPT reference images (input tokens at $8/1M are
+  not charged today); drop `gpt-image` 1.5 and 2 per owner direction (`isDefault`
+  still `'2'`); decide FLUX retail price or disable `flux`
+  (`specs/2026-09-22-catalog-refresh.md` §13).
+- **CI** — `.github/workflows/ci.yml` runs web, edge and database jobs on every
+  push. Missing a `deno cache` step, so a cold runner can fail three edge test
+  files fetching `jsr:@matmen/imagescript`.
+- **Owner-requested revamps (last in order)** — self-hosted Supabase staging (cloud
+  org is taken by production and `algawth`), clean-code revamp for AI-free
+  maintenance, public website redesign, left toolbar redesign. Detail in the
+  review's consolidated list, items 21–24.
 
 ---
 
-## ✅ Done since last update (2026-07-24 → 2026-09-06)
+## ✅ Done since last update (2026-09-06 → 2026-09-22)
+
+- **Release hardening P1–P9 implemented** — gateway/input integrity, billing
+  fulfillment RPC, catalog contract + drift checks, transactional settlement, durable
+  dispatch via `job-worker`, durable deletion via `cleanup-worker`, client
+  correctness, product-truth/recovery routes, release gates. Evidence:
+  `plans/2026-09-20-release-evidence.md`; procedure: `plans/2026-09-20-release-runbook.md`.
+- **Production caught up (2026-09-22)** — migrations through `0025` applied; `api`,
+  both workers and both webhooks redeployed (the webhooks had been stale since July);
+  `GET /manifest` and `GET /capabilities` live; `deploy.sh` added.
+- **Catalog refresh `2026-09-22.3`** — Nano Banana fast moved off
+  `gemini-2.5-flash-image` before Google's 2026-10-02 shutdown; `gpt-image` 1
+  withdrawn, 2.5 Flare/Sunburst added; all four image families' costs verified
+  against live vendor pages.
+- **`npm run verify` + CI** — ten-check runner, pinned local test stack
+  (`db:test:start|stop`, CLI 2.114.0, migration hash manifest), GitHub Actions
+  pipeline. `supabase start` fixed (duplicate `0008` prefix, vault guards, analytics off).
+- **Trend thumbnails** — 12/12 generated and committed to `public/trends/`;
+  `check:assets` passes.
+
+## ✅ Done earlier (2026-07-24 → 2026-09-06)
 
 - **Video (Phase 4b) code complete (2026-09-06)** — five families (Veo 3.1, Gemini Omni
   Flash 1.1, Kling 3.0 Pro, Runway Gen-4.5, Seedance 2.5) via new adapters in

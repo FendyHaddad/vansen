@@ -220,58 +220,56 @@ describe('LeftPanel resolution tiers follow the aspect ratio', () => {
 });
 
 /**
- * The panel used to name GPT Image version '2' in a literal, so the two 2.5
+ * The panel used to name a GPT Image version in a literal, so the two 2.5
  * models shipped on 2026-09-22 offering 1K only — a capability we sell, hidden
  * by the control that was supposed to expose it. The ceiling is catalog data
  * now; these lock the offer to it.
  */
 describe('LeftPanel resolution tiers follow the model version', () => {
-  it('offers 2K and 4K on GPT Image 2 and both 2.5 models', () => {
+  it('offers 1K to 4K and all five qualities on both GPT Image 2.5 models', () => {
     const component = makeComponent();
     component.selectFamily('gpt-image');
 
-    for (const version of ['2', '2.5-flare', '2.5-sunburst']) {
+    for (const version of ['2.5-flare', '2.5-sunburst']) {
       component.setAxis('version', version);
       expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K', '2K', '4K']);
+      expect(component.qualityOptions()?.map((o) => o.value)).toEqual([
+        'low', 'medium', 'high', 'xhigh', 'max',
+      ]);
     }
   });
 
-  it('caps GPT Image 1.5 at 1K and pulls a 4K selection back down', () => {
+  it('withholds the Seedream tiers an endpoint cannot render and moves the selection', () => {
     const component = makeComponent();
-    component.selectFamily('gpt-image');
-    component.setAxis('version', '2');
+    component.selectFamily('seedream');
+    component.setAxis('version', '4');
     component.setAxis('resolution', '4K');
 
-    component.setAxis('version', '1.5');
+    // 5 Pro tops out at 2K: the largest still on offer, not the smallest.
+    component.setAxis('version', '5-pro');
+    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K', '2K']);
+    expect(component.settings().resolution).toBe('2K');
 
-    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K']);
-    expect(component.settings().resolution).toBe('1K');
+    // 4.5 has no 1K: a 1K selection is pulled UP to the smallest it can do.
+    component.setAxis('resolution', '1K');
+    component.setAxis('version', '4.5');
+    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['2K', '4K']);
+    expect(component.settings().resolution).toBe('4K');
   });
 
-  it('shows X-High and Max on the 2.5 models and hides them elsewhere', () => {
+  it('prices a reference image into the credit total where the provider bills it', () => {
     const component = makeComponent();
     component.selectFamily('gpt-image');
+    const without = component.unitCredits();
+    component.reference.set({ id: null, uploadId: 'u1', url: 'https://x/u1.png' });
+    expect(component.unitCredits()).toBeGreaterThan(without);
 
-    component.setAxis('version', '2.5-flare');
-    expect(component.qualityOptions()?.map((o) => o.value)).toEqual([
-      'low', 'medium', 'high', 'xhigh', 'max',
-    ]);
-
-    component.setAxis('version', '2');
-    expect(component.qualityOptions()?.map((o) => o.value)).toEqual(['low', 'medium', 'high']);
-  });
-
-  it('pulls a Max selection back to High when the version drops to 2', () => {
-    const component = makeComponent();
-    component.selectFamily('gpt-image');
-    component.setAxis('version', '2.5-sunburst');
-    component.setAxis('quality', 'max');
-
-    component.setAxis('version', '2');
-
-    // Not 'low': 2.5 max and version 2 high are the same 7,024 tokens, so this
-    // keeps what they asked for instead of quietly downgrading the render.
-    expect(component.settings().quality).toBe('high');
+    // Seedream bills flat per image, so a reference changes nothing there.
+    component.reference.set(null);
+    component.selectFamily('seedream');
+    const flat = component.unitCredits();
+    component.reference.set({ id: null, uploadId: 'u1', url: 'https://x/u1.png' });
+    expect(component.unitCredits()).toBe(flat);
   });
 
   it('still caps Nano Banana Fast at 1K', () => {

@@ -53,7 +53,7 @@ for (const familyId of REFERENCE_FAMILIES) {
         settings: {
           aspectRatio: '1:1',
           resolution: familyId === 'flux' ? '1MP' : '1K',
-          version: familyId === 'gpt-image' ? '2' : undefined,
+          version: familyId === 'gpt-image' ? '2.5-flare' : undefined,
           quality: familyId === 'gpt-image' ? 'medium' : undefined,
         },
         referenceUploadId: MINE,

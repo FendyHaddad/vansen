@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-22.3';
+export const CATALOG_VERSION = '2026-09-22.4';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -74,10 +74,11 @@ export interface ModelFamily {
      * A version absent from this map is unrestricted.
      *
      * This lives here as data because it used to live in the left panel as a
-     * hardcoded `version !== '2'`: adding GPT Image 2.5 on 2026-09-22 silently
+     * hardcoded GPT version check: adding GPT Image 2.5 on 2026-09-22 silently
      * withheld 2K and 4K from the two new models, which both support them.
      * Encoding the limit next to the versions it describes means adding a
-     * version cannot quietly narrow the offer again.
+     * version cannot quietly narrow the offer again. Seedream uses it for the
+     * pixel window of each endpoint.
      */
     versionResolutions?: Record<string, string[]>;
     /**
@@ -94,30 +95,65 @@ export interface ModelFamily {
     imageInput: boolean;
     maskInput: boolean;
   };
+  /** Provider cost of the OUTPUT alone, for these settings. */
   providerCost(settings: GenerationSettings): number;
+  /**
+   * Provider cost of the INPUT side: the prompt tokens and, when a reference
+   * image rides along, the image input tokens. Absent means the provider bills
+   * a flat price per output and inputs are free (fal's image endpoints).
+   */
+  inputCost?(input: GenerationInput, settings: GenerationSettings): number;
 }
+
+/** What the customer attached, as far as price is concerned. */
+export interface GenerationInput {
+  hasReference: boolean;
+}
+
+export const NO_INPUT: GenerationInput = { hasReference: false };
+
+/**
+ * Prompt length cap, enforced by the composer (maxlength) and the gateway.
+ * Token-billed providers charge for every prompt token, so an unbounded
+ * prompt is an unbounded cost on a fixed credit price. The cap makes the
+ * worst case a known number, and PROMPT_TOKEN_ALLOWANCE prices that worst
+ * case into every token-billed generation instead of making the credit
+ * price jitter as someone types.
+ */
+export const PROMPT_MAX_CHARS = 2000;
+
+/**
+ * Tokens billed for the prompt, assumed on every token-billed generation.
+ * 2000 characters of English is ~500 tokens; the style modifier and a persona
+ * trigger word add under 30 more. 800 covers that with room for dense text.
+ */
+export const PROMPT_TOKEN_ALLOWANCE = 800;
 
 const AR_IMAGE = ['1:1', '3:4', '4:3', '16:9', '9:16'];
 
 /**
- * FLUX.2 (`fal-ai/flux-2`) takes `image_size` as `{width, height}` with BOTH
- * edges clamped to 512–2048. The clamp means only 1:1 actually reaches 4MP —
- * 16:9 tops out at 2.36MP — which is why the 4MP tier is withheld from every
- * other ratio. Keyed `aspectRatio:resolution`; this table drives the provider
- * request in `_shared/generation-request.ts`, so a tier we sell is always a
- * size we send.
+ * FLUX.2 takes `image_size` as `{width, height}`. [dev] clamps both edges to
+ * 512–2048; [pro], [flex] and [max] take 256–2560 with a 4,194,304 px area
+ * cap and want both edges divisible by 16. Every size below satisfies all four
+ * endpoints, and every tier's pixel count is at or under its megapixel label
+ * in fal's units (1 MP = 1,048,576 px, which is how fal's own 1024×1024
+ * example prices as one megapixel), so "rounded up to the nearest megapixel"
+ * bills exactly the tier. Only 1:1 reaches 4MP inside the edge limits, which
+ * is why the 4MP tier is withheld from every other ratio. Keyed
+ * `aspectRatio:resolution`; this table drives the provider request in
+ * `_shared/generation-request.ts`, so a tier we sell is always a size we send.
  */
 export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
   '1:1:1MP': { width: 1024, height: 1024 },
   '4:3:1MP': { width: 1152, height: 864 },
   '3:4:1MP': { width: 864, height: 1152 },
-  '16:9:1MP': { width: 1344, height: 756 },
-  '9:16:1MP': { width: 756, height: 1344 },
-  '1:1:2MP': { width: 1448, height: 1448 },
-  '4:3:2MP': { width: 1632, height: 1224 },
-  '3:4:2MP': { width: 1224, height: 1632 },
-  '16:9:2MP': { width: 1888, height: 1062 },
-  '9:16:2MP': { width: 1062, height: 1888 },
+  '16:9:1MP': { width: 1344, height: 752 },
+  '9:16:1MP': { width: 752, height: 1344 },
+  '1:1:2MP': { width: 1440, height: 1440 },
+  '4:3:2MP': { width: 1632, height: 1216 },
+  '3:4:2MP': { width: 1216, height: 1632 },
+  '16:9:2MP': { width: 1888, height: 1056 },
+  '9:16:2MP': { width: 1056, height: 1888 },
   '1:1:4MP': { width: 2048, height: 2048 },
   '4:3:4MP': { width: 2048, height: 1536 },
   '3:4:4MP': { width: 1536, height: 2048 },
@@ -125,13 +161,15 @@ export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
   '9:16:4MP': { width: 1152, height: 2048 },
 };
 
+const FLUX_MP: Record<string, number> = { '1MP': 1, '2MP': 2, '4MP': 4 };
+
 /**
- * Flat price per tier. fal quotes FLUX.2 per megapixel, but a per-megapixel
- * charge makes the credit ladder non-monotonic once it is rounded to whole
- * credits — two adjacent sizes can cost the same, and a wide 4MP can cost less
- * than a square 2MP. These tiers are the deliberate retail shape; the 2048
- * clamp is handled by not offering a tier we cannot fill (see
- * `resolutionExclusions` on the family) rather than by discounting it.
+ * Flat price per tier for FLUX.2 [dev]. fal bills it at $0.012 per megapixel,
+ * but a per-megapixel charge makes the credit ladder non-monotonic once it is
+ * rounded to whole credits — two adjacent sizes can cost the same, and a wide
+ * 4MP can cost less than a square 2MP. These tiers are the deliberate retail
+ * shape (a 2.5× markup, owner decision); the edge clamp is handled by not
+ * offering a tier we cannot fill (see `resolutionExclusions`).
  */
 export const FLUX_TIER_USD: Record<string, number> = {
   '1MP': 0.03,
@@ -139,8 +177,93 @@ export const FLUX_TIER_USD: Record<string, number> = {
   '4MP': 0.12,
 };
 
+/**
+ * The three dearer FLUX.2 endpoints are priced at fal's published rate, read
+ * off each model page on 2026-09-22, and carried through the margin formula
+ * like every other family:
+ *   pro   $0.03 for the first megapixel, $0.015 per extra
+ *   flex  $0.05 per megapixel
+ *   max   $0.07 for the first megapixel, $0.03 per extra
+ * Text-to-image only, so the "input side" fal mentions is zero for us.
+ */
+function fluxProviderCost(s: GenerationSettings): number {
+  const mp = FLUX_MP[s.resolution ?? '1MP'] ?? 1;
+  const version = s.version ?? 'dev';
+  if (version === 'pro') return 0.03 + 0.015 * (mp - 1);
+  if (version === 'flex') return 0.05 * mp;
+  if (version === 'max') return 0.07 + 0.03 * (mp - 1);
+  return FLUX_TIER_USD[s.resolution ?? '1MP'] ?? FLUX_TIER_USD['1MP'];
+}
+
 export function fluxDims(s: GenerationSettings): { width: number; height: number } {
   return FLUX_DIMS[`${s.aspectRatio ?? '1:1'}:${s.resolution ?? '1MP'}`] ?? FLUX_DIMS['1:1:1MP'];
+}
+
+/**
+ * Seedream takes `image_size` as `{width, height}` and no aspect ratio, so the
+ * ratio rides in the dimensions. Keyed `aspectRatio:resolution`. Each version
+ * has its own pixel window (fal OpenAPI schemas, 2026-09-22):
+ *   4.0     960² – 4096² total
+ *   4.5     3,686,400 (2560×1440) – 16,777,216 total  → 2K and 4K only
+ *   5 Lite  3,686,400 – 9,437,184 (3072²) total        → 2K only
+ *   5 Pro   1,048,576 – 4,194,304 total                → 1K and 2K only
+ * The tiers each version cannot fill are withheld via `versionResolutions`.
+ */
+export const SEEDREAM_DIMS: Record<string, { width: number; height: number }> = {
+  '1:1:1K': { width: 1024, height: 1024 },
+  '4:3:1K': { width: 1152, height: 864 },
+  '3:4:1K': { width: 864, height: 1152 },
+  '16:9:1K': { width: 1344, height: 756 },
+  '9:16:1K': { width: 756, height: 1344 },
+  '1:1:2K': { width: 2048, height: 2048 },
+  '4:3:2K': { width: 2304, height: 1728 },
+  '3:4:2K': { width: 1728, height: 2304 },
+  '16:9:2K': { width: 2688, height: 1512 },
+  '9:16:2K': { width: 1512, height: 2688 },
+  '1:1:4K': { width: 4096, height: 4096 },
+  '4:3:4K': { width: 4096, height: 3072 },
+  '3:4:4K': { width: 3072, height: 4096 },
+  '16:9:4K': { width: 4096, height: 2304 },
+  '9:16:4K': { width: 2304, height: 4096 },
+};
+
+/**
+ * Seedream 5 Pro refuses anything under 1,048,576 px. The shared 1K table's
+ * non-square sizes are 995,328 and 1,016,064 px, so Pro gets 1K sizes that
+ * clear the floor while staying under its $0.0675 tier (≤ 1536² px).
+ */
+const SEEDREAM_PRO_1K_DIMS: Record<string, { width: number; height: number }> = {
+  '1:1': { width: 1024, height: 1024 },
+  '4:3': { width: 1216, height: 912 },
+  '3:4': { width: 912, height: 1216 },
+  '16:9': { width: 1408, height: 800 },
+  '9:16': { width: 800, height: 1408 },
+};
+
+export function seedreamDims(s: GenerationSettings): { width: number; height: number } {
+  const aspectRatio = s.aspectRatio ?? '1:1';
+  const resolution = s.resolution ?? '1K';
+  if (s.version === '5-pro' && resolution === '1K') {
+    return SEEDREAM_PRO_1K_DIMS[aspectRatio] ?? SEEDREAM_PRO_1K_DIMS['1:1'];
+  }
+  return SEEDREAM_DIMS[`${aspectRatio}:${resolution}`] ?? SEEDREAM_DIMS['1:1:1K'];
+}
+
+/** Seedream 5 Pro's two price tiers split at 1536² px; every 2K size is above it. */
+const SEEDREAM_PRO_TIER_PX = 1536 * 1536;
+
+/**
+ * Flat per-image prices from each fal model page, 2026-09-22. Every Seedream
+ * endpoint bills per output image regardless of prompt or reference (5 Pro's
+ * edit endpoint charges only from the SECOND input image, and we send one).
+ */
+function seedreamProviderCost(s: GenerationSettings): number {
+  const version = s.version ?? '4';
+  if (version === '4.5') return 0.04;
+  if (version === '5-lite') return 0.035;
+  if (version !== '5-pro') return 0.03;
+  const { width, height } = seedreamDims(s);
+  return width * height <= SEEDREAM_PRO_TIER_PX ? 0.0675 : 0.135;
 }
 const AR_VIDEO = ['16:9', '9:16', '1:1'];
 
@@ -162,7 +285,8 @@ const GPT_QUALITY_TOOLTIPS: Record<string, string> = {
 };
 
 /**
- * Image output tokens for GPT Image 2 and 2.5, keyed `aspectRatio:resolution`.
+ * Image output tokens for the GPT Image 2.5 models, keyed
+ * `aspectRatio:resolution`.
  *
  * OpenAI bills images per output token, and the token count tracks pixel area,
  * not our tier names. The previous shape — one flat price per quality, doubled
@@ -172,12 +296,13 @@ const GPT_QUALITY_TOOLTIPS: Record<string, string> = {
  *
  * Each row is the five quality steps OpenAI bills, in order:
  * [low, medium, high, xhigh, max]. Measured from the calculator in
- * platform.openai.com/docs/guides/image-generation on 2026-09-22 by entering
- * every size below, not interpolated.
+ * developers.openai.com/api/docs/guides/image-generation on 2026-09-22 by
+ * entering every size below, not interpolated; re-checked cell by cell in §13.
  *
- * GPT Image 2 offers only three qualities and they are the SAME ladder sampled
- * at steps 0, 2 and 4 — verified cell by cell, not assumed, which is why one
- * table serves both models (see GPT_QUALITY_STEP).
+ * GPT Image 1.5 and 2 were withdrawn from the offer on 2026-09-22 (§14):
+ * version 2 sampled this same ladder at steps 0, 2 and 4, so it had no price
+ * point 2.5 does not already sell on a newer model, and 1.5 was dearer per
+ * token and 1K-only.
  */
 const GPT_TOKENS: Record<string, readonly number[]> = {
   '1:1:1K': [196, 439, 1756, 3122, 7024],
@@ -197,49 +322,62 @@ const GPT_TOKENS: Record<string, readonly number[]> = {
   '9:16:4K': [371, 865, 3336, 5930, 13342],
 };
 
-/** Which step of GPT_TOKENS each version's quality labels select. */
-const GPT_QUALITY_STEP: Record<string, Record<string, number>> = {
-  '2': { low: 0, medium: 2, high: 4 },
-  '2.5-flare': { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 },
-  '2.5-sunburst': { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 },
-};
+/** Which step of GPT_TOKENS each quality label selects. Both 2.5 models share it. */
+const GPT_QUALITY_STEP: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+export const GPT_DEFAULT_VERSION = '2.5-flare';
+
+/** USD per token, from developers.openai.com/api/docs/pricing on 2026-09-22. */
+const GPT_RATE = 30 / 1_000_000;
+const GPT_TEXT_IN_RATE = 5 / 1_000_000;
+const GPT_IMAGE_IN_RATE = 8 / 1_000_000;
 
 /**
- * gpt-image-1.5 is a different generation with a different token table and a
- * different rate. It accepts only the three standard sizes, so it is keyed by
- * aspect ratio alone: [low, medium, high].
- *
- * Source: the "Older-model pricing examples" table in the same guide —
- * 272/1056/4160 square, 408/1584/6240 portrait, 400/1568/6208 landscape.
+ * Image input tokens billed when a reference image is attached. OpenAI does
+ * not publish the figure for the 2.5 models; it does for gpt-image-1 at high
+ * input fidelity — which the guide says gpt-image-2 and later ALWAYS use — as
+ * 65 + 129 per 512px tile + 6,240 for a non-square image, ≈ 7,079 tokens for
+ * a 1024×1536 reference. That is the documented worst case and it is what we
+ * price, because a reference on a low or medium generation is otherwise worth
+ * more than the whole generation ($0.057 against $0.006–0.013). The openai
+ * adapter logs `usage.input_tokens_details` on every call so this can be
+ * replaced by a measured number after the first live reference generation.
  */
-const GPT15_TOKENS: Record<string, readonly number[]> = {
-  '1:1': [272, 1056, 4160],
-  '4:3': [400, 1568, 6208],
-  '16:9': [400, 1568, 6208],
-  '3:4': [408, 1584, 6240],
-  '9:16': [408, 1584, 6240],
-};
-
-/** USD per image output token. 1.5 is dearer than the models that replaced it. */
-const GPT_RATE = 30 / 1_000_000;
-const GPT15_RATE = 32 / 1_000_000;
+export const GPT_REFERENCE_TOKENS = 7_100;
 
 function gptProviderCost(s: GenerationSettings): number {
-  const version = s.version ?? '2';
   const aspectRatio = s.aspectRatio ?? '1:1';
   const quality = s.quality ?? 'medium';
-
-  if (version === '1.5') {
-    const row = GPT15_TOKENS[aspectRatio] ?? GPT15_TOKENS['1:1'];
-    const step = ['low', 'medium', 'high'].indexOf(quality);
-    return row[step === -1 ? 1 : step] * GPT15_RATE;
-  }
-
   const row = GPT_TOKENS[`${aspectRatio}:${s.resolution ?? '1K'}`] ?? GPT_TOKENS['1:1:1K'];
-  const step = GPT_QUALITY_STEP[version]?.[quality];
-  // An unknown version or quality is a bug upstream, not a discount: fall back
-  // to the dearest step this row has rather than the cheapest.
+  const step = GPT_QUALITY_STEP[quality];
+  // An unknown quality is a bug upstream, not a discount: fall back to the
+  // dearest step this row has rather than the cheapest.
   return row[step ?? row.length - 1] * GPT_RATE;
+}
+
+function gptInputCost(input: GenerationInput): number {
+  const prompt = PROMPT_TOKEN_ALLOWANCE * GPT_TEXT_IN_RATE;
+  return input.hasReference ? prompt + GPT_REFERENCE_TOKENS * GPT_IMAGE_IN_RATE : prompt;
+}
+
+/**
+ * Gemini bills a reference image as input tokens too: 1,120 tokens for an
+ * image at its default media resolution, at the model's text-input rate
+ * ($0.25/1M Lite, $0.50/1M Flash, $2/1M Pro — ai.google.dev pricing,
+ * 2026-09-22). Under a quarter of a cent everywhere, but it is a real cost,
+ * so it is on the bill.
+ */
+const NANO_REFERENCE_TOKENS = 1_120;
+const NANO_TEXT_IN_RATE: Record<string, number> = {
+  fast: 0.25 / 1_000_000,
+  standard: 0.5 / 1_000_000,
+  pro: 2 / 1_000_000,
+};
+
+function nanoInputCost(input: GenerationInput, s: GenerationSettings): number {
+  const rate = NANO_TEXT_IN_RATE[s.version ?? 'standard'] ?? NANO_TEXT_IN_RATE['standard'];
+  const tokens = PROMPT_TOKEN_ALLOWANCE + (input.hasReference ? NANO_REFERENCE_TOKENS : 0);
+  return tokens * rate;
 }
 
 /** Margin baked into the credit charge table. 1 credit = $0.01 of Studio retail. */
@@ -367,6 +505,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       if (s.version === 'pro') return s.resolution === '4K' ? 0.24 : 0.134;
       return { '1K': 0.067, '2K': 0.101, '4K': 0.151 }[s.resolution ?? '1K'] ?? 0.067;
     },
+    inputCost: nanoInputCost,
   },
   {
     id: 'gpt-image',
@@ -374,40 +513,28 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'OpenAI',
     logo: '/logos/openai.svg',
     kind: 'image',
-    blurb: 'Five-step quality dial on 2.5; true 4K and masked edits from version 2 up.',
+    blurb: 'GPT Image 2.5 — five-step quality dial, true 4K, masked edits.',
     capabilities: {
       versions: [
-        { value: '1.5', label: '1.5', tooltip: 'Previous generation. ~1K output only, and dearer per pixel than 2.' },
-        {
-          value: '2',
-          label: '2',
-          isDefault: true,
-          tooltip: 'Any resolution up to 3840px, masked editing. Low/Medium/High only.',
-        },
         {
           value: '2.5-flare',
-          label: '2.5 Flare',
+          label: 'Flare',
           tag: 'Latest',
-          tooltip: 'Fastest 2.5 model — everyday generation. Adds X-High and Max.',
+          isDefault: true,
+          tooltip: 'Fastest 2.5 model — everyday generation.',
         },
         {
           value: '2.5-sunburst',
-          label: '2.5 Sunburst',
-          tooltip: 'Most capable 2.5 model — precision edits. Adds X-High and Max.',
+          label: 'Sunburst',
+          tooltip: 'Most capable 2.5 model — precision edits and dense text.',
         },
       ],
       aspectRatios: AR_IMAGE,
       resolutions: [
         { value: '1K', label: '1K', tooltip: RES_TOOLTIPS['1K'] },
-        { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] + ' (Not on version 1.5.)' },
-        { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] + ' (Not on version 1.5.)' },
+        { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] },
+        { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] },
       ],
-      // gpt-image-1.5 accepts only the three standard sizes, so every request
-      // collapses to ~1K. Versions 2 and both 2.5 models take arbitrary
-      // dimensions up to 3840x2160 — see `_shared/provider-capabilities.json`.
-      versionResolutions: {
-        '1.5': ['1K'],
-      },
       qualities: [
         { value: 'low', label: 'Low', tooltip: GPT_QUALITY_TOOLTIPS['low'] },
         { value: 'medium', label: 'Medium', tooltip: GPT_QUALITY_TOOLTIPS['medium'] },
@@ -415,18 +542,11 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         { value: 'xhigh', label: 'X-High', tooltip: GPT_QUALITY_TOOLTIPS['xhigh'] },
         { value: 'max', label: 'Max', tooltip: GPT_QUALITY_TOOLTIPS['max'] },
       ],
-      // Only the 2.5 models accept xhigh and max: "For gpt-image-2, the options
-      // are low, medium, and high" (platform.openai.com/docs/guides/image-generation).
-      // Sending either to version 2 or 1.5 is a provider rejection, so the
-      // chips are absent and the request is refused before it is charged.
-      versionQualities: {
-        '2': ['low', 'medium', 'high'],
-        '1.5': ['low', 'medium', 'high'],
-      },
       imageInput: true,
       maskInput: true,
     },
     providerCost: gptProviderCost,
+    inputCost: gptInputCost,
   },
   {
     id: 'flux',
@@ -434,12 +554,27 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Black Forest Labs',
     logo: '/logos/bfl.svg',
     kind: 'image',
-    blurb: 'FLUX.2 — photoreal detail at a flat price per size.',
+    blurb: 'FLUX.2 — photoreal detail; Dev, Pro, Flex and Max tiers.',
     capabilities: {
+      versions: [
+        {
+          value: 'dev',
+          label: 'Dev',
+          isDefault: true,
+          tooltip: 'FLUX.2 [dev] — the open-weights model. Cheapest FLUX.',
+        },
+        { value: 'pro', label: 'Pro', tooltip: 'FLUX.2 [pro] — production quality, fast.' },
+        {
+          value: 'flex',
+          label: 'Flex',
+          tooltip: 'FLUX.2 [flex] — strongest prompt adherence and text rendering.',
+        },
+        { value: 'max', label: 'Max', tag: 'Latest', tooltip: 'FLUX.2 [max] — highest fidelity FLUX.' },
+      ],
       aspectRatios: AR_IMAGE,
       resolutions: [
         { value: '1MP', label: '1MP', tooltip: '~1 megapixel, e.g. 1024×1024.' },
-        { value: '2MP', label: '2MP', tooltip: '~2 megapixels, e.g. 1448×1448.' },
+        { value: '2MP', label: '2MP', tooltip: '~2 megapixels, e.g. 1440×1440.' },
         {
           value: '4MP',
           label: '4MP',
@@ -455,12 +590,12 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         '16:9': ['4MP'],
         '9:16': ['4MP'],
       },
-      // fal-ai/flux-2 documents no reference-image input (capability record,
-      // 2026-09-21), so the family no longer offers one.
+      // No FLUX.2 text-to-image endpoint documents a reference-image input
+      // (capability record, 2026-09-21; pro/flex/max schemas 2026-09-22).
       imageInput: false,
       maskInput: false,
     },
-    providerCost: (s) => FLUX_TIER_USD[s.resolution ?? '1MP'] ?? FLUX_TIER_USD['1MP'],
+    providerCost: fluxProviderCost,
   },
   {
     id: 'seedream',
@@ -468,19 +603,37 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'ByteDance',
     logo: '/logos/bytedance.svg',
     kind: 'image',
-    blurb: 'Seedream 4.0 — strong aesthetics at a low flat price.',
+    blurb: 'Seedream — strong aesthetics at a flat price per image, 4.0 to 5.0 Pro.',
     capabilities: {
+      versions: [
+        { value: '4', label: '4.0', isDefault: true, tooltip: 'Seedream 4.0 — 1K to 4K, cheapest tier.' },
+        { value: '4.5', label: '4.5', tooltip: 'Seedream 4.5 — sharper detail. 2K and 4K only.' },
+        { value: '5-lite', label: '5.0 Lite', tooltip: 'Seedream 5.0 Lite — newest generation, 2K only.' },
+        {
+          value: '5-pro',
+          label: '5.0 Pro',
+          tag: 'Latest',
+          tooltip: 'Seedream 5.0 Pro — photographic realism. 1K and 2K; 2K is the dearer tier.',
+        },
+      ],
       aspectRatios: AR_IMAGE,
       resolutions: [
         { value: '1K', label: '1K', tooltip: RES_TOOLTIPS['1K'] },
         { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] },
         { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] },
       ],
+      // Each endpoint's pixel window, from its fal OpenAPI schema — see
+      // SEEDREAM_DIMS. A tier outside the window is not offered, so it cannot
+      // be charged for a request fal would refuse.
+      versionResolutions: {
+        '4.5': ['2K', '4K'],
+        '5-lite': ['2K'],
+        '5-pro': ['1K', '2K'],
+      },
       imageInput: true,
       maskInput: false,
     },
-    // fal: $0.03 per image at any resolution (verified 2026-07-05)
-    providerCost: () => 0.03,
+    providerCost: seedreamProviderCost,
   },
   // ── Video ───────────────────────────────────────────────────────────
   {
@@ -727,8 +880,8 @@ export function resolutionsFor(
 /**
  * The quality settings one version of a family really accepts.
  *
- * Same reason as `resolutionsFor`: GPT Image 2.5 takes xhigh and max, version 2
- * does not, and a chip the provider would reject must not be offered or priced.
+ * Same reason as `resolutionsFor`: a quality one version accepts and another
+ * rejects must not be offered or priced where the provider would refuse it.
  */
 export function qualitiesFor(family: ModelFamily, version?: string): FamilyOption[] {
   const all = family.capabilities.qualities ?? [];
@@ -760,9 +913,27 @@ export function videoFamilySupports(family: ModelFamily, mode: VideoMode): boole
   return family.capabilities.modes?.includes(mode) ?? false;
 }
 
-/** Integer credits for one output: ceil(providerCost / (1 − margin) × 100). */
-export function creditCost(family: ModelFamily, s: GenerationSettings): number {
-  return Math.ceil((family.providerCost(s) / (1 - STUDIO_MARGIN)) * 100);
+/** Provider cost of one output including its inputs, in USD. */
+export function providerCostWithInput(
+  family: ModelFamily,
+  s: GenerationSettings,
+  input: GenerationInput = NO_INPUT,
+): number {
+  return family.providerCost(s) + (family.inputCost?.(input, s) ?? 0);
+}
+
+/**
+ * Integer credits for one output: ceil(cost / (1 − margin) × 100), where cost
+ * covers the output AND the inputs the customer attached. The composer and the
+ * gateway both pass what they know about the reference, so the number on the
+ * button is the number on the ledger.
+ */
+export function creditCost(
+  family: ModelFamily,
+  s: GenerationSettings,
+  input: GenerationInput = NO_INPUT,
+): number {
+  return Math.ceil((providerCostWithInput(family, s, input) / (1 - STUDIO_MARGIN)) * 100);
 }
 
 export function upscaleCreditCost(): number {

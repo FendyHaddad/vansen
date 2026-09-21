@@ -75,10 +75,8 @@ function slugFor(ctx: SubmitCtx): string {
   if (!ctx.normalized) {
     throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
   }
-  // Seedream's reference path is a sibling endpoint, not a different model.
-  if (ctx.familyId === 'seedream' && ctx.referenceUrl) {
-    return 'fal-ai/bytedance/seedream/v4/edit';
-  }
+  // Seedream's reference path is a sibling endpoint per version; the
+  // normalized request already chose it from `hasReference`.
   return ctx.normalized.providerModel;
 }
 
@@ -127,8 +125,9 @@ function payloadFor(ctx: SubmitCtx): Record<string, unknown> {
   // silently dropped, which is why both the ratio and the resolution controls
   // did nothing. Both now ride inside `image_size`.
   const body: Record<string, unknown> = { prompt: ctx.prompt, ...ctx.normalized.providerSettings };
-  // Only seedream takes a reference; fal-ai/flux-2 documents no such input, so
-  // a reference is dropped rather than sent under a name the model ignores.
+  // Only seedream takes a reference; no FLUX.2 endpoint documents such an
+  // input, so a reference is dropped rather than sent under a name the model
+  // ignores.
   if (ctx.familyId === 'seedream' && ctx.referenceUrl) body.image_urls = [ctx.referenceUrl];
   return body;
 }

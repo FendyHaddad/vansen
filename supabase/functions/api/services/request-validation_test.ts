@@ -31,39 +31,38 @@ Deno.test('accepts every catalogued combination for each family', () => {
 });
 
 /**
- * xhigh and max exist on the GPT Image 2.5 models only. A stale client that
- * still believes otherwise must be refused here, because this is where the
- * charge happens — the provider would reject the request after we had taken
- * the credits.
+ * xhigh and max exist on both GPT Image 2.5 models. A stale client that sends
+ * one of the withdrawn versions (1.5, 2) must be refused here, because this is
+ * where the charge happens — the provider would reject or we would price a
+ * model we no longer sell.
  */
-Deno.test('refuses a quality the selected version does not accept', () => {
+Deno.test('accepts xhigh and max on both 2.5 models and refuses withdrawn versions', () => {
   const family = familyById('gpt-image')!;
-  for (const version of ['2', '1.5']) {
-    for (const quality of ['xhigh', 'max']) {
-      const result = validateSettings(family, { aspectRatio: '1:1', version, quality });
-      assertEquals(result?.field, 'quality', `${version}/${quality}`);
-      assertEquals(result?.value, quality);
-    }
-  }
-  // And they are accepted where they are real.
   for (const version of ['2.5-flare', '2.5-sunburst']) {
     for (const quality of ['xhigh', 'max']) {
       assertEquals(validateSettings(family, { aspectRatio: '1:1', version, quality }), null);
     }
   }
+  for (const version of ['1', '1.5', '2']) {
+    const result = validateSettings(family, { aspectRatio: '1:1', version, quality: 'medium' });
+    assertEquals(result?.field, 'version', version);
+  }
 });
 
-/** gpt-image-1.5 collapses every request to ~1K, so 2K and 4K are not sellable on it. */
-Deno.test('refuses a resolution the selected version cannot render', () => {
-  const family = familyById('gpt-image')!;
-  for (const resolution of ['2K', '4K']) {
-    const result = validateSettings(family, { aspectRatio: '1:1', version: '1.5', resolution });
-    assertEquals(result?.field, 'resolution', resolution);
+/**
+ * Seedream's endpoints have different pixel windows, so the tiers differ per
+ * version. A stale client asking 5 Lite for 4K, or 4.5 for 1K, is refused
+ * before the charge rather than after fal rejects the size.
+ */
+Deno.test('refuses a seedream resolution the selected version cannot render', () => {
+  const family = familyById('seedream')!;
+  const cases: [string, string][] = [['4.5', '1K'], ['5-lite', '1K'], ['5-lite', '4K'], ['5-pro', '4K']];
+  for (const [version, resolution] of cases) {
+    const result = validateSettings(family, { aspectRatio: '1:1', version, resolution });
+    assertEquals(result?.field, 'resolution', `${version}/${resolution}`);
   }
-  assertEquals(
-    validateSettings(family, { aspectRatio: '1:1', version: '2', resolution: '4K' }),
-    null,
-  );
+  assertEquals(validateSettings(family, { aspectRatio: '1:1', version: '4', resolution: '4K' }), null);
+  assertEquals(validateSettings(family, { aspectRatio: '1:1', version: '5-pro', resolution: '2K' }), null);
 });
 
 /**
@@ -96,7 +95,7 @@ Deno.test('rejects an unknown version', () => {
     resolution: '1K',
   });
   assertEquals(result?.field, 'version');
-  assertEquals(result?.allowed, ['1.5', '2', '2.5-flare', '2.5-sunburst']);
+  assertEquals(result?.allowed, ['2.5-flare', '2.5-sunburst']);
 });
 
 Deno.test('rejects an unknown resolution', () => {
@@ -106,7 +105,9 @@ Deno.test('rejects an unknown resolution', () => {
 });
 
 Deno.test('rejects a version on a family that has none', () => {
-  const family = familyById('flux')!;
+  // Every image family now carries versions, so build a versionless one.
+  const flux = familyById('flux')!;
+  const family = { ...flux, capabilities: { ...flux.capabilities, versions: undefined } };
   const result = validateSettings(family, {
     aspectRatio: '1:1',
     resolution: '1MP',
@@ -114,6 +115,15 @@ Deno.test('rejects a version on a family that has none', () => {
   });
   assertEquals(result?.field, 'version');
   assertEquals(result?.allowed, []);
+});
+
+Deno.test('flux accepts its four versions and refuses an unknown one', () => {
+  const family = familyById('flux')!;
+  for (const version of ['dev', 'pro', 'flex', 'max']) {
+    assertEquals(validateSettings(family, { aspectRatio: '1:1', resolution: '1MP', version }), null);
+  }
+  const result = validateSettings(family, { aspectRatio: '1:1', resolution: '1MP', version: 'schnell' });
+  assertEquals(result?.field, 'version');
 });
 
 Deno.test('rejects an unsupported aspect ratio', () => {

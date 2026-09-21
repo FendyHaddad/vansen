@@ -14,6 +14,9 @@ import {
   CATALOG_VERSION,
   creditCost,
   fluxDims,
+  GPT_DEFAULT_VERSION,
+  providerCostWithInput,
+  seedreamDims,
   type GenerationSettings,
   type ModelFamily,
 } from './model-families.ts';
@@ -43,19 +46,10 @@ export interface NormalizedRequest {
   hasMask: boolean;
 }
 
-const RESOLUTION_ORDER = ['1K', '2K', '4K'];
-
 function lookup(table: Record<string, string>, key: string, field: string): string {
   const mapped = table[key];
   if (!mapped) throw new Error(`unsupported_${field}:${key}`);
   return mapped;
-}
-
-/** "1024x768" → {width, height}, the shape fal's image_size takes. */
-function dimensions(size: string): { width: number; height: number } {
-  const [width, height] = size.split('x').map(Number);
-  if (!width || !height) throw new Error(`unsupported_size:${size}`);
-  return { width, height };
 }
 
 function nanoSettings(s: GenerationSettings): Record<string, ProviderValue> {
@@ -66,41 +60,16 @@ function nanoSettings(s: GenerationSettings): Record<string, ProviderValue> {
 }
 
 /**
- * gpt-image-1 and 1.5 accept only the three standard sizes, so a resolution
- * above their ceiling is refused rather than quietly downgraded — charging the
- * 4K multiplier for a 1024px file is the defect this plan exists to remove.
+ * Both offered GPT Image models take arbitrary sizes, so every tier maps to a
+ * measured size. An unknown key is a refusal, never a fallback: the size we
+ * send is the size we priced.
  */
-function gptSize(version: string, aspectRatio: string, resolution: string): string {
-  const ceiling = lookup(verified.gptMaxResolution, version, 'version');
-  const wanted = RESOLUTION_ORDER.indexOf(resolution);
-  if (wanted === -1) throw new Error(`unsupported_resolution:${resolution}`);
-  if (wanted > RESOLUTION_ORDER.indexOf(ceiling)) {
-    throw new Error(`unsupported_resolution:${resolution}@${version}`);
-  }
-  if (ceiling === '1K') return lookup(verified.gptStandardSizes, aspectRatio, 'aspectRatio');
-  return lookup(verified.gptSizes, `${aspectRatio}:${resolution}`, 'size');
-}
-
 function gptSettings(s: GenerationSettings): Record<string, ProviderValue> {
-  const version = String(s.version ?? '2');
+  const key = `${String(s.aspectRatio ?? '1:1')}:${String(s.resolution ?? '1K')}`;
   return {
-    size: gptSize(version, String(s.aspectRatio ?? '1:1'), String(s.resolution ?? '1K')),
+    size: lookup(verified.gptSizes, key, 'size'),
     quality: String(s.quality ?? 'medium'),
   };
-}
-
-/**
- * fal takes no `aspect_ratio` on any image endpoint in this catalog — an
- * unrecognised key is dropped silently, which is why both the ratio and the
- * resolution control were dead. Both axes ride inside `image_size`.
- */
-function falSettings(
-  table: Record<string, string>,
-  s: GenerationSettings,
-  fallbackResolution: string,
-): Record<string, ProviderValue> {
-  const key = `${String(s.aspectRatio ?? '1:1')}:${String(s.resolution ?? fallbackResolution)}`;
-  return { image_size: dimensions(lookup(table, key, 'size')) };
 }
 
 export function normalizeGenerationRequest(
@@ -128,25 +97,36 @@ export function normalizeGenerationRequest(
   if (family.id === 'gpt-image') {
     return {
       ...base,
-      providerModel: lookup(verified.gptModels, String(settings.version ?? '2'), 'version'),
+      providerModel: lookup(
+        verified.gptModels,
+        String(settings.version ?? GPT_DEFAULT_VERSION),
+        'version',
+      ),
       providerSettings: gptSettings(settings),
     };
   }
   if (family.id === 'flux') {
     // The dimensions come from the catalog's own FLUX_DIMS, the same table
     // `resolutionExclusions` was derived from — so a tier we sell is always a
-    // size this endpoint will actually render.
+    // size this endpoint will actually render. fal takes no `aspect_ratio` on
+    // any image endpoint; the ratio rides inside `image_size`.
     return {
       ...base,
-      providerModel: verified.fluxSlug,
+      providerModel: lookup(verified.fluxModels, String(settings.version ?? 'dev'), 'version'),
       providerSettings: { image_size: fluxDims(settings) },
     };
   }
   if (family.id === 'seedream') {
+    // A reference is a sibling endpoint on every Seedream version, chosen here
+    // so the adapter never has to know which version has which edit slug.
+    const endpoints = verified.seedreamModels[
+      String(settings.version ?? '4') as keyof typeof verified.seedreamModels
+    ];
+    if (!endpoints) throw new Error(`unsupported_version:${settings.version}`);
     return {
       ...base,
-      providerModel: verified.seedreamSlug,
-      providerSettings: falSettings(verified.seedreamSizes, settings, '1K'),
+      providerModel: ctx.hasReference ? endpoints.edit : endpoints.generate,
+      providerSettings: { image_size: seedreamDims(settings) },
     };
   }
   // Families with no verified axis mapping yet (video, persona, edit tools)
@@ -158,14 +138,17 @@ export function normalizeGenerationRequest(
  * The price of exactly this request. Both numbers come from the catalog so a
  * quote can never disagree with `creditCost`; the point of taking the
  * normalized request is that the caller cannot price one request and submit
- * another.
+ * another. The reference flag is part of the price: token-billed providers
+ * charge for the image input, so a request with a reference costs more than
+ * the same settings without one.
  */
 export function quote(
   n: NormalizedRequest,
   family: ModelFamily,
 ): { credits: number; providerCostUsd: number } {
+  const input = { hasReference: n.hasReference };
   return {
-    credits: creditCost(family, n.settings),
-    providerCostUsd: family.providerCost(n.settings),
+    credits: creditCost(family, n.settings, input),
+    providerCostUsd: providerCostWithInput(family, n.settings, input),
   };
 }

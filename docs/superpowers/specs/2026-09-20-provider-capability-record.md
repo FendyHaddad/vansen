@@ -99,6 +99,23 @@ describe FLUX.2; the adapter calls FLUX 1.1 [pro] and sends it a parameter it
 does not accept. (Resolved by moving to `fal-ai/flux-2`. The per-megapixel
 *price* story was rejected — retail stays flat, see the foot of this file.)
 
+### Added 2026-09-22 (catalog `2026-09-22.4`): the three dearer FLUX.2 endpoints
+
+Source: each endpoint's fal OpenAPI schema
+(`fal.ai/api/openapi/queue/openapi.json?endpoint_id=…`) and model page.
+
+| Catalog version | Slug | Price (model page) | Schema | Smoke |
+|---|---|---|---|---|
+| `dev` (default) | `fal-ai/flux-2` | $0.012/MP; retail flat $0.03/0.06/0.12 (owner decision) | as above | |
+| `pro` | `fal-ai/flux-2-pro` | $0.03 first MP + $0.015 per extra MP, rounded up | `image_size` presets or `{width,height}` 256–2560, multiples of 16, max area 4,194,304; no image input; `output_format` jpeg/png | |
+| `flex` | `fal-ai/flux-2-flex` | $0.05 per MP in+out, rounded up | same limits; adds `num_inference_steps`, `guidance_scale`; no image input | |
+| `max` | `fal-ai/flux-2-max` | $0.07 first MP + $0.03 per extra MP | same limits; no image input | |
+
+fal's own 1024×1024 example on the flex page prices as one megapixel, so a
+megapixel is 1,048,576 px. `FLUX_DIMS` was re-cut so every tier is at or under
+its label in those units and every edge is a multiple of 16 (1344×752,
+1440×1440, 1632×1216, 1888×1056); the old 756/1448/1224/1062 edges were not.
+
 ---
 
 ## Seedream (fal / ByteDance)
@@ -110,6 +127,23 @@ does not accept. (Resolved by moving to `fal-ai/flux-2`. The per-megapixel
 | flat $0.03 at every resolution | Not stated on the model page; **must be confirmed by smoke**, since 4K output at a flat rate is the assumption the margin formula rests on | same | |
 | aspectRatio | **Not accepted.** Same silent-drop as FLUX | same | |
 | reference → `/edit` slug, `image_urls` | v4 is described as unified generation+editing; a separate `/edit` slug is not documented on this page. Needs confirming before the edit path is trusted | same | |
+
+### Added 2026-09-22 (catalog `2026-09-22.4`): Seedream 4.5, 5.0 Lite, 5.0 Pro
+
+Source: fal OpenAPI schemas and model pages, 2026-09-22.
+
+| Catalog version | generate / edit slug | Price | Pixel window (schema) | Tiers offered | Smoke |
+|---|---|---|---|---|---|
+| `4` (default) | `fal-ai/bytedance/seedream/v4/text-to-image` / `…/v4/edit` | $0.03 flat | 960² – 4096² | 1K 2K 4K | |
+| `4.5` | `…/seedream/v4.5/text-to-image` / `…/v4.5/edit` | $0.04 flat | 2560×1440 – 4096² total | 2K 4K | |
+| `5-lite` | `…/seedream/v5/lite/text-to-image` / `…/v5/lite/edit` | $0.035 flat | 2560×1440 – 3072² total | 2K | |
+| `5-pro` | `bytedance/seedream/v5/pro/text-to-image` / `…/v5/pro/edit` (no `fal-ai/` prefix) | $0.0675 ≤ 1536² px, $0.135 above ("tentative" per fal); edit: first input free, +$0.0045 per additional input | min_area 1,048,576, max_area 4,194,304 | 1K 2K | |
+
+All four edit endpoints take `image_urls` (up to 10). 5 Pro's window refuses
+the shared non-square 1K sizes (995,328 / 1,016,064 px), so it gets its own
+1K table (`SEEDREAM_PRO_1K_DIMS`: 1216×912, 1408×800), all under the $0.0675
+tier. The edit slug is now chosen in `generation-request.ts` from
+`hasReference`, per version, so the adapter has no Seedream literal left.
 
 ---
 
