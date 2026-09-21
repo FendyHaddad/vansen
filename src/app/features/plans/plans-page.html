@@ -7,18 +7,21 @@
       One subscription. Every model.
     </h1>
     <p class="muted mx-auto mt-4 max-w-xl text-lg">
-      Studio $15/mo or Pro $30/mo, with the full price back in monthly credits.
+      Studio ${{ studioPriceUsd }}/mo or Pro ${{ proPriceUsd }}/mo, with the full price
+      back in monthly credits.
       Spend them on any model at the price shown.
     </p>
     <p class="promo-strip mx-auto mt-4">
-      Launch offer — first-time subscribers pay <span class="num">$10</span> /
-      <span class="num">$25</span> for their first 60 days, full credit grant included.
+      Launch offer — first-time subscribers pay
+      <span class="num">${{ studioPromoUsd }}</span> /
+      <span class="num">${{ proPromoUsd }}</span> for their first 60 days, full credit
+      grant included.
     </p>
   </section>
 
   <section class="mx-auto max-w-5xl px-6 py-10">
     <div class="grid gap-5 lg:grid-cols-2">
-      @for (plan of plans; track plan.id) {
+      @for (plan of plans(); track plan.id) {
         <div hlmCard [class.studio-card]="plan.featured">
           <div hlmCardHeader>
             <div class="flex items-center justify-between">
@@ -74,8 +77,9 @@
   <section class="mx-auto max-w-4xl px-6 py-12">
     <h2 class="text-center text-2xl font-semibold tracking-tight">Add-on credit packs</h2>
     <p class="muted mx-auto mt-3 max-w-xl text-center">
-      One-time top-ups for heavy months. Bigger packs carry a bonus; Pro gets 25% more
-      credits per dollar. Pack credits roll over while you stay subscribed.
+      One-time top-ups for heavy months. Bigger packs carry a bonus; Pro gets
+      {{ proPackBonusPercent }}% more credits per dollar. Pack credits roll over while you
+      stay subscribed.
     </p>
     <div class="pack-table mt-8">
       <div class="pack-row pack-head">

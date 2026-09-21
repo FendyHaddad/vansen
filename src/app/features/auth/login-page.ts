@@ -4,6 +4,8 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmLabel } from '@spartan-ng/helm/label';
 import { AuthService } from '../../core/auth/auth-service';
+import { MODEL_FAMILIES } from '../../core/catalog/model-families';
+import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -17,6 +19,19 @@ type AuthMode = 'signin' | 'signup';
 export class LoginPage {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly capabilities = inject(PublicCapabilitiesService);
+
+  constructor() {
+    void this.capabilities.load();
+  }
+
+  /** The splash caption named Sora, which has no adapter. Live families only. */
+  readonly modelCaption = computed(() => {
+    const enabled = this.capabilities.enabledFamilyIds();
+    return MODEL_FAMILIES.filter((f) => enabled.includes(f.id))
+      .map((f) => f.name)
+      .join(' · ');
+  });
 
   readonly mode = signal<AuthMode>('signin');
   readonly email = signal('');

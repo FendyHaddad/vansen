@@ -31,8 +31,12 @@ export class ReferenceDrop {
   private readonly api = inject(ApiService);
 
   readonly mode = input.required<VideoMode>();
-  readonly slots = input.required<RefSlot[]>();
-  readonly slotsChanged = output<RefSlot[]>();
+  /**
+   * Positions, not a list. `keyframes` is [first, last] on every adapter, so
+   * an empty first frame is a hole that stays a hole — never a shorter array.
+   */
+  readonly slots = input.required<(RefSlot | null)[]>();
+  readonly slotsChanged = output<(RefSlot | null)[]>();
 
   readonly error = signal('');
   readonly uploadingIndex = signal<number | null>(null);
@@ -42,11 +46,15 @@ export class ReferenceDrop {
   /** Filled slots + one empty (until max). Keyframes always show both. */
   readonly visible = computed(() => {
     const filled = this.slots();
-    const shown = this.mode() === 'keyframes' ? this.max() : Math.min(filled.length + 1, this.max());
+    // A trailing hole is still a slot the customer can fill, so count the
+    // array's length rather than how many of them happen to be occupied.
+    const shown = this.mode() === 'keyframes'
+      ? this.max()
+      : Math.min(filled.filter((s) => !!s).length + 1, this.max());
     return Array.from({ length: shown }, (_, i) => ({
       index: i,
       label: slotLabel(this.mode(), i),
-      slot: filled[i] as RefSlot | undefined,
+      slot: filled[i] ?? undefined,
     }));
   });
 
@@ -91,15 +99,47 @@ export class ReferenceDrop {
     }
   }
 
+  /**
+   * Slots are positions, not a list. keyframes = [first, last] on every
+   * adapter, so compacting the array silently promoted the end frame to the
+   * start — the video then began where it was meant to end.
+   */
   place(index: number, slot: RefSlot): void {
-    const next = [...this.slots()];
+    const next = this.padded();
     next[index] = slot;
-    this.slotsChanged.emit(next.filter((s): s is RefSlot => !!s));
+    this.slotsChanged.emit(next); // nulls preserved
   }
 
   clear(index: number): void {
-    const next = this.slots().filter((_, i) => i !== index);
+    const next = this.padded();
+    next[index] = null;
     this.slotsChanged.emit(next);
+  }
+
+  /** Every required position for this mode is filled. */
+  complete(): boolean {
+    const rule = referenceRule(this.mode());
+    const filled = this.slots().filter((s) => !!s).length;
+    if (filled < rule.min || filled > rule.max) return false;
+    // No holes before the end: refs[1] with refs[0] empty is not one
+    // reference, it is a missing first frame.
+    return this.slots().slice(0, filled).every((s) => !!s);
+  }
+
+  /**
+   * The provider array, in provider order. A sparse array is a bug, not a
+   * shorter list.
+   */
+  serialize(): string[] {
+    if (!this.complete()) throw new Error('reference slots incomplete');
+    return this.slots().filter((s): s is RefSlot => !!s).map((s) => s.path);
+  }
+
+  /** The slot array grown to the mode's width, so an index always exists. */
+  private padded(): (RefSlot | null)[] {
+    const next = [...this.slots()];
+    while (next.length < this.max()) next.push(null);
+    return next;
   }
 }
 

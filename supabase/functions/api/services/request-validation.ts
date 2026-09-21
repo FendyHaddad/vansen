@@ -2,6 +2,7 @@
 // well-formed string; this proves the selected family actually offers it, so a
 // nonsense axis can never be priced by the providerCost() fallback and then
 // charged for a request the provider will clamp or reject.
+import { resolutionsFor } from '../_shared/model-families.ts';
 import type { GenerationSettings, ModelFamily } from '../_shared/model-families.ts';
 
 export interface SettingsError {
@@ -29,18 +30,20 @@ export function validateSettings(
   const version = offered('version', settings.version, caps.versions?.map((v) => v.value) ?? []);
   if (version) return version;
 
+  const aspect = offered('aspectRatio', settings.aspectRatio, caps.aspectRatios);
+  if (aspect) return aspect;
+
+  // Checked after the ratio, because which tiers exist depends on it: FLUX.2
+  // clamps every edge to 2048, so "4MP" is real at 1:1 and a lie at 16:9.
   const resolution = offered(
     'resolution',
     settings.resolution,
-    caps.resolutions?.map((r) => r.value) ?? [],
+    caps.resolutions ? resolutionsFor(family, settings.aspectRatio).map((r) => r.value) : [],
   );
   if (resolution) return resolution;
 
   const quality = offered('quality', settings.quality, caps.qualities?.map((q) => q.value) ?? []);
   if (quality) return quality;
-
-  const aspect = offered('aspectRatio', settings.aspectRatio, caps.aspectRatios);
-  if (aspect) return aspect;
 
   const durations = caps.durations ?? [];
   if (settings.durationS !== undefined && !durations.includes(settings.durationS)) {

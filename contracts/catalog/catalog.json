@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "2026-09-20.2",
+  "catalogVersion": "2026-09-21.1",
   "studioMargin": 0.4,
   "planCredits": {
     "studio": 1500,
@@ -73,6 +73,7 @@
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -108,6 +109,7 @@
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": true
       }
@@ -135,6 +137,20 @@
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": {
+          "4:3": [
+            "4MP"
+          ],
+          "3:4": [
+            "4MP"
+          ],
+          "16:9": [
+            "4MP"
+          ],
+          "9:16": [
+            "4MP"
+          ]
+        },
         "imageInput": false,
         "maskInput": false
       }
@@ -162,6 +178,7 @@
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -201,6 +218,7 @@
           "extend"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -239,6 +257,7 @@
           "edit"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -268,6 +287,7 @@
           "keyframes"
         ],
         "audio": "selectable",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -298,6 +318,7 @@
           "i2v"
         ],
         "audio": "none",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -330,6 +351,7 @@
           "ref2v"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }

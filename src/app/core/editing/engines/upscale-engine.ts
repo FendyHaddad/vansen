@@ -1,7 +1,8 @@
 import * as ort from 'onnxruntime-web';
 import { PixelBuffer } from '../pixel-buffer';
 import { MAX_UPSCALE_PIXELS, upscaleModelProgress, upscaleTileProgress } from './engine-status';
-import { getOrtSession } from './model-loader';
+import { acquireOrtSession } from './model-loader';
+import { assertPixelBudget, upscalePolicy } from '../editor-policy';
 
 /**
  * 2× super-resolution via Swin2SR lightweight (caidas, Apache-2.0; Xenova
@@ -9,8 +10,6 @@ import { getOrtSession } from './model-loader';
  * upscaleTileProgress reports 0..1 across tiles.
  */
 
-const MODEL_URL =
-  'https://huggingface.co/Xenova/swin2SR-lightweight-x2-64/resolve/main/onnx/model.onnx';
 const SCALE = 2;
 const TILE = 224; // core tile edge, must keep TILE+2*OV a multiple of 8
 const OV = 16; // overlap trimmed from every side to hide seams
@@ -32,10 +31,12 @@ function saneTile(up: Float32Array): boolean {
 }
 
 export async function upscale2x(buf: PixelBuffer): Promise<PixelBuffer> {
-  if (buf.width * buf.height > MAX_UPSCALE_PIXELS) {
-    throw new Error('too_large');
-  }
-  let session = await getOrtSession(MODEL_URL, upscaleModelProgress);
+  // Before the model download, before the session, before the output buffer:
+  // a size check that runs after any of those has already spent the memory
+  // it was supposed to protect.
+  assertPixelBudget(buf.width, buf.height, SCALE, upscalePolicy(MAX_UPSCALE_PIXELS));
+  let lease = await acquireOrtSession('upscale-swin2sr', upscaleModelProgress);
+  let session = lease.session;
   let validated = false;
   const { width: w, height: h } = buf;
   const out: PixelBuffer = {
@@ -84,7 +85,11 @@ export async function upscale2x(buf: PixelBuffer): Promise<PixelBuffer> {
           if (!validated && !saneTile(up)) throw new Error('gpu output invalid');
         } catch (e) {
           if (validated) throw e;
-          session = await getOrtSession(MODEL_URL, upscaleModelProgress, ['wasm']);
+          // Swap to CPU, and let go of the GPU session that just failed.
+          const cpu = await acquireOrtSession('upscale-swin2sr', upscaleModelProgress, ['wasm']);
+          await lease.release();
+          lease = cpu;
+          session = cpu.session;
           up = (await session.run(feed()))[session.outputNames[0]].data as Float32Array;
         }
         validated = true;
@@ -111,6 +116,8 @@ export async function upscale2x(buf: PixelBuffer): Promise<PixelBuffer> {
     }
   } finally {
     upscaleTileProgress.set(null);
+    // The weights are tens of megabytes; they go when the work does.
+    await lease.release();
   }
   // The network is RGB-only — carry transparency (e.g. after Cut Out) across
   // with a plain bilinear resample of the alpha channel.

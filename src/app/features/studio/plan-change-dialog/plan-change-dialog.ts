@@ -17,6 +17,7 @@ import {
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { PLAN_CREDITS, PLAN_PRICE_USD } from '../../../core/catalog/model-families';
+import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
 export type ChangeWhen = 'now' | 'period_end';
 
@@ -34,7 +35,7 @@ export type ChangeWhen = 'now' | 'period_end';
   templateUrl: './plan-change-dialog.html',
   styleUrl: './plan-change-dialog.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, NgIcon, HlmButton],
+  imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, DialogDirective],
   providers: [
     provideIcons({ lucideCalendarClock, lucideCheck, lucideSparkles, lucideX, lucideZap }),
   ],

@@ -31,6 +31,7 @@ import {
   familyById,
   personaGenCreditCost,
   referenceRule,
+  resolutionsFor,
   videoFamilySupports,
 } from '../../../core/catalog/model-families';
 import { LedgerService } from '../../../core/ledger/ledger-service';
@@ -146,7 +147,12 @@ export class LeftPanel {
   readonly upgradeRequested = output<void>();
   readonly pickVideoRequested = output<void>();
 
-  readonly refSlots = signal<RefSlot[]>([]);
+  /**
+   * Reference slots by POSITION. A keyframes request is [first, last] all the
+   * way to the provider, so an unfilled first frame stays a hole here rather
+   * than letting the last frame slide into its place.
+   */
+  readonly refSlots = signal<(RefSlot | null)[]>([]);
   readonly videoParent = signal<GenerationItem | null>(null);
 
   readonly mode = signal<ModelKind>('image');
@@ -204,8 +210,9 @@ export class LeftPanel {
 
   readonly resolutionOptions = computed<FamilyOption[] | null>(() => {
     const f = this.family();
-    const list = f.capabilities.resolutions;
-    if (!list) return null;
+    if (!f.capabilities.resolutions) return null;
+    // Aspect-driven limits first: FLUX.2 cannot fill a 4MP tier off-square.
+    const list = resolutionsFor(f, this.settings().aspectRatio);
     // GPT Image: 2K/4K exist on version 2 only
     if (f.id === 'gpt-image' && this.settings().version !== '2') {
       return list.filter((o) => o.value === '1K');
@@ -275,8 +282,11 @@ export class LeftPanel {
     if (this.mode() !== 'video') return true;
     const rule = this.refRule();
     if (rule.needsParent) return this.videoParent() !== null;
-    const n = this.refSlots().length;
-    return n >= rule.min && n <= rule.max;
+    const slots = this.refSlots();
+    const filled = slots.filter((slot) => !!slot).length;
+    if (filled < rule.min || filled > rule.max) return false;
+    // A hole before the end is a missing frame, not a shorter list.
+    return slots.slice(0, filled).every((slot) => !!slot);
   });
 
   readonly batch = computed(() => this.settings().batch ?? 1);
@@ -362,7 +372,8 @@ export class LeftPanel {
 
   setAxis(axis: 'version' | 'aspectRatio' | 'resolution' | 'quality', value: string): void {
     this.settings.update((s) => ({ ...s, [axis]: value }));
-    if (axis === 'version') this.clampSettings();
+    // A new ratio can withdraw the selected size as surely as a new version can.
+    if (axis === 'version' || axis === 'aspectRatio') this.clampSettings();
   }
 
   setDuration(value: string): void {
@@ -452,7 +463,7 @@ export class LeftPanel {
       referenceUrl: imageRef?.url ?? null,
       batch: imageMode ? this.batch() : 1,
       priceCredits: this.priceCredits(),
-      referencePaths: imageMode ? undefined : this.refSlots().map((slot) => slot.path),
+      referencePaths: imageMode ? undefined : this.referencePaths(),
       videoParentId: imageMode ? undefined : this.videoParent()?.id,
     });
     this.prompt.set('');
@@ -461,14 +472,25 @@ export class LeftPanel {
     this.refSlots.set([]);
   }
 
-  /** Reset options that fell out of range after a version or family switch. */
+  /**
+   * The provider array, in provider order. `videoInputsReady` gates Generate
+   * on the same rule, so a hole cannot reach here — and if one ever did, a
+   * silently compacted array would be worse than nothing.
+   */
+  private referencePaths(): string[] {
+    return this.refSlots().filter((slot): slot is RefSlot => !!slot).map((slot) => slot.path);
+  }
+
+  /** Reset options that fell out of range after a version, ratio or family switch. */
   private clampSettings(): void {
     const f = this.family();
     const allowed = this.resolutionOptions();
     const stale = !!allowed && !allowed.some((o) => o.value === this.settings().resolution);
     this.settings.update((s) => {
       const next = { ...s };
-      if (stale) next.resolution = allowed![0]?.value;
+      // Someone who picked the largest size wants the largest size still on
+      // offer, not the smallest one in the list.
+      if (stale) next.resolution = allowed![allowed!.length - 1]?.value;
       if (f.kind === 'video' && !videoFamilySupports(f, next.mode ?? 't2v')) next.mode = 't2v';
       if (f.capabilities.audio !== 'selectable') delete next.audio;
       if (f.capabilities.audio === 'selectable' && !next.audio) next.audio = 'off';

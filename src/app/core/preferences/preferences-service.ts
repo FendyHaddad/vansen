@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
 import type { VideoMode } from '../catalog/model-families';
 
@@ -40,6 +41,20 @@ export class PreferencesService {
 
   readonly prefs = this.state.asReadonly();
 
+  constructor() {
+    inject(SessionLifecycle).register('preferences', this);
+  }
+
+  /**
+   * Identity changed: fall back to defaults and drop the cached copy. These
+   * are per-account settings held in localStorage — the next person to sign
+   * in on this browser must not inherit them.
+   */
+  reset(): void {
+    this.state.set({ ...DEFAULTS });
+    clearCache();
+  }
+
   /** Called by ProfileStore when the server profile arrives. */
   applyServerPrefs(serverPrefs: Record<string, unknown>): void {
     const merged = { ...DEFAULTS, ...(serverPrefs as Partial<Prefs>) };
@@ -69,4 +84,13 @@ function restoreCache(): Prefs {
 function persistCache(prefs: Prefs): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(CACHE_KEY, JSON.stringify(prefs));
+}
+
+function clearCache(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(CACHE_KEY);
+  } catch {
+    // private mode / denied storage — nothing to clear
+  }
 }

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { API_TOKEN_PROVIDER, ApiError, ApiService } from './api-service';
+import { SessionLifecycle } from '../auth/session-lifecycle';
+import { API_TOKEN_PROVIDER, ApiError, ApiService, StaleSessionError } from './api-service';
 
 const originalFetch = globalThis.fetch;
 
@@ -123,5 +124,53 @@ describe('ApiService', () => {
       .mockResolvedValue(new Response(null, { status: 502 })) as unknown as typeof fetch;
     const api = makeApi('tok');
     await expect(api.post('/errors', { message: 'test' })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+/**
+ * R12: a request made as one account must never resolve into another's state.
+ * The epoch is captured when the request leaves and checked when it returns.
+ */
+describe('ApiService session epoch', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function make(): { api: ApiService; lifecycle: SessionLifecycle } {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: API_TOKEN_PROVIDER, useValue: () => Promise.resolve('tok') }],
+    });
+    return {
+      api: TestBed.inject(ApiService),
+      lifecycle: TestBed.inject(SessionLifecycle),
+    };
+  }
+
+  it('R12: a response that arrives after a user switch is discarded', async () => {
+    const { api, lifecycle } = make();
+    await lifecycle.onIdentityChange('user-1');
+    let release: (r: Response) => void = () => undefined;
+    globalThis.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      })) as unknown as typeof fetch;
+
+    const inflight = api.get('/generations');
+    // The other account signs in while the request is still in the air.
+    await lifecycle.onIdentityChange('user-2');
+    release(new Response(JSON.stringify({ items: [{ id: 'other-account' }] }), { status: 200 }));
+
+    await expect(inflight).rejects.toBeInstanceOf(StaleSessionError);
+  });
+
+  it('a response under the same identity is delivered normally', async () => {
+    const { api, lifecycle } = make();
+    await lifecycle.onIdentityChange('user-1');
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })) as unknown as typeof fetch;
+
+    await expect(api.get('/profile')).resolves.toEqual({ ok: true });
   });
 });

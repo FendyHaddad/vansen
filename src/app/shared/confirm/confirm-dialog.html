@@ -1,0 +1,39 @@
+@if (pending(); as request) {
+  <div class="cd-backdrop" (click)="answer(false)"></div>
+
+  <div
+    class="cd-dialog"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="cd-title"
+    aria-describedby="cd-body"
+    (keydown)="onKeydown($event)"
+  >
+    <h2 class="cd-title" id="cd-title">{{ request.title }}</h2>
+    <p class="cd-body" id="cd-body">{{ request.body }}</p>
+
+    <div class="cd-actions">
+      <button
+        #cancelButton
+        type="button"
+        class="cd-button cd-cancel"
+        data-focus="cancel"
+        (keydown)="onTab($event, true)"
+        (click)="answer(false)"
+      >
+        {{ request.cancelLabel ?? 'Cancel' }}
+      </button>
+      <button
+        #confirmButton
+        type="button"
+        class="cd-button"
+        [class.cd-destructive]="request.destructive"
+        data-focus="confirm"
+        (keydown)="onTab($event, false)"
+        (click)="answer(true)"
+      >
+        {{ request.confirmLabel ?? 'Continue' }}
+      </button>
+    </div>
+  </div>
+}

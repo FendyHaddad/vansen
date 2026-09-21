@@ -22,17 +22,19 @@
       </nav>
       <div class="site-footer-models">
         <span class="site-footer-nav-title">Models</span>
-        <p class="site-footer-models-body">
-          Nano Banana · GPT Image · FLUX · Seedream
-        </p>
-        <p class="site-footer-models-body">
-          Veo · Sora · Kling · Runway · Seedance
-        </p>
+        @if (imageNames()) {
+          <p class="site-footer-models-body">{{ imageNames() }}</p>
+        }
+        @if (videoNames()) {
+          <p class="site-footer-models-body">{{ videoNames() }}</p>
+        }
         <span class="site-footer-models-note">New models added as providers ship them</span>
       </div>
       <div class="site-footer-start">
         <span class="site-footer-nav-title">Pricing</span>
-        <code class="site-footer-plan">Studio $15/mo · Pro $30/mo</code>
+        <code class="site-footer-plan">
+          Studio ${{ studioPriceUsd }}/mo · Pro ${{ proPriceUsd }}/mo
+        </code>
       </div>
     </div>
     <div class="site-footer-meta">

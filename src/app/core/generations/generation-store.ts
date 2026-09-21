@@ -1,10 +1,13 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
 import {
   CancelJobResponse,
   CreateGenerationRequest,
   CreateGenerationResponse,
+  RetryableDto,
   GenerationDto,
+  GenerationResponse,
   GenerationsResponse,
   SaveEditResponse,
 } from '../api/dtos';
@@ -17,6 +20,24 @@ import { ProfileStore } from '../profile/profile-store';
 
 export type { GenerationOp };
 export type GenerationItem = GenerationDto;
+
+/** Matches the gateway's own default; the server clamps anything larger. */
+export const PAGE_SIZE = 50;
+
+/** Swaps in a fully-signed row, or appends it when the page never held it. */
+function replaceOrAppend(current: GenerationDto[], item: GenerationDto): GenerationDto[] {
+  const at = current.findIndex((held) => held.id === item.id);
+  if (at < 0) return [...current, item];
+  const next = [...current];
+  next[at] = item;
+  return next;
+}
+
+/** Appends what is new, keeping the first copy of anything already held. */
+function merge(current: GenerationDto[], incoming: GenerationDto[]): GenerationDto[] {
+  const seen = new Set(current.map((item) => item.id));
+  return [...current, ...incoming.filter((item) => !seen.has(item.id))];
+}
 
 /** API-backed library. Server assigns prices, media, and ids. */
 @Injectable({ providedIn: 'root' })
@@ -34,31 +55,38 @@ export class GenerationStore {
 
   private readonly itemsSig = signal<GenerationDto[]>([]);
   private readonly loadedSig = signal(false);
+  private readonly cursorSig = signal<string | null>(null);
+  private readonly loadingMoreSig = signal(false);
+  /** Guards against a refresh and a page landing out of order. */
+  private pageEpoch = 0;
 
   /** Newest first. */
   readonly items = this.itemsSig.asReadonly();
   readonly loaded = this.loadedSig.asReadonly();
+  readonly loadingMore = this.loadingMoreSig.asReadonly();
+  readonly hasMore = computed(() => this.cursorSig() !== null);
+
+  constructor() {
+    inject(SessionLifecycle).register('generations', this);
+  }
 
   byId(id: string): GenerationDto | undefined {
     return this.itemsSig().find((item) => item.id === id);
   }
 
-  /** Ancestors (via parentId) + self + descendants, oldest first. */
-  chainFor(id: string): GenerationDto[] {
-    const all = this.itemsSig();
-    const chain: GenerationDto[] = [];
-    let current = this.byId(id);
-    while (current) {
-      chain.unshift(current);
-      current = current.parentId ? this.byId(current.parentId) : undefined;
-    }
-    let frontier = [id];
-    while (frontier.length) {
-      const children = all.filter((i) => i.parentId && frontier.includes(i.parentId));
-      chain.push(...children.filter((c) => !chain.includes(c)));
-      frontier = children.map((c) => c.id);
-    }
-    return chain.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  /**
+   * The version chain for an item, oldest first, from the server.
+   *
+   * This used to be assembled from whatever the client happened to hold. Now
+   * that the library pages, an ancestor can easily be thousands of rows back,
+   * and a chain silently missing its start is worse than no chain at all.
+   */
+  async loadChain(id: string): Promise<GenerationDto[]> {
+    const response = await this.api.get<GenerationsResponse>(
+      `/generations/${id}/versions?limit=${PAGE_SIZE}`,
+    );
+    this.itemsSig.update((list) => merge(list, response.items));
+    return response.items;
   }
 
   async load(): Promise<void> {
@@ -71,15 +99,69 @@ export class GenerationStore {
         this.loadedSig.set(true);
       }
     }
-    const response = await this.api.get<GenerationsResponse>('/generations');
+    const epoch = ++this.pageEpoch;
+    const response = await this.api.get<GenerationsResponse>(
+      `/generations?limit=${PAGE_SIZE}`,
+    );
+    // A refresh started after this one already replaced the list; appending
+    // this page now would interleave two different reads of the library.
+    if (epoch !== this.pageEpoch) return;
     this.itemsSig.set(response.items);
+    this.cursorSig.set(response.nextCursor);
     this.loadedSig.set(true);
     void this.persist();
   }
 
-  /** Snapshot the list so the next app start paints without waiting. */
+  /**
+   * The next page, appended. Older items keep their place: the grid is
+   * newest-first and a page only ever adds to the end of it.
+   */
+  async loadMore(): Promise<void> {
+    const cursor = this.cursorSig();
+    if (!cursor || this.loadingMoreSig()) return;
+    const epoch = this.pageEpoch;
+    this.loadingMoreSig.set(true);
+    try {
+      const response = await this.api.get<GenerationsResponse>(
+        `/generations?limit=${PAGE_SIZE}&cursor=${encodeURIComponent(cursor)}`,
+      );
+      if (epoch !== this.pageEpoch) return;
+      this.itemsSig.update((list) => merge(list, response.items));
+      this.cursorSig.set(response.nextCursor);
+    } finally {
+      this.loadingMoreSig.set(false);
+    }
+  }
+
+  /**
+   * One item by id, from the server if the library has not paged that far.
+   *
+   * A deep link or an edit parent can be thousands of rows old; before the
+   * library paged, `byId` could assume everything was loaded.
+   */
+  async fetchById(id: string): Promise<GenerationDto | undefined> {
+    const known = this.byId(id);
+    // A row from a list page carries a thumbnail, not the original: opening,
+    // editing or downloading it needs the full media signed.
+    if (known?.mediaUrl) return known;
+    try {
+      const response = await this.api.get<GenerationResponse>(`/generations/${id}`);
+      this.itemsSig.update((list) => replaceOrAppend(list, response.item));
+      return response.item;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Snapshot only the first page.
+   *
+   * The cache exists to make the grid appear instantly, not to mirror the
+   * library; a large write here throws QuotaExceeded and takes every other
+   * cached store down with it.
+   */
   private async persist(): Promise<void> {
-    writeCache(`generations.${await currentUid()}`, this.itemsSig());
+    writeCache(`generations.${await currentUid()}`, this.itemsSig().slice(0, PAGE_SIZE));
   }
 
   /** Charges on the server, prepends the created items, updates the balance. */
@@ -119,6 +201,40 @@ export class GenerationStore {
     // Accepted: the key has done its job. Deliberately submitting the same
     // prompt again is a NEW piece of work and must not replay this one.
     this.submissionKeys.delete(fingerprint);
+    this.itemsSig.update((list) => [...response.items, ...list]);
+    this.ledger.setCredits(response.credits);
+    void this.persist();
+    return response.items;
+  }
+
+  /**
+   * The server rebuilds the request from its snapshot; the client no longer
+   * guesses at fields it never had.
+   *
+   * The old client-side retry sent family, op, prompt, settings and parent —
+   * so an edit lost its mask, a video lost its references, and a persona run
+   * sent the pseudo-family 'persona' and was rejected outright.
+   */
+  async retry(id: string): Promise<GenerationDto[]> {
+    return await this.rerun(`/generations/${id}/retry`);
+  }
+
+  /** Another take on the same prompt, hung off the original as its parent. */
+  async variation(id: string): Promise<GenerationDto[]> {
+    return await this.rerun(`/generations/${id}/variation`);
+  }
+
+  /** What the UI should enable for this item, and why not when it should not. */
+  async retryable(id: string): Promise<RetryableDto> {
+    return await this.api.get<RetryableDto>(`/generations/${id}/retryable`);
+  }
+
+  private async rerun(path: string): Promise<GenerationDto[]> {
+    const response = await this.api.post<CreateGenerationResponse>(
+      path,
+      {},
+      { idempotencyKey: crypto.randomUUID() },
+    );
     this.itemsSig.update((list) => [...response.items, ...list]);
     this.ledger.setCredits(response.credits);
     void this.persist();
@@ -224,5 +340,9 @@ export class GenerationStore {
   reset(): void {
     this.itemsSig.set([]);
     this.loadedSig.set(false);
+    this.cursorSig.set(null);
+    this.loadingMoreSig.set(false);
+    // A page still in flight belongs to the account that just left.
+    this.pageEpoch += 1;
   }
 }

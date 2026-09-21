@@ -1,0 +1,49 @@
+<main class="auth-shell">
+  <div class="auth-card">
+    <a routerLink="/" class="site-brand">Vansen</a>
+    <h1>Reset your password</h1>
+
+    @if (sent()) {
+      <p class="auth-sub" role="status" aria-live="polite">
+        If an account exists for that address, a reset link is on its way. The link
+        works once and expires shortly.
+      </p>
+      <div class="auth-actions">
+        <button hlmBtn variant="outline" type="button" class="w-full" (click)="again()">
+          Send it again
+        </button>
+        <a routerLink="/login" class="linkish">Back to sign in</a>
+      </div>
+    } @else {
+      <p class="auth-sub">
+        Enter your email and we'll send a link to set a new one.
+      </p>
+
+      <form (submit)="$event.preventDefault(); submit()" class="space-y-4">
+        <div class="space-y-2">
+          <label hlmLabel for="recover-email">Email</label>
+          <input
+            id="recover-email"
+            hlmInput
+            type="email"
+            autocomplete="email"
+            class="w-full"
+            placeholder="you@example.com"
+            [value]="email()"
+            (input)="email.set($any($event.target).value)"
+          />
+        </div>
+
+        <p class="auth-live" role="status" aria-live="polite">{{ error() }}</p>
+
+        <button hlmBtn type="submit" class="w-full" [disabled]="pending()">
+          {{ pending() ? 'One moment…' : 'Send reset link' }}
+        </button>
+      </form>
+
+      <p class="muted mt-6 text-center text-sm">
+        <a routerLink="/login" class="linkish">Back to sign in</a>
+      </p>
+    }
+  </div>
+</main>

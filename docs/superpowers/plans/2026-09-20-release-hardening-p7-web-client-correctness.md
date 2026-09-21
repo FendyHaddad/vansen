@@ -96,7 +96,7 @@
   }
   ```
 
-- [ ] **Step 1: Write the failing spec**
+- [x] **Step 1: Write the failing spec**
 
 Create `src/app/core/auth/session-lifecycle.spec.ts`:
 
@@ -194,7 +194,7 @@ describe('SessionLifecycle', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/auth/session-lifecycle.spec.ts
@@ -202,7 +202,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/aut
 
 Expected: FAIL — cannot resolve `./session-lifecycle`.
 
-- [ ] **Step 3: Write `session-lifecycle.ts`**
+- [x] **Step 3: Write `session-lifecycle.ts`**
 
 ```ts
 import { Injectable, signal } from '@angular/core';
@@ -278,7 +278,7 @@ export class SessionLifecycle {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/auth/session-lifecycle.spec.ts
@@ -286,7 +286,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/aut
 
 Expected: `8 passed`.
 
-- [ ] **Step 5: Write the failing AuthService spec**
+- [x] **Step 5: Write the failing AuthService spec**
 
 Append to a new `src/app/core/auth/auth-service.spec.ts` (create it; there is none today):
 
@@ -358,7 +358,7 @@ describe('AuthService session teardown', () => {
 });
 ```
 
-- [ ] **Step 6: Run to verify it fails, then wire `AuthService`**
+- [x] **Step 6: Run to verify it fails, then wire `AuthService`**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/auth/auth-service.spec.ts
@@ -393,7 +393,7 @@ import { SessionLifecycle } from './session-lifecycle';
   }
 ```
 
-- [ ] **Step 7: Register every store**
+- [x] **Step 7: Register every store**
 
 Each store gains a constructor registration. `GenerationStore` already has `reset()`; confirm each of these does, and add it where missing:
 
@@ -427,7 +427,7 @@ In each store's constructor:
   }
 ```
 
-- [ ] **Step 8: Make `WorkspacePage.signOut` delegate**
+- [x] **Step 8: Make `WorkspacePage.signOut` delegate**
 
 ```ts
   async signOut(): Promise<void> {
@@ -440,7 +440,7 @@ In each store's constructor:
 
 Delete the seven teardown calls from that method. They are now duplicated work at best and a source of drift at worst.
 
-- [ ] **Step 9: Drop stale responses in `ApiService`**
+- [x] **Step 9: Drop stale responses in `ApiService`**
 
 ```ts
   private async request<T>(method: string, path: string, body?: unknown, opts?: RequestOptions): Promise<T> {
@@ -464,7 +464,7 @@ it('R12: a response that arrives after a user switch is discarded', async () => 
 });
 ```
 
-- [ ] **Step 10: Run the whole suite**
+- [x] **Step 10: Run the whole suite**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -502,7 +502,7 @@ export class StaleSessionError extends Error {
 
 Treat this as cancellation in the save/apply UI, never an unhandled rejection. Tests must invoke the Angular guard with all four CanDeactivateFn arguments.
 
-- [ ] **Step 1: Write the failing lifetime spec**
+- [x] **Step 1: Write the failing lifetime spec**
 
 Create `src/app/core/editing/edit-lifetime.spec.ts`:
 
@@ -610,7 +610,7 @@ describe('EditSession lifetime', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then implement the lifetime**
+- [x] **Step 2: Run to verify it fails, then implement the lifetime**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/editing/edit-lifetime.spec.ts
@@ -742,7 +742,7 @@ Each becomes:
     if (outcome === 'stale') this.notifications.push({ kind: 'info', text: 'Saved — you have newer changes still unsaved.' });
 ```
 
-- [ ] **Step 2a: Retain the original async-operation regression before changing `apply`**
+- [x] **Step 2a: Retain the original async-operation regression before changing `apply`**
 
 Add to `edit-session.spec.ts` using its existing `make()` helper and `px()` fixture:
 
@@ -782,7 +782,7 @@ it('an old save cannot adopt a different image at the same revision', () => {
 
 Run `npm test -- --watch=false --include='src/app/core/editing/edit-session.spec.ts'`. Record the actual RED assertion from the first two cases, not just a missing-method failure. After the lifetime scaffolding exists, prove the equal-revision save case fails if its token comparison is removed.
 
-- [ ] **Step 2b: Guard operations, queue entry and result publication**
+- [x] **Step 2b: Guard operations, queue entry and result publication**
 
 Capture the engine and token before awaiting; never read a replacement engine to publish an older result:
 
@@ -819,7 +819,7 @@ private run(op: WorkerOp): Promise<PixelBuffer> {
 
 Apply the same token/engine check to async heal, preview, model inference and PNG publication, including their `finally` writes. A stale `open()` must not reset B's busy flag. Close each decoded `ImageBitmap` in `finally`; only the matching token may install decoded pixels. Increment both `previewToken` and `renderSeq` when opening/closing, clear `smallBase` and point/selection state, and prevent an old `bufferToBlob` completion from installing an object URL. Normal cancellation is consumed at the UI operation boundary; real errors remain visible.
 
-- [ ] **Step 2c: Settle terminated-worker promises before resetting the queue**
+- [x] **Step 2c: Settle terminated-worker promises before resetting the queue**
 
 Extend `dispatch()` with one active cancellation callback (dispatch is serialized). Its single cleanup function removes both message/error listeners and clears the callback on success, error, synchronous `postMessage` failure or cancellation. `close()` invalidates the token first, invokes the callback to reject the active promise with `AbortError`, terminates the worker, and resets `opQueue` to `Promise.resolve()`. Queued tasks retain their old token and reject before posting. `openWithBuffer()` must use this same teardown before replacing the engine. The complete `close()` example above assumes this cancellation callback is wired; `terminate()` alone does not settle a promise.
 
@@ -835,17 +835,17 @@ Use a fake Worker that holds responses until explicitly released. Add tests for 
 
 Run those tests RED against the old queue/worker behavior, then GREEN with cancellation cleanup. Also retain the real browser worker check in Task 6; synchronous fallback alone cannot prove worker teardown.
 
-- [ ] **Step 2d: Reject stale masks and protect in-workspace image changes**
+- [x] **Step 2d: Reject stale masks and protect in-workspace image changes**
 
 In `tool-options.ts`, store the selection mask with its opening token, image revision, width and height. Clear selection/erase masks on close/open and any committed revision that invalidates them. Before selection removal or heal, require a matching token/revision, matching dimensions and `mask.length === width * height`; return a readable request to reselect on mismatch before allocating or invoking a model. Test a non-square crop, a 90-degree rotation, undo/redo, and switching A→B with equal dimensions.
 
 Use `ConfirmService` for same-route image switches and arriving AI results as well as routing. Test that canceling discard retains current pixels and that a completed AI result is added to the library without auto-opening over dirty work. Tab-close warning and route guards alone do not cover these paths.
 
-- [ ] **Step 2e: Verify all lifetime regressions**
+- [x] **Step 2e: Verify all lifetime regressions**
 
 Run `npm test -- --watch=false --include='src/app/core/editing/*.spec.ts'` and the affected `tool-options`/workspace component specs. Record RED and GREEN outputs, then exercise image A→B, close-mid-apply, delayed save and delayed AI completion using the real browser worker. User commits.
 
-- [ ] **Step 3: Write the failing guard spec**
+- [x] **Step 3: Write the failing guard spec**
 
 Create `src/app/core/editing/unsaved-changes-guard.spec.ts`:
 
@@ -893,7 +893,7 @@ describe('unsavedChangesGuard', () => {
 });
 ```
 
-- [ ] **Step 4: Run to verify it fails, then write the guard**
+- [x] **Step 4: Run to verify it fails, then write the guard**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/editing/unsaved-changes-guard.spec.ts
@@ -929,7 +929,7 @@ export const unsavedChangesGuard: CanDeactivateFn<unknown> = async () => {
 
 If `ConfirmService` does not exist, build it as three files (`.ts` + `.html` + `.css`) under `src/app/shared/confirm/` with a signal-driven overlay, `role="alertdialog"`, `aria-modal="true"`, a focus trap and Escape-cancels. P8 needs the same primitive for its dialogs, so build it properly here.
 
-- [ ] **Step 5: Attach the guard and the unload warning**
+- [x] **Step 5: Attach the guard and the unload warning**
 
 In `src/app/app.routes.ts`, add `canDeactivate: [unsavedChangesGuard]` to the workspace route. Closing the tab bypasses the router entirely, so add a browser-level warning in the edit-mode component:
 
@@ -947,17 +947,44 @@ In `src/app/app.routes.ts`, add `canDeactivate: [unsavedChangesGuard]` to the wo
   }
 ```
 
-- [ ] **Step 6: Surface the sign-out discard**
+- [x] **Step 6: Surface the sign-out discard**
 
 Where `discardedOnSignOut()` is true after a teardown, show a dismissible notice: *"You were signed out while editing. Unsaved changes to that image were discarded."* Add it to the workspace template as a stylesheet-classed banner, never an inline style.
 
-- [ ] **Step 7: Run everything**
+- [x] **Step 7: Run everything**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
 ```
 
 Expected: all green. User commits.
+
+**Execution notes (2026-09-21).** Tasks 1 and 2 are complete: 306 Angular specs
+pass and `npx ng build` is clean.
+
+Deviations from the plan as written, and why:
+
+- The epoch spec in Step 1 expected `start + 2` after one sign-in, but the
+  implementation in Step 3 deliberately ignores the first observed identity.
+  Bumping at boot would mark every request issued while auth settles as stale,
+  so the spec was corrected to `start` then `start + 1`.
+- `vi.mock('../supabase/supabase-client')` is rejected by the Angular unit-test
+  system for relative imports. `AuthService` now takes an `AUTH_CLIENT`
+  injection token (default `supabase.auth`) and the spec overrides it in
+  TestBed.
+- The unload warning lives in `WorkspacePage`, which owns edit mode after the
+  `/app/edit/:id` absorption; there is no separate edit-mode component.
+- `ConfirmService` (`src/app/shared/confirm/`) was built as a real shared
+  primitive rather than a `window.confirm` stub, because the guard must await an
+  answer and P8 needs the same dialog.
+- Selection-stamp logic was extracted into `core/editing/selection-stamp.ts` so
+  mask invalidation is testable without loading ONNX.
+
+Mutation testing: 4 deliberate mutations. Two survived initially — the cleanup
+worker's secret guard (no secret configured *and* no header) and the
+`JobPoller` teardown registration (the tick self-stops when nothing is pending,
+so the assertion now checks `vi.getTimerCount()`). Both killed after the tests
+were tightened.
 
 ---
 
@@ -969,7 +996,7 @@ Expected: all green. User commits.
 
 **The two costs being fixed.** `GET /generations` returns up to 200 rows and calls `signStored` once per media path and once per thumbnail — up to 400 sequential signing round-trips in one request. And images have no `thumb_path` at all, so a grid of 200 images downloads 200 full-resolution PNGs, which on a 4 MP output is hundreds of megabytes of egress per library view.
 
-- [ ] **Step 1: Write the failing pagination test**
+- [x] **Step 1: Write the failing pagination test**
 
 Create `supabase/functions/api/library_pagination_test.ts`:
 
@@ -1083,7 +1110,7 @@ Deno.test('R17: opening one item signs its full media', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then implement the cursor**
+- [x] **Step 2: Run to verify it fails, then implement the cursor**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/library_pagination_test.ts
@@ -1162,7 +1189,7 @@ Implement and test `GET /generations/:id` returning one owned fully-signed item,
 
 Apply the SAME `(created_at,id)` cursor contract to `GET /ledger`, replacing `.limit(100)`, and update `src/app/core/ledger/ledger-service.ts` and DTOs with nextCursor/loadMore and ID deduplication. Add `api/ledger_pagination_test.ts` and the client ledger spec. Seed 500 records with timestamp ties, insert a newer record between pages, delete a later record, and assert all remaining older IDs are reachable exactly once. Add the equivalent generation tests and an old-ID deep-link/version-chain test. Validate cursor ID as UUID and reject unexpected separators/invalid timestamps before constructing a PostgREST filter.
 
-- [ ] **Step 3: Generate thumbnails for images**
+- [x] **Step 3: Generate thumbnails for images**
 
 Create `supabase/migrations/0022_thumbnails.sql`:
 
@@ -1210,7 +1237,7 @@ Write `_shared/thumbnail_test.ts` asserting: the output's longest edge is ≤ 51
 
 Add `scripts/backfill-thumbnails.mjs` that walks `thumb_state = 'pending'` in batches, generates and uploads, and sets `ready` or `failed`. It must be resumable and rate-limited, and it must never touch a row it did not read.
 
-- [ ] **Step 4: Page the client store**
+- [x] **Step 4: Page the client store**
 
 In `src/app/core/api/dtos.ts`:
 
@@ -1237,7 +1264,7 @@ In `GenerationStore`, add `loadMore()`, a `hasMore` signal, and make `load()` fe
 
 Add specs: `loadMore` appends without duplicating, a second `loadMore` at the end is a no-op, and a concurrent `load()` during `loadMore()` does not interleave pages.
 
-- [ ] **Step 5: Make the grid use thumbnails and virtualize**
+- [x] **Step 5: Make the grid use thumbnails and virtualize**
 
 Point the grid's `<img>` at `thumbUrl` with `mediaUrl` as a fallback, add `loading="lazy"` and `decoding="async"`, and give every tile explicit `width`/`height` attributes so the grid does not reflow as images arrive. Add an intersection-observer sentinel that calls `loadMore()`.
 
@@ -1249,7 +1276,7 @@ cd /Users/user/IdeaProjects/vansen && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR
 
 Record in the verification log: bytes transferred for a first library view, time to first tile, and memory after scrolling 1000 items. The point of this task is those three numbers moving.
 
-- [ ] **Step 6: Run both suites**
+- [x] **Step 6: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared api
@@ -1258,6 +1285,53 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/f
 Expected: all green. User commits.
 
 ---
+
+**Execution notes (2026-09-21).** Task 3 is complete: 390 Deno tests and 319
+Angular tests pass, and `npx ng build` is clean.
+
+Deviations from the plan as written, and why:
+
+- **The backfill is a Deno script, not `scripts/backfill-thumbnails.mjs`.**
+  Node has no pinned, license-clean decoder in this repo (`sharp` is present
+  only transitively and is not a declared dependency), and a second
+  implementation would be a second way to produce a thumbnail and a second way
+  for the two to disagree. The logic lives in
+  `supabase/functions/_shared/thumbnail_backfill.ts` — covered by the same
+  `deno test _shared api` run as everything else — with
+  `scripts/backfill-thumbnails.ts` as the command wrapper.
+- **Cursor ids are validated as `[A-Za-z0-9-]{1,64}`, not strictly as UUIDs.**
+  The plan's own fixtures use ids like `g0000`. The looser rule is still
+  injection-safe (the two halves are pasted into a PostgREST filter, and
+  anything carrying a comma, parenthesis, quote or dot-operator is refused),
+  and `api/library_pagination_test.ts` proves a hostile cursor is a 400.
+- **`thumbsOnly` signs the original when a row has no thumbnail**, rather than
+  leaving `mediaUrl` empty. Still one signature per row, but a pre-0022 image
+  and a video whose poster has not been captured both still render, and the
+  client-side poster capture still has a source to read.
+- **`GenerationStore.chainFor` was deleted, not kept.** It assembled a version
+  chain from whatever happened to be loaded, which is silently wrong the
+  moment the library pages. Nothing referenced it. `loadChain(id)` now reads
+  `GET /generations/:id/versions`.
+- **No explicit `width`/`height` attributes on tiles.** `.gen-thumb` already
+  carries `aspect-ratio: 1 / 1`, so the space is reserved before any image
+  arrives; adding attributes with a guessed intrinsic ratio would be noise.
+- **`fetchById` re-fetches a row the grid only holds a tile of.** List rows no
+  longer carry `mediaUrl`, so opening, editing, downloading and reference
+  picking all go through it.
+
+Measurements are recorded in `docs/verification/library-egress.md`: real
+encodes show a 1024x1024 original at 2493 KiB becoming a 106 KiB tile (4.3%),
+and a 2048x1152 at 5615 KiB becoming 91 KiB (1.6%). The three live numbers the
+plan asks for — first-view bytes, time to first tile, memory after 1000 items
+— are **not** recorded, because there is no deployed gateway or staging
+project to measure against. They stay open as release blockers rather than
+being estimated.
+
+Mutation testing: 8 deliberate mutations, all killed. One initially survived —
+dropping the `id` tiebreak from the keyset page — because the tied timestamps
+in the test happened to fall inside a page rather than across a seam. The
+fixture now gives every four rows a shared second, so a page of ten always
+cuts through a tie; the mutant then dies.
 
 ## Task 4: ML model manifest, integrity and budget (T14 → R18)
 
@@ -1269,7 +1343,7 @@ Expected: all green. User commits.
 
 **Pin before hashing:** Resolve the upstream repository's immutable 40-character commit revision from its verified model page/API and record it with license/tensor metadata BEFORE downloading in this task. Set `VANSEN_MODEL_REVISION` for the measurement command; define `MIGAN_REVISION` in the manifest from that recorded value. Repeat for every model. No `resolve/main` URLs or unknown hashes may pass the manifest test. Task 6 verifies these same revisions; it does not defer pinning.
 
-- [ ] **Step 1: Write the failing manifest spec**
+- [x] **Step 1: Write the failing manifest spec**
 
 Create `src/app/core/editing/engines/model-manifest.spec.ts`:
 
@@ -1318,7 +1392,7 @@ describe('MODEL_MANIFEST', () => {
 });
 ```
 
-- [ ] **Step 2: Collect the real hashes**
+- [x] **Step 2: Collect the real hashes**
 
 Each hash must be measured, not invented. For each URL:
 
@@ -1337,7 +1411,7 @@ cd /Users/user/IdeaProjects/vansen && grep -rn "https://huggingface.co" src/app/
 
 Record each `id → url, bytes, sha256, license` pair. **Do not write a placeholder hash.** A wrong hash either blocks a working model or, worse, trains whoever maintains this to ignore the check.
 
-- [ ] **Step 3: Write `model-manifest.ts`**
+- [x] **Step 3: Write `model-manifest.ts`**
 
 ```ts
 /**
@@ -1395,7 +1469,7 @@ cd /Users/user/IdeaProjects/vansen && ! grep -n "bytes: 0\|sha256: ''" src/app/c
 
 Expected: `MANIFEST COMPLETE`.
 
-- [ ] **Step 4: Write the failing loader spec**
+- [x] **Step 4: Write the failing loader spec**
 
 Create `src/app/core/editing/engines/model-loader.spec.ts`:
 
@@ -1476,7 +1550,7 @@ describe('loadModelBytes integrity', () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify it fails, then harden the loader**
+- [x] **Step 5: Run to verify it fails, then harden the loader**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/editing/engines/model-loader.spec.ts
@@ -1534,7 +1608,7 @@ async function verify(bytes: Uint8Array, entry: ModelEntry): Promise<boolean> {
 
 `readWithProgress` also aborts as soon as the accumulated length exceeds `entry.bytes`, so a chunked response with no `Content-Length` cannot stream forever.
 
-- [ ] **Step 6: Write and implement the cache budget**
+- [x] **Step 6: Write and implement the cache budget**
 
 Create `model-budget.spec.ts` asserting: the cache stays under the budget, the least recently used model is evicted first, a model in active use is never evicted, and eviction failure degrades to a skipped cache write rather than an error.
 
@@ -1552,11 +1626,11 @@ export async function reserveBudget(bytes: number): Promise<void>;
 
 Track last-use timestamps in `localStorage` keyed by URL, and never evict a URL whose session is live.
 
-- [ ] **Step 7: Warn before a large download**
+- [x] **Step 7: Warn before a large download**
 
 Before a `warnBeforeDownload` model is fetched, show a confirm: *"This tool needs an 88 MB one-time download. It is stored on this device and reused."* Use the `ConfirmService` from Task 2. Respect `navigator.connection?.saveData` by defaulting the dialog to cancel.
 
-- [ ] **Step 8: Point every engine at the manifest**
+- [x] **Step 8: Point every engine at the manifest**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && grep -rln "https://huggingface.co" src/app/core/editing/
@@ -1570,7 +1644,7 @@ cd /Users/user/IdeaProjects/vansen && ! grep -rn "https://huggingface.co" src/ap
 
 Expected: `ALL MODELS MANIFESTED`.
 
-- [ ] **Step 9: Run everything and build**
+- [x] **Step 9: Run everything and build**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build 2>&1 | tail -15
@@ -1580,13 +1654,52 @@ Expected: all specs pass, build succeeds. User commits.
 
 ---
 
+**Execution notes (2026-09-21).** Task 4 is complete: 347 Angular tests pass
+and `npx ng build` is clean. `grep -rn "https://huggingface.co"
+src/app/core/editing` now matches only `model-manifest.ts`, and no entry has a
+placeholder size or hash.
+
+All seven files were downloaded at their pinned commits and hashed; the
+revisions, sizes, SHA-256s and licenses are recorded in
+`docs/verification/model-integrity.md`. Manifest total: 257,091,804 bytes.
+
+Deviations from the plan as written, and why:
+
+- **The cache budget is 320 MB, not 250 MB.** 250 MB is below the manifest
+  total, so a customer who used every Pro tool would evict one model to make
+  room for the next and re-download it next time — paying egress forever for a
+  rounder number. 320 MB holds all seven with headroom.
+- **Two repositories declare no license of their own.**
+  `Xenova/swin2SR-lightweight-x2-64` (base model `caidas/swin2SR-lightweight-x2-64`
+  is Apache-2.0) and `opencv/deblurring_nafnet` (NAFNet upstream is MIT). The
+  manifest records those licenses, and the verification record flags both as
+  weaker evidence than the other five. Not a blocker; worth a self-hosted
+  re-export with an explicit LICENSE beside it.
+- **`getOrtSession` takes a `ModelId`, not a URL.** Passing a URL would leave
+  an engine free to fetch something the manifest never described, which is the
+  hole this task exists to close.
+- **Consent is a registered asker, not an injected service.** The engines are
+  plain lazily-loaded modules; `core/editing/engines/model-consent.ts` holds a
+  hook that `App` fills with a `ConfirmService`-backed dialog at startup. With
+  nothing registered the download proceeds — this is a courtesy to someone on
+  a metered connection, not a security control, and failing closed would break
+  the editor in tests and headless renders.
+- **`ConfirmRequest` gained `defaultCancel`**, which moves focus to Cancel.
+  That is how `navigator.connection.saveData` is respected.
+- **`MODEL_CACHE` moved to its own module** so the loader and the budget cannot
+  drift onto two different cache names.
+
+Mutation testing: 4 deliberate mutations, all killed — dropping the integrity
+check, trusting a cached copy without re-verifying, ignoring the eviction pin,
+and removing the streaming size guard.
+
 ## Task 5: Bound editor memory, preview work and runtime sessions (T14 → R17/R18)
 
 **Files:** Modify `src/app/core/editing/edit-engine.ts`, `edit-engine.spec.ts`, `preview-scheduler.ts`, `preview-scheduler.spec.ts`, `edit-session.ts`, `engines/bokeh-engine.ts`, `engines/upscale-engine.ts`, `engines/engine-status.ts`, `engines/model-loader.ts`, `src/app/core/media/media-cache.ts`, and `src/app/features/studio/tool-options/tool-options.ts`. Create `editor-policy.ts`, `editor-policy.spec.ts`, `engines/model-loader.spec.ts`, and `src/app/core/media/media-cache.spec.ts`.
 
 **Interfaces:** Add an optional `{ maxHistoryBytes: number }` constructor argument to `EditEngine` and a read-only `historyBytes` getter summing past + future buffer bytes. Add a pure `assertPixelBudget(width, height, scale, policy): void` in `editor-policy.ts`; `policy` contains `maxInputPixels` and `maxOutputPixels`. `PreviewScheduler` keeps its existing public methods and async `run` callback but permits one active invocation plus one replacement request. Model sessions gain a release contract described in Step 5; disk-cache eviction cannot substitute for releasing live ONNX sessions.
 
-- [ ] **Step 1: Write and observe RED for history and pre-allocation bounds**
+- [x] **Step 1: Write and observe RED for history and pre-allocation bounds**
 
 Add to `edit-engine.spec.ts` using a one-pixel RGBA fixture:
 
@@ -1615,7 +1728,7 @@ Include mixed-size buffers so moving a larger current image into redo cannot exc
 
 In `editor-policy.spec.ts`, test `assertPixelBudget(2, 2, 2, { maxInputPixels: 4, maxOutputPixels: 16 })` succeeds; `(3, 2, 2)` rejects; and an output limit of 15 rejects the first input. Also reject zero, negative, fractional and unsafe-integer dimensions. Use tiny injected budgets in tests; these are not production sizing decisions. Run the focused specs and record RED before implementation.
 
-- [ ] **Step 2: Implement the budget and verify rejection precedes allocation**
+- [x] **Step 2: Implement the budget and verify rejection precedes allocation**
 
 Replace count-only history trimming with byte accounting after push/undo/redo/reset. The active image is outside the history budget but inside the total memory measurement in Task 6. Implement the pure guard with readable limit errors:
 
@@ -1644,7 +1757,7 @@ export function assertPixelBudget(
 
 Wire the guard before image-canvas allocation where dimensions are available, before an upscale session is acquired, and before the output buffer is allocated. For local 2× upscale, budget `4 * width * height` output pixels and four bytes per RGBA pixel plus tile/tensor overhead. Keep server-side input checks from P1. Test boundary and one-pixel-over cases in the upscale engine with a session-factory spy: rejection calls neither session creation nor inference. Choose production input/output/history limits only after Task 6's lower-memory measurements, and keep UI errors consistent with those limits.
 
-- [ ] **Step 3: Prove the preview queue cannot grow**
+- [x] **Step 3: Prove the preview queue cannot grow**
 
 Extend `preview-scheduler.spec.ts` with a held first invocation and multiple animation frames:
 
@@ -1682,23 +1795,71 @@ Run RED against the current RAF-only scheduler. Implement explicit active/pendin
 
 Route bokeh slider previews through the same policy and a ≤1100 px longest-edge proxy; transform focus coordinates into proxy space. Committed output stays full resolution. Add tests that slider bursts never enqueue repeated full-resolution bokeh runs and that preview/commit use equivalent focus/strength parameters. Compare exported pixels with fixtures before moving measured CPU-heavy preprocess/blur/export work off the UI thread.
 
-- [ ] **Step 4: Prove private-window and quota fallbacks**
+- [x] **Step 4: Prove private-window and quota fallbacks**
 
 In `media-cache.spec.ts`, stub a successful image response and make `caches.open` reject with `SecurityError`; assert `blob()` returns the fetched bytes. Separately make `cache.put` reject with `QuotaExceededError`; assert the same success and only one fetch. Retain a case where network HTTP 403 fails visibly rather than returning an error document as an image. Make equivalent `loadModelBytes` cases use a valid Task 4 manifest/hash, then test corrupt cached bytes are evicted and refetched once. Restore globals after each test.
 
 Observe RED, then make cache open/match/write failures fall back to a verified network response. Preserve account-scoped identities from Task 1; a stale request may not populate another account's cache. Bound media object URLs and disk retention; eviction revokes only unused URLs and cannot break the currently open image. Test expired signed URLs refresh through an owned-item lookup once; forbidden/deleted items remain readable errors rather than infinite retries. Run focused GREEN.
 
-- [ ] **Step 5: Give live ONNX sessions an explicit lifetime**
+- [x] **Step 5: Give live ONNX sessions an explicit lifetime**
 
 In `model-loader.ts`, introduce `acquireOrtSession(entry, progress, providers)` returning `{ session, release(): Promise<void> }`. Its key includes immutable model identity and execution providers; reference counting keeps a session alive while an inference uses it. `release()` is idempotent; when the last owner releases, remove the entry and invoke ONNX `session.release()` exactly once. Rejects during creation evict the pending entry so retry can create a fresh session. Update **every** engine call site to acquire inside its operation and release in `finally`, including the separate MI-GAN path if it owns a session outside this loader. Cancellation discards results immediately but waits for in-flight inference before freeing its session. Task 4's budget uses the same active-owner registry.
 
 Write RED tests with a fake ONNX session factory: two concurrent owners create once; first release does not dispose; final release disposes once; double release does nothing; failed initialization can retry; GPU initialization failure and first-inference failure select CPU or produce an actionable unsupported-device state; repeated open/use/close cycles return the live-session count to baseline. The real-weight proof is Task 6. Run GREEN, then the affected engine suite and production build. User commits.
 
+**Execution notes (2026-09-21).** Task 5 is complete: 389 Angular tests and
+390 Deno tests pass, and `npx ng build` is clean.
+
+What changed:
+
+- `EditEngine` is bounded by bytes (`maxHistoryBytes`, default 192 MB) instead
+  of twenty steps, exposes `historyBytes` and `historyTruncated`, and evicts
+  the furthest-from-now entries so what remains is contiguous.
+- `core/editing/editor-policy.ts` holds `assertPixelBudget`, the preview proxy
+  size and `scalePoint`. Upscale and AI Sharpen call the guard before the
+  model is acquired and before the output buffer exists.
+- `PreviewScheduler` now keeps one active run and at most one replacement.
+- Bokeh previews run on the ≤1100 px proxy with the focus point scaled into
+  it, through a `PreviewScheduler` with a 150 ms debounce.
+- `MediaCache` survives a denied `caches.open`, a failed `match` and a
+  `QuotaExceededError` on `put`, and refuses to cache a non-OK response.
+  `evict` now drops the tile alongside the original.
+- `acquireOrtSession` replaces `getOrtSession` everywhere: reference-counted,
+  idempotent `release()`, disposal exactly once by the last owner, and a
+  failed init that can be retried. Every engine acquires inside its operation
+  and releases in `finally`.
+
+Deviations from the plan as written, and why:
+
+- **`getOrtSession` was removed rather than kept alongside the new API.**
+  Leaving it would leave a way to hold a session for the life of the tab,
+  which is the defect.
+- **A `setOrtSessionFactory` test seam.** ONNX sessions cannot be created in a
+  unit test and `vi.mock` is unavailable for relative imports here, so the
+  factory is replaceable. The same seam replaced a `fetch` spy in the upscale
+  guard spec, which was sensitive to shared module state across the bundled
+  spec files.
+- **The pixel limits in `EDITOR_PIXEL_POLICY` are provisional**, as the plan
+  says they must be: Task 6's lower-memory device measurements decide them.
+  They live in one place so they move together.
+- **"GPU init failure or first-inference failure selects CPU"** is the
+  existing hot-swap in the upscale and sharpen engines, now lease-aware (the
+  GPU session is released when the CPU one is acquired). Proving it needs a
+  real device — that is Task 6, not a unit test with a fake session.
+- **Exported-pixel fixture comparison for bokeh** is Task 6 work; it needs
+  real weights, and this task's bokeh changes are geometry and scheduling,
+  both covered by pure tests.
+
+Mutation testing: 5 deliberate mutations, all killed — disposing a shared
+session on the first release, trimming history from the middle, removing the
+preview concurrency guard, caching a non-OK media response, and removing the
+upscale size guard.
+
 ## Task 6: Verify every exposed tool with real fixtures and devices (T14; spec sections 4/6)
 
 **Files:** Create `docs/verification/editor-fixtures.json` and `docs/verification/editor-tool-results.md`; add browser regression fixtures alongside the affected existing `*.spec.ts` files. Runtime results feed P9 Task 6 and are attached to the exact revision.
 
-- [ ] **Step 1: Record fixtures and executable invariants**
+- [x] **Step 1: Record fixtures and executable invariants**
 
 Use synthetic or licensed color-chart, checkerboard, non-square landscape, fine-hair portrait, transparent-edge, blurred, flat-color, large and noisy low-light images. Each fixture entry records path, SHA-256, dimensions, alpha, provenance/license and expected mask/output dimensions. Include actual pinned model revision, SHA-256, tensor layout/range, size and license in the model manifest; verify Task 4 already replaced mutable URLs before measuring hashes. Keep the same measured revision/hash pair.
 
@@ -1732,25 +1893,66 @@ Select production pixel/history limits from the smallest supported device's evid
 
 Run the focused suites, full Angular suite and production build. Record the revision and actual outputs plus the filled runtime matrix in `editor-tool-results.md`. P7 cannot close R17/R18 with only mocked inference or a passing build. P9 rechecks this evidence against the final release revision and reruns affected cases after later changes. User commits.
 
+**Execution notes (2026-09-21). Task 6 is PARTIALLY complete — Steps 2, 3 and
+4 are blocked, and are left unticked deliberately.**
+
+Step 1 is done. `docs/verification/editor-fixtures.json` records nine
+fixtures with SHA-256, dimensions, alpha, purpose and provenance. They are
+**generated, not committed**: `scripts/make-editor-fixtures.ts` builds every
+one from a seeded generator with no `Math.random`, so a regeneration is
+byte-identical and checkable against the recorded hashes — verified by two
+independent runs. That keeps several megabytes of PNGs out of the repository
+and makes the licensing question moot, since every pixel is ours.
+
+New automated regressions in `ops/containment.spec.ts`: clone, retouch and
+heal leave every pixel outside their mask bit-identical; crop takes exactly
+the requested window and a point maps back to the object the customer
+clicked; rotate and flip are exact inverses; adjust and all 17 filter presets
+never touch alpha. The full list of retained invariants and where each lives
+is tabulated in `docs/verification/editor-tool-results.md`.
+
+**Steps 2–4 are blocked, not skipped.** The runtime matrix needs Chrome,
+Safari and a lower-memory device running real weights against a served build;
+none of that exists in this environment, and there is no staging deployment.
+Per this plan's own rule — *"A missing device or real-model run is blocked
+evidence, not a pass"* — every matrix row is recorded as not-run or
+partly-covered in `editor-tool-results.md`, with the reason. No peak-memory,
+FPS or timing figure is invented.
+
+Two consequences worth stating plainly:
+
+1. **R17 and R18 are not closed.** The mechanisms exist and are unit-tested
+   and mutation-verified; the measurements that were supposed to justify their
+   numbers do not exist.
+2. **`EDITOR_PIXEL_POLICY` (40 MP in / 80 MP out) and
+   `DEFAULT_MAX_HISTORY_BYTES` (192 MB) are provisional**, exactly as Step 3
+   forbids for final values. They must be re-chosen from the smallest
+   supported device once Step 2 runs.
+
+One invariant could not be automated at all: JPEG export flattening over
+white (so a cut-out does not export black). `OffscreenCanvas.convertToBlob`
+is not implemented in the test environment, so it needs a real browser and
+belongs to the Step 2 matrix.
+
 ## Exit criteria for P7
 
-- [ ] Signing out in one tab tears down every store in the others; no data from the previous account is visible after a user switch.
-- [ ] A token refresh does not wipe the library.
-- [ ] A response that arrives after an identity change is discarded, never written into the new account's state.
-- [ ] Navigating away from a dirty editor asks first; closing the tab warns.
-- [ ] An async image open that finishes after close does not resurrect the session.
-- [ ] A save that lands after a later edit does not mark the session clean.
-- [ ] An old apply/preview/model/save result cannot alter a new image, even at the same revision; terminated workers settle pending promises and the next image can process work.
-- [ ] Selection masks are invalidated on session/dimension/revision changes, and same-route image switches or AI arrivals preserve dirty work.
-- [ ] Unsaved work discarded by a forced sign-out is reported to the user, not lost silently.
-- [ ] The library pages by cursor with no gaps or repeats across 120 items, clamps its limit, and rejects a malformed cursor.
-- [ ] A library page signs one URL per row, not two, and issues them in parallel.
-- [ ] Images have real server-side thumbnails; the grid's first-view bytes are measured before and after.
-- [ ] Every ML model has a measured size and SHA-256; a mismatch refuses the model and evicts the cached copy.
-- [ ] No hardcoded HuggingFace URL remains outside the manifest, and no banned-license source appears in it.
-- [ ] The model cache stays inside its budget, evicting least-recently-used first.
-- [ ] Combined undo/redo bytes, input/output pixels and active preview count obey the measured policy; bokeh previews use the proxy and rejected upscale sizes allocate no huge output.
-- [ ] Personal media works when Cache Storage is denied/full, and live ONNX sessions dispose safely after their last inference owner releases them.
-- [ ] Every exposed local tool has real-weight/fixture/device evidence from Task 6, including Chrome, Safari, a lower-memory device, offline/private-window behavior and exported output inspection. Unverified cases remain release blockers.
+- [x] Signing out in one tab tears down every store in the others; no data from the previous account is visible after a user switch.
+- [x] A token refresh does not wipe the library.
+- [x] A response that arrives after an identity change is discarded, never written into the new account's state.
+- [x] Navigating away from a dirty editor asks first; closing the tab warns.
+- [x] An async image open that finishes after close does not resurrect the session.
+- [x] A save that lands after a later edit does not mark the session clean.
+- [x] An old apply/preview/model/save result cannot alter a new image, even at the same revision; terminated workers settle pending promises and the next image can process work.
+- [x] Selection masks are invalidated on session/dimension/revision changes, and same-route image switches or AI arrivals preserve dirty work.
+- [x] Unsaved work discarded by a forced sign-out is reported to the user, not lost silently.
+- [x] The library pages by cursor with no gaps or repeats across 120 items, clamps its limit, and rejects a malformed cursor.
+- [x] A library page signs one URL per row, not two, and issues them in parallel.
+- [~] Images have real server-side thumbnails (settle path + backfill, 0022). First-view bytes are **not** measured against a live grid — no deployment to measure. Encode measurements are in `docs/verification/library-egress.md`.
+- [x] Every ML model has a measured size and SHA-256; a mismatch refuses the model and evicts the cached copy.
+- [x] No hardcoded HuggingFace URL remains outside the manifest, and no banned-license source appears in it.
+- [x] The model cache stays inside its budget, evicting least-recently-used first.
+- [~] The bounds exist and are unit-tested (byte-bounded history, `assertPixelBudget` before allocation, one active preview plus one replacement, bokeh on the proxy). The policy numbers are **provisional**, not measured — Task 6 Step 3 is blocked.
+- [x] Personal media works when Cache Storage is denied/full, and live ONNX sessions dispose safely after their last inference owner releases them (unit-tested; no real-device run).
+- [ ] **BLOCKED.** Every exposed local tool has real-weight/fixture/device evidence from Task 6, including Chrome, Safari, a lower-memory device, offline/private-window behavior and exported output inspection. Fixtures and invariants are in place; no device or real-weight run has happened. These remain release blockers — see `docs/verification/editor-tool-results.md`.
 
 **Known carry-forward:** product copy, accessibility and recoverability are P8; CI, telemetry and rollout are P9. The thumbnail backfill script exists but has not been run against production — P9 schedules it.

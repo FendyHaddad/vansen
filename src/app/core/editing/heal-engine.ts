@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web';
-import { getOrtSession } from './engines/model-loader';
+import { acquireOrtSession, type SessionLease } from './engines/model-loader';
 import { PixelBuffer, clonePixels } from './pixel-buffer';
 import { healEngineReady, healModelProgress } from './heal-status';
 
@@ -16,13 +16,11 @@ import { healEngineReady, healModelProgress } from './heal-status';
  * PatchMatch op (see edit-session.applyHeal).
  */
 
-const MODEL_URL =
-  'https://huggingface.co/andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx';
 
-async function getSession(): Promise<ort.InferenceSession> {
-  const session = await getOrtSession(MODEL_URL, healModelProgress);
+async function leaseSession(): Promise<SessionLease> {
+  const lease = await acquireOrtSession('heal-migan', healModelProgress);
   healEngineReady.set(true);
-  return session;
+  return lease;
 }
 
 /**
@@ -30,8 +28,7 @@ async function getSession(): Promise<ort.InferenceSession> {
  * Only masked pixels are replaced — everything else stays bit-identical.
  */
 export async function healSmart(buf: PixelBuffer, mask: Uint8Array): Promise<PixelBuffer> {
-  const { width: w, height: h, data } = buf;
-  const n = w * h;
+  const n = buf.width * buf.height;
   let any = false;
   for (let i = 0; i < n; i++) {
     if (mask[i]) {
@@ -41,7 +38,21 @@ export async function healSmart(buf: PixelBuffer, mask: Uint8Array): Promise<Pix
   }
   if (!any) return clonePixels(buf);
 
-  const session = await getSession();
+  const lease = await leaseSession();
+  try {
+    return await inpaint(lease.session, buf, mask, n);
+  } finally {
+    await lease.release();
+  }
+}
+
+async function inpaint(
+  session: ort.InferenceSession,
+  buf: PixelBuffer,
+  mask: Uint8Array,
+  n: number,
+): Promise<PixelBuffer> {
+  const { width: w, height: h, data } = buf;
 
   // MI-GAN pipeline inputs: image uint8 [1,3,H,W] RGB planes; mask uint8
   // [1,1,H,W] where 255 = known pixel, 0 = region to inpaint.

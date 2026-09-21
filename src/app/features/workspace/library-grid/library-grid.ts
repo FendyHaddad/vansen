@@ -3,11 +3,13 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   input,
   OnDestroy,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -52,6 +54,9 @@ export class LibraryGrid implements OnDestroy {
   readonly poster = inject(PosterService);
 
   readonly items = input.required<GenerationItem[]>();
+  /** True while there are older items the server has not sent yet. */
+  readonly hasMore = input(false);
+  readonly loadingMore = input(false);
   /** Item ids with an action in flight — their buttons show a spinner and stay disabled. */
   readonly busyIds = input<Set<string>>(new Set());
   readonly pickMode = input(false);
@@ -69,6 +74,49 @@ export class LibraryGrid implements OnDestroy {
   /** Ids to delete — one card, or a whole multi-select batch. */
   readonly deleted = output<string[]>();
   readonly cancel = output<string>();
+  /** The bottom of the list came into view; ask for the next page. */
+  readonly moreWanted = output<void>();
+
+  private readonly sentinel = viewChild<ElementRef<HTMLElement>>('sentinel');
+
+  /**
+   * Ask for the next page when the end of the list is actually reached.
+   *
+   * A scroll listener would run on every frame and still have to guess at the
+   * distance; the observer fires once, when the marker below the last tile
+   * enters the viewport.
+   */
+  private observer?: IntersectionObserver;
+  private readonly sentinelEffect = effect(() => {
+    const element = this.sentinel()?.nativeElement;
+    this.observer?.disconnect();
+    this.observer = undefined;
+    if (!element || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      this.moreWanted.emit();
+    }, { rootMargin: '400px' });
+    observer.observe(element);
+    this.observer = observer;
+  });
+
+  /**
+   * What a tile shows: the server's thumbnail, falling back to the original
+   * for anything made before thumbnails existed (0022 marks those `pending`
+   * and the backfill works through them).
+   */
+  tileUrl(item: GenerationItem): string {
+    return item.thumbUrl || item.mediaUrl;
+  }
+
+  /**
+   * Tiles and the detail view cache under different keys. One key for both
+   * would mean whichever loaded first decided what the other showed — a
+   * 512 px tile in the detail overlay, or a 4 MP original in the grid.
+   */
+  tileKey(item: GenerationItem): string {
+    return item.thumbUrl ? `${item.id}:thumb` : item.id;
+  }
 
   /** Ticking clock the pending-video cards read for elapsed/eta — kept here
    * (not per-card) so every card re-renders off one shared interval. */
@@ -83,6 +131,7 @@ export class LibraryGrid implements OnDestroy {
 
   ngOnDestroy(): void {
     clearInterval(this.clock);
+    this.observer?.disconnect();
   }
 
   /** Multi-select mode: cards toggle a checkbox instead of opening. */
@@ -114,6 +163,19 @@ export class LibraryGrid implements OnDestroy {
     });
   });
 
+  /**
+   * What a screen reader reads instead of "image".
+   *
+   * The tiles are visually distinguished by their picture alone, so without
+   * this every card in the grid announces identically and the list is
+   * unusable by ear.
+   */
+  cardLabel(item: GenerationItem): string {
+    const kind = item.kind === 'video' ? 'Video' : 'Image';
+    const status = item.status === 'done' ? '' : `, ${item.status}`;
+    return `${kind}: ${item.prompt.slice(0, 80)}${status}`;
+  }
+
   onCardClick(item: GenerationItem): void {
     if (this.pickMode()) this.picked.emit(item.id);
     else if (this.selectMode()) this.toggleSelected(item.id);
@@ -127,6 +189,18 @@ export class LibraryGrid implements OnDestroy {
 
   isSelected(id: string): boolean {
     return this.selectedIds().has(id);
+  }
+
+  /**
+   * Cancelled, not failed.
+   *
+   * The server now persists this, so it survives a reload. `error` is the
+   * older signal and is kept as a fallback for rows settled before the
+   * failure columns were written.
+   */
+  isCancelled(item: GenerationItem): boolean {
+    if (item.failure) return item.failure.cancelled;
+    return item.error === 'cancelled';
   }
 
   toggleSelected(id: string): void {

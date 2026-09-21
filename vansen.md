@@ -157,11 +157,16 @@ stub with a ledger (`core/ledger/ledger-service.ts`) that mirrors the future
 - At period end, if not renewed (canceled beforehand, or payment simply didn't go
   through / user didn't resubscribe) → purge: delete all storage files + library entries
   for that user.
-- Scheduled function (alongside `timeout-sweep`) runs daily: find subscriptions with
-  `status = canceled` or `status = expired` and `current_period_end < now()`, delete
-  their Storage objects, delete/soft-delete their `jobs`/library rows.
-- Purge is permanent — no grace period beyond the paid period itself. Warn user in UI
-  before period end that library will be deleted if they don't renew.
+- Scheduled function (`purge_lapsed`, daily) finds subscriptions with `status = canceled`
+  or `status = expired` and `current_period_end < now()` and puts them through the same
+  deletion lifecycle as a customer request: tombstone the rows, queue every registered
+  object for the cleanup worker, keep anonymised billing history.
+- Purge is permanent — no grace period beyond the paid period itself. The UI counts down
+  to the period end (`daysUntilPurge`), before the library goes, not after.
+- Pack credits are a separate clock: they expire 30 days after a lapse
+  (`expire_lapsed_packs`). The copy must never merge the two dates.
+- Full policy, including what survives account closure and for how long:
+  `docs/superpowers/specs/2026-09-20-retention-policy.md` (decision D2).
 
 ### 7. Video (Phase 4b)
 
@@ -398,8 +403,9 @@ Stripe hosted checkout live — first purchase $15 ($10 credits + $5/mo Studio m
 top-ups from $10, signature-verified `stripe-webhook` function as sole `topup` writer,
 `webhook_events` dedupe + `ledger_entries.stripe_ref UNIQUE` (double-credit impossible,
 verified), `/billing/reconcile` self-heal (verified restoring a deleted credit,
-idempotent), Billing Portal for cancel/card/invoices, 30-day-grace purge cron (dry-run
-verified), account deletion cancels the Stripe subscription. Promo codes = Stripe-native
+idempotent), Billing Portal for cancel/card/invoices, a lapse purge cron (dry-run
+verified; the 30-day grace it shipped with was replaced at P6 by the paid period itself),
+account deletion cancels the Stripe subscription. Promo codes = Stripe-native
 coupons, zero code. Live keys flip at phase 4 once bank authorization clears.
 
 **MVP Foundation shipped** (spec: `docs/superpowers/specs/2026-07-07-mvp-foundation-design.md`):

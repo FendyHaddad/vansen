@@ -1,5 +1,6 @@
 import type { CheckResult, ProviderAdapter, SubmitCtx, SubmitResult } from './types.ts';
 import { GOOGLE_API_BASE, googleHeaders, googleKey } from './google-common.ts';
+import { frameDrivenShape } from '../video-rules.ts';
 
 const MODEL = 'gemini-omni-flash-1.1';
 
@@ -30,7 +31,8 @@ export const googleOmniAdapter: ProviderAdapter = {
       input: inputFor(ctx),
       generation_config: {
         video_config: {
-          aspect_ratio: s.aspectRatio ?? '16:9',
+          // Omitted in i2v and keyframes: the input frame sets the shape.
+          ...(frameDrivenShape(ctx.mode) ? {} : { aspect_ratio: s.aspectRatio ?? '16:9' }),
           resolution: s.resolution ?? '720p',
           duration_seconds: typeof s.durationS === 'number' ? s.durationS : 8,
         },

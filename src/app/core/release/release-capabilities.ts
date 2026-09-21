@@ -1,5 +1,6 @@
 import { Injectable, InjectionToken, inject } from '@angular/core';
 import { environment } from '../../../environments/environment';
+import { PublicCapabilitiesService } from '../catalog/public-capabilities';
 
 /**
  * What the deployed system has been VERIFIED to do — not what the code can do.
@@ -10,6 +11,10 @@ import { environment } from '../../../environments/environment';
  * you" with no verified delivery means it finishes in silence. P9 sets these
  * from its release manifest after the rehearsal passes; until then they are
  * absent, which reads as false.
+ *
+ * The deployment's own answer (GET /capabilities) wins once it arrives, so a
+ * flag can be turned on after the rehearsal without shipping a new bundle.
+ * The build-time manifest is what the UI uses until then.
  */
 export interface ReleaseCapabilityManifest {
   /** A deployed worker finishes work after every client has gone away. */
@@ -31,9 +36,11 @@ export const RELEASE_CAPABILITIES = new InjectionToken<ReleaseCapabilityManifest
 @Injectable({ providedIn: 'root' })
 export class ReleaseCapabilities {
   private readonly manifest = inject(RELEASE_CAPABILITIES, { optional: true });
+  private readonly server = inject(PublicCapabilitiesService);
 
   /** Unreadable, unreachable or unset manifests all mean "not verified". */
   backgroundCompletion(): boolean {
+    if (this.server.loaded()) return this.server.backgroundCompletion();
     return this.manifest?.backgroundCompletion === true;
   }
 
@@ -42,6 +49,7 @@ export class ReleaseCapabilities {
    * attached, and a delivery path proven on the device.
    */
   completionNotifications(): boolean {
+    if (this.server.loaded()) return this.server.completionNotifications();
     return this.backgroundCompletion() && this.manifest?.completionNotifications === true;
   }
 }

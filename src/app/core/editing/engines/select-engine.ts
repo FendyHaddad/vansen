@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web';
 import { PixelBuffer } from '../pixel-buffer';
 import { samModelProgress } from './engine-status';
-import { getOrtSession } from './model-loader';
+import { acquireOrtSession } from './model-loader';
 import { resizeBilinear, resizeFloatMap } from './raster';
 
 /**
@@ -10,10 +10,6 @@ import { resizeBilinear, resizeFloatMap } from './raster';
  * per pixel state, so after the first click every further click is fast.
  */
 
-const ENCODER_URL =
-  'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/main/onnx/vision_encoder_quantized.onnx';
-const DECODER_URL =
-  'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/main/onnx/prompt_encoder_mask_decoder_quantized.onnx';
 const SIZE = 1024;
 const MASK_SIZE = 256;
 
@@ -45,7 +41,19 @@ function embed(buf: PixelBuffer): Promise<Embedded> {
 const SAM_PROVIDERS: Array<'wasm'> = ['wasm'];
 
 async function runEncoder(buf: PixelBuffer): Promise<Embedded> {
-  const session = await getOrtSession(ENCODER_URL, samModelProgress, SAM_PROVIDERS);
+  const lease = await acquireOrtSession('select-slimsam-encoder', samModelProgress, SAM_PROVIDERS);
+  const session = lease.session;
+  try {
+    return await encode(session, buf);
+  } finally {
+    await lease.release();
+  }
+}
+
+async function encode(
+  session: ort.InferenceSession,
+  buf: PixelBuffer,
+): Promise<Embedded> {
   // SAM preprocessing: longest side → 1024, normalize, zero-pad bottom/right.
   const scale = SIZE / Math.max(buf.width, buf.height);
   const rw = Math.max(1, Math.round(buf.width * scale));
@@ -84,10 +92,23 @@ export interface SelectPoint {
  * object", negative points (label 0) say "not this part".
  */
 export async function smartSelect(buf: PixelBuffer, points: SelectPoint[]): Promise<Uint8Array> {
-  const [emb, decoder] = await Promise.all([
+  const [emb, lease] = await Promise.all([
     embed(buf),
-    getOrtSession(DECODER_URL, samModelProgress, SAM_PROVIDERS),
+    acquireOrtSession('select-slimsam-decoder', samModelProgress, SAM_PROVIDERS),
   ]);
+  try {
+    return await decode(lease.session, buf, points, emb);
+  } finally {
+    await lease.release();
+  }
+}
+
+async function decode(
+  decoder: ort.InferenceSession,
+  buf: PixelBuffer,
+  points: SelectPoint[],
+  emb: Embedded,
+): Promise<Uint8Array> {
 
   const coords = new Float32Array(points.length * 2);
   const labels = new BigInt64Array(points.length);

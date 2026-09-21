@@ -37,10 +37,44 @@ function compare(a: unknown, b: unknown): number {
   return String(a ?? "").localeCompare(String(b ?? ""));
 }
 
+/** Splits on commas that are not inside parentheses. */
+function splitTerms(expression: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < expression.length; i += 1) {
+    const ch = expression[i];
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (ch !== "," || depth !== 0) continue;
+    out.push(expression.slice(start, i));
+    start = i + 1;
+  }
+  out.push(expression.slice(start));
+  return out.filter((t) => t.length > 0);
+}
+
+function parseOrTerm(term: string): (r: Row) => boolean {
+  if (term.startsWith("and(") && term.endsWith(")")) {
+    const inner = splitTerms(term.slice(4, -1)).map(parseOrTerm);
+    return (r) => inner.every((f) => f(r));
+  }
+  const first = term.indexOf(".");
+  const second = term.indexOf(".", first + 1);
+  if (first < 0 || second < 0) throw new Error(`fake or(${term}) is malformed`);
+  const col = term.slice(0, first);
+  const op = term.slice(first + 1, second);
+  const val = term.slice(second + 1);
+  if (op === "eq") return (r) => String(r[col] ?? "") === val;
+  if (op === "lt") return (r) => compare(r[col], val) < 0;
+  if (op === "gt") return (r) => compare(r[col], val) > 0;
+  throw new Error(`fake or(${op}) is not implemented`);
+}
+
 class FakeQuery implements PromiseLike<FakeResult<unknown>> {
   private filters: ((r: Row) => boolean)[] = [];
   private cols?: string;
-  private sort?: { col: string; asc: boolean };
+  private sorts: { col: string; asc: boolean }[] = [];
   private max?: number;
   private headOnly = false;
   private wantCount = false;
@@ -82,6 +116,13 @@ class FakeQuery implements PromiseLike<FakeResult<unknown>> {
     return this;
   }
 
+  /** PostgREST's negated filter. Only `is` is used against this fake. */
+  not(col: string, op: string, val: unknown): this {
+    if (op !== "is") throw new Error(`fake not(${op}) is not implemented`);
+    this.filters.push((r) => (r[col] ?? null) !== val);
+    return this;
+  }
+
   gte(col: string, val: unknown): this {
     this.filters.push((r) => compare(r[col], val) >= 0);
     return this;
@@ -92,8 +133,20 @@ class FakeQuery implements PromiseLike<FakeResult<unknown>> {
     return this;
   }
 
+  /** Chained calls are secondary keys, as PostgREST orders them. */
   order(col: string, opts?: { ascending?: boolean }): this {
-    this.sort = { col, asc: opts?.ascending !== false };
+    this.sorts.push({ col, asc: opts?.ascending !== false });
+    return this;
+  }
+
+  /**
+   * PostgREST's disjunction, in the one shape the gateway builds: top-level
+   * terms separated by commas, each either `col.op.value` or `and(...)` of
+   * such terms. Anything else throws rather than silently matching nothing.
+   */
+  or(expression: string): this {
+    const terms = splitTerms(expression).map(parseOrTerm);
+    this.filters.push((r) => terms.some((t) => t(r)));
     return this;
   }
 
@@ -161,12 +214,14 @@ class FakeQuery implements PromiseLike<FakeResult<unknown>> {
 
   private runSelect(): FakeResult<unknown> {
     let out = this.matched();
-    if (this.sort) {
-      const { col, asc } = this.sort;
-      out = [...out].sort((
-        a,
-        b,
-      ) => (asc ? compare(a[col], b[col]) : compare(b[col], a[col])));
+    if (this.sorts.length > 0) {
+      out = [...out].sort((a, b) => {
+        for (const { col, asc } of this.sorts) {
+          const c = asc ? compare(a[col], b[col]) : compare(b[col], a[col]);
+          if (c !== 0) return c;
+        }
+        return 0;
+      });
     }
     const count = out.length;
     if (this.max != null) out = out.slice(0, this.max);
@@ -249,6 +304,10 @@ export interface StoredObject {
 
 export class FakeStorage {
   readonly objects = new Map<string, StoredObject>();
+  /** Observer for tests that care about the ORDER of writes. */
+  onUpload?: (bucket: string, path: string) => void;
+  /** Observer for tests that count signing round trips. */
+  onSign?: (bucket: string, path: string) => void;
   private failures = new Map<string, FakeError>();
 
   failNext(key: string, message: string): void {
@@ -265,11 +324,14 @@ export class FakeStorage {
   from(bucket: string) {
     const objects = this.objects;
     const take = (op: string) => this.takeFailure(`${bucket}.${op}`);
+    const observe = this.onUpload;
+    const observeSign = this.onSign;
     return {
       // deno-lint-ignore no-explicit-any
       async upload(path: string, bytes: Uint8Array, opts?: any) {
         const fail = take("upload");
         if (fail) return { data: null, error: fail };
+        observe?.(bucket, path);
         objects.set(`${bucket}/${path}`, {
           bytes,
           contentType: opts?.contentType ?? "application/octet-stream",
@@ -277,6 +339,7 @@ export class FakeStorage {
         return { data: { path }, error: null };
       },
       async createSignedUrl(path: string, _ttl: number) {
+        observeSign?.(bucket, path);
         const fail = take("createSignedUrl");
         if (fail) return { data: null, error: fail };
         if (!objects.has(`${bucket}/${path}`)) {
@@ -302,6 +365,22 @@ export class FakeStorage {
         if (fail) return { data: null, error: fail };
         for (const p of paths) objects.delete(`${bucket}/${p}`);
         return { data: null, error: null };
+      },
+      // Mirrors supabase-storage's listing: `search` is a substring filter
+      // inside one prefix, and a failure is an error, never an empty page.
+      async list(prefix: string, opts?: { search?: string; limit?: number }) {
+        const fail = take("list");
+        if (fail) return { data: null, error: fail };
+        const head = prefix ? `${bucket}/${prefix}/` : `${bucket}/`;
+        const names: { name: string }[] = [];
+        for (const key of objects.keys()) {
+          if (!key.startsWith(head)) continue;
+          const rest = key.slice(head.length);
+          if (rest.includes("/")) continue;
+          if (opts?.search && !rest.includes(opts.search)) continue;
+          names.push({ name: rest });
+        }
+        return { data: names.slice(0, opts?.limit ?? 100), error: null };
       },
       async download(path: string) {
         const fail = take("download");
@@ -397,3 +476,309 @@ export class FakeDb {
   readonly deletedUsers: string[] = [];
 }
 
+
+/**
+ * The object registry and deletion outbox of 0021, reduced to what the
+ * gateway and the cleanup worker actually read back. The real behaviour —
+ * bucket-aware locators, leases, holds, dead letters — is proven in
+ * supabase/tests/deletion.sql; this exists so route tests can register and
+ * queue objects without a database.
+ */
+export function installRegistryRpcs(db: FakeDb): void {
+  db.tables.storage_objects ??= [];
+  db.tables.deletion_outbox ??= [];
+  db.tables.storage_config ??= [{ key: "r2_bucket", value: "vansen-test" }];
+
+  db.rpcHandlers.fn_storage_config = (args, self) => {
+    const row = (self.tables.storage_config ?? []).find((r) =>
+      r.key === args.p_key
+    );
+    if (!row) throw new Error(`storage_config ${args.p_key} is not set`);
+    return row.value;
+  };
+  db.rpcHandlers.fn_register_object = (args, self) => {
+    self.tables.storage_objects ??= [];
+    const found = self.tables.storage_objects.find((o) =>
+      o.backend === args.p_backend && o.bucket === args.p_bucket &&
+      o.path === args.p_path
+    );
+    if (found) return found.id;
+    const id = `obj-${self.tables.storage_objects.length + 1}`;
+    self.tables.storage_objects.push({
+      id,
+      user_id: args.p_user,
+      backend: args.p_backend,
+      bucket: args.p_bucket,
+      path: args.p_path,
+      purpose: args.p_purpose,
+      state: "staged",
+      retain_until: null,
+    });
+    return id;
+  };
+  db.rpcHandlers.fn_mark_object_live = (args, self) => {
+    const row = (self.tables.storage_objects ?? []).find((o) =>
+      o.id === args.p_id
+    );
+    if (!row || row.state === "gone") return false;
+    if (row.state === "staged" || row.state === "live") row.state = "live";
+    return true;
+  };
+  db.rpcHandlers.fn_hold_object = (args, self) => {
+    const row = (self.tables.storage_objects ?? []).find((o) =>
+      o.id === args.p_id
+    );
+    if (!row) return false;
+    row.state = "held";
+    row.retain_until = args.p_until;
+    return true;
+  };
+  db.rpcHandlers.fn_enqueue_deletions = (args, self) => {
+    self.tables.deletion_outbox ??= [];
+    const ids = (args.p_objects as string[]) ?? [];
+    let queued = 0;
+    for (const id of ids) {
+      const row = (self.tables.storage_objects ?? []).find((o) => o.id === id);
+      if (!row) continue;
+      if (row.state === "gone") continue;
+      // Evidence under an unexpired hold is never queued.
+      if (
+        row.state === "held" &&
+        new Date(String(row.retain_until ?? 0)).getTime() > Date.now()
+      ) {
+        continue;
+      }
+      row.state = "delete_pending";
+      const already = self.tables.deletion_outbox.find((d) =>
+        d.object_id === id && d.completed_at == null
+      );
+      if (already) continue;
+      self.tables.deletion_outbox.push({
+        id: `del-${self.tables.deletion_outbox.length + 1}`,
+        object_id: id,
+        backend: row.backend,
+        bucket: row.bucket,
+        object_path: row.path,
+        reason: args.p_reason,
+        attempts: 0,
+        lease_token: null,
+        completed_at: null,
+      });
+      queued += 1;
+    }
+    return queued;
+  };
+
+  // The content lifecycle the gateway calls. Mirrors the CONTRACT proven in
+  // supabase/tests/deletion.sql: ownership decides not_found, a live job
+  // holds the row back, and a repeat is idempotent rather than a second
+  // queueing.
+  const reap = (
+    self: FakeDb,
+    table: "generations" | "personas",
+    id: string,
+    reason: string,
+  ) => {
+    const jobs = table === "generations"
+      ? (self.tables.jobs ?? []).filter((j) =>
+        j.generation_id === id && j.state !== "done"
+      )
+      : (self.tables.training_jobs ?? []).filter((j) =>
+        j.persona_id === id && j.state !== "done"
+      );
+    if (jobs.length > 0) return { status: "pending_job", objects: 0 };
+    const row = (self.tables[table] ?? []).find((r) => r.id === id);
+    const paths = table === "generations"
+      ? [row?.media_path, row?.thumb_path]
+      : ((row?.photo_paths as string[]) ?? []).concat(
+        `persona-zips/${row?.user_id}/${id}.zip`,
+      );
+    const ids: string[] = [];
+    for (const path of paths) {
+      if (!path) continue;
+      const object = (self.tables.storage_objects ?? []).find((o) =>
+        o.path === path
+      );
+      if (object) ids.push(String(object.id));
+    }
+    const queued = self.rpcHandlers.fn_enqueue_deletions(
+      { p_objects: ids, p_reason: reason },
+      self,
+    ) as number;
+    self.tables[table] = (self.tables[table] ?? []).filter((r) => r.id !== id);
+    return { status: "queued", objects: queued };
+  };
+
+  db.rpcHandlers.fn_delete_generation = (args, self) => {
+    const row = (self.tables.generations ?? []).find((r) =>
+      r.id === args.p_id && r.user_id === args.p_user
+    );
+    if (!row) throw new Error("not_found");
+    row.deleted_at ??= self.now().toISOString();
+    for (const job of self.tables.jobs ?? []) {
+      if (job.generation_id !== row.id || job.state === "done") continue;
+      job.cancel_requested_at ??= self.now().toISOString();
+    }
+    return reap(self, "generations", String(row.id), "generation_deleted");
+  };
+  db.rpcHandlers.fn_delete_persona = (args, self) => {
+    const row = (self.tables.personas ?? []).find((r) =>
+      r.id === args.p_id && r.user_id === args.p_user
+    );
+    if (!row) throw new Error("not_found");
+    row.deleted_at ??= self.now().toISOString();
+    for (const job of self.tables.training_jobs ?? []) {
+      if (job.persona_id !== row.id || job.state === "done") continue;
+      job.cancel_requested_at ??= self.now().toISOString();
+    }
+    self.tables.provider_artifact_deletions ??= [];
+    const known = self.tables.provider_artifact_deletions.some((a) =>
+      a.artifact_ref === row.lora_url
+    );
+    if (row.lora_url && !known) {
+      self.tables.provider_artifact_deletions.push({
+        id: `art-${self.tables.provider_artifact_deletions.length + 1}`,
+        user_id: row.user_id,
+        provider: "fal",
+        artifact_ref: row.lora_url,
+        status: "requested",
+      });
+    }
+    return reap(self, "personas", String(row.id), "persona_deleted");
+  };
+
+  // Account closure, as the gateway sees it: one open request per user, work
+  // that is still running holds the data back, and the auth user is only
+  // named once the data side is finalised.
+  db.rpcHandlers.fn_delete_account = (args, self) => {
+    self.tables.account_deletions ??= [];
+    const user = String(args.p_user);
+    let request = self.tables.account_deletions.find((r) =>
+      r.user_id === user || r.closed_user_id === user
+    );
+    if (!request) {
+      request = {
+        id: crypto.randomUUID(),
+        user_id: user,
+        closed_user_id: user,
+        auth_user_id: user,
+        status: "processing",
+        subscriptions: args.p_subscriptions ?? [],
+        data_finalized_at: null,
+      };
+      self.tables.account_deletions.push(request);
+    }
+    request.subscriptions = args.p_subscriptions ?? request.subscriptions;
+
+    for (const row of self.tables.generations ?? []) {
+      if (row.user_id !== user) continue;
+      row.deleted_at ??= self.now().toISOString();
+    }
+    for (const row of self.tables.personas ?? []) {
+      if (row.user_id !== user) continue;
+      row.deleted_at ??= self.now().toISOString();
+    }
+    const live = (self.tables.jobs ?? []).filter((j) =>
+      j.user_id === user && j.state !== "done"
+    ).length;
+    for (const job of self.tables.jobs ?? []) {
+      if (job.user_id !== user || job.state === "done") continue;
+      job.cancel_requested_at ??= self.now().toISOString();
+    }
+    const artifacts = (self.tables.provider_artifact_deletions ?? []).filter(
+      (a) => a.user_id === user && a.status === "requested",
+    ).length;
+    if (live > 0) {
+      return {
+        status: "processing",
+        requestId: request.id,
+        pendingJobs: live,
+        providerArtifacts: artifacts,
+      };
+    }
+    request.data_finalized_at = self.now().toISOString();
+    request.user_id = null;
+    self.tables.profiles = (self.tables.profiles ?? []).filter((r) =>
+      r.id !== user
+    );
+    return {
+      status: "processing",
+      requestId: request.id,
+      authUserId: user,
+      pendingJobs: 0,
+      providerArtifacts: artifacts,
+    };
+  };
+  db.rpcHandlers.fn_complete_account_deletion = (args, self) => {
+    const request = (self.tables.account_deletions ?? []).find((r) =>
+      r.id === args.p_request
+    );
+    if (!request) return { status: "processing", reason: "not_found" };
+    const user = String(request.closed_user_id ?? "");
+    const unresolved = (self.tables.provider_artifact_deletions ?? []).filter(
+      (a) => a.user_id === user && a.status === "requested",
+    ).length;
+    if (unresolved > 0) {
+      return { status: "processing", reason: "provider_artifacts_unresolved" };
+    }
+    request.status = "completed";
+    request.auth_user_id = null;
+    return { status: "completed", requestId: request.id };
+  };
+
+  // The claim/acknowledge pair the cleanup worker fences against. The real
+  // functions are proven in supabase/tests/deletion.sql; this mirrors their
+  // CONTRACT — a lease token, and a zero-row acknowledgement that is a stale
+  // claim rather than a success.
+  db.rpcHandlers.fn_claim_deletions = (args, self) => {
+    self.tables.deletion_outbox ??= [];
+    const now = self.now().getTime();
+    const due = self.tables.deletion_outbox.filter((d) =>
+      d.completed_at == null &&
+      new Date(String(d.not_before ?? 0)).getTime() <= now &&
+      (d.lease_until == null ||
+        new Date(String(d.lease_until)).getTime() < now)
+    ).slice(0, Number(args.p_limit ?? 25));
+    for (const row of due) {
+      row.attempts = Number(row.attempts ?? 0) + 1;
+      row.lease_token = `lease-${row.id}-${row.attempts}`;
+      row.lease_until = new Date(now + 120_000).toISOString();
+    }
+    return due.map((r) => ({ ...r }));
+  };
+  db.rpcHandlers.fn_complete_deletion = (args, self) => {
+    const now = self.now().getTime();
+    const row = (self.tables.deletion_outbox ?? []).find((d) =>
+      d.id === args.p_id && d.lease_token === args.p_token &&
+      d.completed_at == null &&
+      new Date(String(d.lease_until ?? 0)).getTime() > now
+    );
+    if (!row) return { acknowledged: false, reason: "stale_or_done" };
+    if (args.p_error == null) {
+      row.completed_at = new Date(now).toISOString();
+      row.lease_token = null;
+      row.lease_until = null;
+      const object = (self.tables.storage_objects ?? []).find((o) =>
+        o.id === row.object_id
+      );
+      if (object) object.state = "gone";
+      return { acknowledged: true, state: "gone" };
+    }
+    const attempts = Number(row.attempts ?? 0);
+    row.lease_token = null;
+    row.lease_until = null;
+    row.last_error = String(args.p_error).slice(0, 500);
+    row.not_before = new Date(
+      now + Math.min(3600, 60 * 2 ** Math.min(attempts, 6)) * 1000,
+    ).toISOString();
+    const budget = Number(
+      (self.tables.dispatch_limits ?? []).find((l) =>
+        l.key === "deletion_max_attempts"
+      )?.value ?? 12,
+    );
+    if (attempts >= budget) {
+      return { acknowledged: true, state: "dead_letter", attempts };
+    }
+    return { acknowledged: true, state: "retry", attempts };
+  };
+}

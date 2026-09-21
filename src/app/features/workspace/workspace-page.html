@@ -157,6 +157,20 @@
     }
 
     <main class="content" data-tour="library">
+      @if (editSession.discardedOnSignOut()) {
+        <div class="notice-banner" role="status">
+          You were signed out while editing. Unsaved changes to that image were discarded.
+          <button
+            type="button"
+            class="notice-close"
+            aria-label="Dismiss"
+            (click)="editSession.clearDiscardNotice()"
+          >
+            <ng-icon name="lucideX" size="13" />
+          </button>
+        </div>
+      }
+      <p class="sr-only" role="status" aria-live="polite">{{ liveMessage() }}</p>
       @if (notice()) {
         <div class="notice-banner">
           {{ notice() }}
@@ -165,10 +179,10 @@
           </button>
         </div>
       }
-      @if (graceDaysLeft(); as days) {
+      @if (daysUntilPurge(); as days) {
         <div class="notice-banner">
-          Subscription lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
-          left before your library is deleted. Download what you need or
+          <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }} left before your
+          library is deleted — it goes when the paid period ends. Download what you need or
           <button type="button" class="linkish" (click)="subscribeTo('studio')">
             resubscribe from <span class="num">$15</span>/mo
           </button>
@@ -207,6 +221,9 @@
           [pickMode]="pickingReference()"
           [samplePrompts]="samplePrompts"
           [search]="searchTerm()"
+          [hasMore]="hasMoreItems()"
+          [loadingMore]="loadingMoreItems()"
+          (moreWanted)="onMoreWanted()"
           (picked)="onReferencePicked($event)"
           (opened)="onOpened($event)"
           (download)="onDownload($event)"
@@ -269,7 +286,9 @@
       [item]="opened"
       [parent]="openedParent()"
       [busy]="busyIds().has(opened.id)"
+      [retryable]="retryable()"
       (closed)="openedId.set(null)"
+      (retry)="onRetry($event)"
       (download)="onDownload($event)"
       (upscale)="onUpscale($event)"
       (variation)="onVariation($event)"

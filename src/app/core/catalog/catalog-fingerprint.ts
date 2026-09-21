@@ -10,4 +10,4 @@
  * sync-shared` and `npm run export-catalog`, hand the new Dart fixture to the
  * mobile repo, then paste the new fingerprint here.
  */
-export const recordedCatalogFingerprint = '-4319f6e';
+export const recordedCatalogFingerprint = '-1059c67b';

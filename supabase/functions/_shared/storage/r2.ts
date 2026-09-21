@@ -59,6 +59,15 @@ export const r2Storage: StorageAdapter = {
   signedUrl(path, ttlS) {
     return r2PresignedGet(path, ttlS);
   },
+  async exists(path) {
+    const env = envFromSecrets();
+    const res = await clientFor(env).fetch(r2ObjectUrl(path, env), { method: 'HEAD' });
+    if (res.status === 404) return false;
+    if (res.ok) return true;
+    // 403, 500, a network wobble: we did not learn anything. Saying "gone"
+    // here would let the worker tick an object off it never removed.
+    throw new Error(`r2 head failed: ${res.status}`);
+  },
   async delete(path) {
     const env = envFromSecrets();
     const res = await clientFor(env).fetch(r2ObjectUrl(path, env), { method: 'DELETE' });

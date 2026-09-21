@@ -1,7 +1,8 @@
 import * as ort from 'onnxruntime-web';
 import { PixelBuffer } from '../pixel-buffer';
 import { MAX_DEBLUR_PIXELS, deblurModelProgress, deblurTileProgress } from './engine-status';
-import { getOrtSession } from './model-loader';
+import { acquireOrtSession } from './model-loader';
+import { assertPixelBudget } from '../editor-policy';
 
 /**
  * AI Sharpen — NAFNet motion/lens deblur (GoPro variant), MIT, ~87.5 MB
@@ -10,8 +11,6 @@ import { getOrtSession } from './model-loader';
  * in flat memory; NAFNet is a 4-level UNet so every tile is padded to a
  * multiple of 16 by edge replication.
  */
-const MODEL_URL =
-  'https://huggingface.co/opencv/deblurring_nafnet/resolve/main/deblurring_nafnet_2025may.onnx';
 /** Core tile size — the region we keep from each inference. */
 const TILE = 256;
 /** Context overlap on every side, discarded after inference. */
@@ -34,9 +33,14 @@ function saneTile(out: Float32Array): boolean {
 
 /** Deblur the whole buffer on-device. Alpha passes through untouched. */
 export async function deblur(buf: PixelBuffer): Promise<PixelBuffer> {
-  if (buf.width * buf.height > MAX_DEBLUR_PIXELS) throw new Error('too_large');
+  // Sharpening is 1:1, so input and output share one ceiling.
+  assertPixelBudget(buf.width, buf.height, 1, {
+    maxInputPixels: MAX_DEBLUR_PIXELS,
+    maxOutputPixels: MAX_DEBLUR_PIXELS,
+  });
   const { width: w, height: h, data: src } = buf;
-  let session = await getOrtSession(MODEL_URL, deblurModelProgress);
+  let lease = await acquireOrtSession('deblur-nafnet', deblurModelProgress);
+  let session = lease.session;
   let validated = false;
 
   const out = new Uint8ClampedArray(w * h * 4);
@@ -84,7 +88,11 @@ export async function deblur(buf: PixelBuffer): Promise<PixelBuffer> {
           if (!validated && !saneTile(res)) throw new Error('gpu output invalid');
         } catch (e) {
           if (validated) throw e;
-          session = await getOrtSession(MODEL_URL, deblurModelProgress, ['wasm']);
+          // Swap to CPU, and let go of the GPU session that just failed.
+          const cpu = await acquireOrtSession('deblur-nafnet', deblurModelProgress, ['wasm']);
+          await lease.release();
+          lease = cpu;
+          session = cpu.session;
           res = (await session.run(feed()))[session.outputNames[0]].data as Float32Array;
         }
         validated = true;
@@ -109,6 +117,8 @@ export async function deblur(buf: PixelBuffer): Promise<PixelBuffer> {
     }
   } finally {
     deblurTileProgress.set(null);
+    // The weights are tens of megabytes; they go when the work does.
+    await lease.release();
   }
   return { width: w, height: h, data: out };
 }

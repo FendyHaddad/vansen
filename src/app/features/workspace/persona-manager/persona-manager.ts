@@ -23,6 +23,7 @@ import { LedgerService } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { PERSONA_TRAINING } from '../../../core/catalog/model-families';
 import { PersonaStatus } from '../../../core/enums';
+import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
 interface WizardPhoto {
   uploadId: string;
@@ -36,7 +37,7 @@ interface WizardPhoto {
   templateUrl: './persona-manager.html',
   styleUrl: './persona-manager.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, HlmButton],
+  imports: [NgIcon, HlmButton, DialogDirective],
   providers: [
     provideIcons({ lucideLoaderCircle, lucidePlus, lucideTrash2, lucideUserRound, lucideX }),
   ],

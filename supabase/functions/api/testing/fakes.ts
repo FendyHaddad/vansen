@@ -13,7 +13,7 @@ export type {
   StoredObject,
 } from "../_shared/testing/fakes.ts";
 
-import { FakeDb, TEST_USER } from "../_shared/testing/fakes.ts";
+import { FakeDb, installRegistryRpcs, TEST_USER } from "../_shared/testing/fakes.ts";
 import type { ApiDeps } from "../app.ts";
 import type { ModerationDecision } from "../_shared/moderation.ts";
 import type {
@@ -103,6 +103,10 @@ export function testDeps(over: Partial<ApiDeps> = {}): ApiDeps {
   db.tables.models = [];
   db.tables.subscriptions = [];
   db.tables.ledger_entries = [];
+  // Every writer records its objects now (P6): without the registry RPCs a
+  // route would refuse to store anything, which is the intended production
+  // behaviour but not a useful default for tests about other things.
+  installRegistryRpcs(db);
   // A faithful stand-in for 0020's reservation: one transaction that charges,
   // writes the generation, its job and its expense, and remembers the
   // submission so a replay returns the same ids. The real one is proven by
@@ -205,6 +209,7 @@ export function testDeps(over: Partial<ApiDeps> = {}): ApiDeps {
       appOrigins: ["https://vansen.app"],
       planPriceIds: {},
       launchCouponId: undefined,
+      releaseFlags: { backgroundCompletion: false, completionNotifications: false },
     },
     now: () => db.now(),
     ...over,

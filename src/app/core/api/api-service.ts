@@ -1,6 +1,20 @@
 import { Injectable, InjectionToken, inject } from '@angular/core';
 import { environment } from '../../../environments/environment';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { supabase } from '../supabase/supabase-client';
+
+/**
+ * The account changed while this request was in the air.
+ *
+ * It is not an error the caller can fix, and it must never be written into a
+ * store: that is how one person's library ends up on another person's screen.
+ * Callers that catch it should do nothing — the new session reloads anyway.
+ */
+export class StaleSessionError extends Error {
+  constructor(readonly path: string) {
+    super('The session changed while this request was in flight.');
+  }
+}
 
 export class ApiError extends Error {
   constructor(
@@ -63,6 +77,7 @@ function friendlyMessage(status: number): string {
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly tokenProvider = inject(API_TOKEN_PROVIDER);
+  private readonly lifecycle = inject(SessionLifecycle);
 
   get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path);
@@ -86,11 +101,13 @@ export class ApiService {
 
   /** Multipart POST (file uploads) — does not set Content-Type (browser adds boundary). */
   async postForm<T>(path: string, form: FormData): Promise<T> {
+    const epoch = this.lifecycle.epoch();
     const token = await this.tokenProvider();
     const headers: Record<string, string> = { 'x-vansen-client': 'web' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const response = await this.fetch('POST', path, { headers, body: form });
-    return this.handle<T>('POST', path, response);
+    const parsed = await this.handle<T>('POST', path, response);
+    return this.fresh(epoch, path, parsed);
   }
 
   private async request<T>(
@@ -99,6 +116,9 @@ export class ApiService {
     body?: unknown,
     opts?: RequestOptions,
   ): Promise<T> {
+    // Captured before the request leaves: everything that comes back is
+    // checked against the identity it was sent under.
+    const epoch = this.lifecycle.epoch();
     const token = await this.tokenProvider();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -110,7 +130,17 @@ export class ApiService {
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    return this.handle<T>(method, path, response);
+    const parsed = await this.handle<T>(method, path, response);
+    return this.fresh(epoch, path, parsed);
+  }
+
+  /**
+   * Started as one account, came back after another signed in. Writing this
+   * into the new account's stores is the defect, so it never reaches them.
+   */
+  private fresh<T>(epoch: number, path: string, value: T): T {
+    if (this.lifecycle.isCurrent(epoch)) return value;
+    throw new StaleSessionError(path);
   }
 
   /** Runs fetch; turns a dropped connection into a readable ApiError instead of a raw TypeError. */

@@ -15,7 +15,20 @@ import {
 } from '@angular/core';
 import { EDIT_TOOLS } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
+import {
+  SelectionStamp,
+  StampedSelection,
+  stampMatches,
+  usableMask,
+} from '../../../core/editing/selection-stamp';
 import { MAX_DEBLUR_PIXELS, MAX_UPSCALE_PIXELS } from '../../../core/editing/engines/engine-status';
+import {
+  HEAVY_PREVIEW_DEBOUNCE_MS,
+  PixelBudgetError,
+  PREVIEW_MAX_DIM,
+  scalePoint,
+} from '../../../core/editing/editor-policy';
+import { PreviewScheduler } from '../../../core/editing/preview-scheduler';
 // Type-only: a value import would drag onnxruntime into the eager bundle.
 import type { SelectPoint } from '../../../core/editing/engines/select-engine';
 import {
@@ -29,7 +42,6 @@ import {
 } from '../../../core/editing/engines/engine-status';
 import { healModelProgress } from '../../../core/editing/heal-status';
 import { PixelBuffer } from '../../../core/editing/pixel-buffer';
-import { PreviewScheduler } from '../../../core/editing/preview-scheduler';
 import { FilterPreset } from '../../../core/editing/ops/filters';
 import { lumaHistogram } from '../../../core/editing/ops/levels';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
@@ -80,7 +92,6 @@ const FILTER_PRESETS: { id: FilterPreset; label: string }[] = [
 
 /** Geometry sliders (straighten, perspective) preview on a copy no larger
  * than this — the overlay canvas CSS-scales it back over the image. */
-const PREVIEW_MAX_DIM = 1100;
 
 const RETOUCH_MODES: { id: RetouchMode; label: string; blurb: string }[] = [
   { id: 'lighten', label: 'Lighten', blurb: 'Brighten where you paint (dodge)' },
@@ -146,8 +157,18 @@ export class ToolOptions {
   readonly bokehStrength = signal(50);
   /** Focus point in image px; null = center until the user clicks. */
   readonly bokehFocus = signal<{ x: number; y: number } | null>(null);
-  /** Smart-select mask for the clicked object, null = nothing selected. */
-  readonly selMask = signal<Uint8Array | null>(null);
+  /**
+   * Smart-select mask for the clicked object, stamped with the session it was
+   * computed in.
+   *
+   * A mask is a per-pixel map of ONE image at ONE moment. A crop, a rotate,
+   * an undo or a different image all invalidate it, and applying it anyway
+   * either throws on a length mismatch or — worse — erases the wrong part of
+   * the picture.
+   */
+  private readonly selectionSig = signal<StampedSelection | null>(null);
+  /** Template binding: is there a selection at all. */
+  readonly selMask = computed(() => this.selectionSig()?.mask ?? null);
   /** All selection clicks so far — SAM refines the mask from the full set. */
   readonly selPoints = signal<SelectPoint[]>([]);
   /** Whether the next click grows or carves the selection. */
@@ -205,8 +226,17 @@ export class ToolOptions {
   /** One preview compute per animation frame — slider drags coalesce. */
   private readonly previewSched = new PreviewScheduler(() => this.runPreview());
 
-  /** Bokeh is heavier (ONNX) — it keeps a longer, fixed debounce. */
-  private bokehTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Bokeh is heavier (ONNX), so it debounces instead of running per frame —
+   * and the scheduler keeps exactly one run in flight, with at most one
+   * replacement waiting. A drag used to start a new depth pass on top of the
+   * last one for as long as it lasted.
+   */
+  private readonly bokehPreview = new PreviewScheduler(
+    () => this.runBokehPreview(),
+    (cb) => setTimeout(() => cb(0), HEAVY_PREVIEW_DEBOUNCE_MS) as unknown as number,
+    (handle) => clearTimeout(handle),
+  );
 
   constructor() {
     // Switching tools drops any un-applied preview and resets the sliders.
@@ -257,7 +287,7 @@ export class ToolOptions {
     // to clear it — drop it so closing a tool discards its preview.
     inject(DestroyRef).onDestroy(() => {
       this.previewSched.cancel();
-      clearTimeout(this.bokehTimer);
+      this.bokehPreview.cancel();
       this.session.resetPreview();
       this.session.setPointPick(null);
     });
@@ -336,7 +366,7 @@ export class ToolOptions {
 
   private resetPending(): void {
     this.previewSched.cancel();
-    clearTimeout(this.bokehTimer);
+    this.bokehPreview.cancel();
     this.brightness.set(0);
     this.contrast.set(0);
     this.saturation.set(0);
@@ -356,7 +386,7 @@ export class ToolOptions {
     this.portraitStrength.set(60);
     this.bokehStrength.set(50);
     this.bokehFocus.set(null);
-    this.selMask.set(null);
+    this.selectionSig.set(null);
     this.selPoints.set([]);
     this.selMode.set('add');
     this.selPrompt.set('');
@@ -509,8 +539,15 @@ export class ToolOptions {
     await this.runEngine(async () => {
       const buf = this.session.current();
       if (!buf) return;
+      const stamp = this.stamp(buf);
       const { smartSelect } = await import('../../../core/editing/engines/select-engine');
       const mask = await smartSelect(buf, [point]);
+      // SAM took a while. If the pixels moved, healing this mask would erase
+      // whatever is now in that rectangle.
+      if (!this.stampMatches(stamp)) {
+        this.engineError.set('The image changed — tap the object again.');
+        return;
+      }
       const { dilateMask } = await import('../../../core/editing/engines/raster');
       const grown = dilateMask(mask, buf.width, buf.height, 3);
       await this.session.applyHeal(grown);
@@ -518,20 +555,23 @@ export class ToolOptions {
   }
 
   scheduleBokehPreview(): void {
-    clearTimeout(this.bokehTimer);
-    this.bokehTimer = setTimeout(() => void this.runBokehPreview(), 150);
+    this.bokehPreview.schedule();
   }
 
   private async runBokehPreview(): Promise<void> {
     const token = ++this.bokehToken;
-    const buf = this.session.current();
-    if (!buf) return;
+    // Previews run on the proxy: a full-resolution depth pass per slider
+    // notch is seconds of inference for an answer nobody can see at that
+    // size. The commit still runs on the real pixels.
+    const proxy = this.session.proxy(PREVIEW_MAX_DIM);
+    if (!proxy) return;
     this.engineError.set('');
     this.engineBusy.set(true);
     try {
       const { bokeh } = await import('../../../core/editing/engines/bokeh-engine');
-      const out = await bokeh(buf, {
-        focus: this.bokehFocus(),
+      const out = await bokeh(proxy.buf, {
+        // The focus point was picked on the full image.
+        focus: scalePoint(this.bokehFocus(), proxy.scale),
         strength: this.bokehStrength(),
       });
       if (token === this.bokehToken && this.tool() === 'bokeh') {
@@ -545,7 +585,7 @@ export class ToolOptions {
   }
 
   async applyBokeh(): Promise<void> {
-    clearTimeout(this.bokehTimer);
+    this.bokehPreview.cancel();
     const focus = this.bokehFocus();
     const strength = this.bokehStrength();
     await this.runEngine(async () => {
@@ -559,17 +599,57 @@ export class ToolOptions {
       const buf = this.session.current();
       const points = this.selPoints();
       if (!buf || !points.length) return;
+      const stamp = this.stamp(buf);
       const { smartSelect } = await import('../../../core/editing/engines/select-engine');
       const mask = await smartSelect(buf, points);
       if (this.tool() !== 'select') return;
-      this.selMask.set(mask);
+      // The image may have changed while the model ran.
+      if (!this.stampMatches(stamp)) return;
+      this.selectionSig.set({ ...stamp, mask });
       this.session.showPreviewBuffer(tintMask(buf, mask));
     });
   }
 
+  /** What identifies the pixels a mask was computed from. */
+  private stamp(buf: PixelBuffer): SelectionStamp {
+    return {
+      token: this.session.openToken(),
+      revision: this.session.revision(),
+      width: buf.width,
+      height: buf.height,
+    };
+  }
+
+  private stampMatches(stamp: SelectionStamp): boolean {
+    const now = this.currentStamp();
+    return !!now && stampMatches(stamp, now);
+  }
+
+  private currentStamp(): SelectionStamp | null {
+    const buf = this.session.current();
+    if (!buf) return null;
+    return this.stamp(buf);
+  }
+
+  /**
+   * The selection, but only if it still describes the pixels on screen.
+   *
+   * Anything else is refused with something the customer can act on, BEFORE
+   * a model runs or a buffer is allocated.
+   */
+  private usableSelection(): Uint8Array | null {
+    const selection = this.selectionSig();
+    if (!selection) return null;
+    const mask = usableMask(selection, this.currentStamp());
+    if (mask) return mask;
+    this.selectClear();
+    this.engineError.set('The image changed — select the area again.');
+    return null;
+  }
+
   /** Smart select → MI-GAN inpaint: the clicked object disappears. */
   async selectRemove(): Promise<void> {
-    const mask = this.selMask();
+    const mask = this.usableSelection();
     if (!mask) return;
     this.selectClear();
     await this.session.applyHeal(mask);
@@ -577,7 +657,7 @@ export class ToolOptions {
 
   /** Smart select → keep only the object, transparent elsewhere. */
   async selectCutout(): Promise<void> {
-    const mask = this.selMask();
+    const mask = this.usableSelection();
     if (!mask) return;
     this.selectClear();
     await this.runEngine(async () => {
@@ -587,7 +667,7 @@ export class ToolOptions {
   }
 
   selectClear(): void {
-    this.selMask.set(null);
+    this.selectionSig.set(null);
     this.selPoints.set([]);
     this.selMode.set('add');
     this.session.resetPreview();
@@ -614,7 +694,7 @@ export class ToolOptions {
   /** Selection mask as the white-on-black PNG data URI FLUX fill expects,
    * grown a few px so no rim of the original object survives the repaint. */
   private async selectionMaskPng(): Promise<string | null> {
-    const mask = this.selMask();
+    const mask = this.usableSelection();
     const buf = this.session.current();
     if (!mask || !buf) return null;
     const { dilateMask } = await import('../../../core/editing/engines/raster');
@@ -645,8 +725,9 @@ export class ToolOptions {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       this.engineError.set(
-        msg === 'too_large'
-          ? 'Image too large for on-device processing — the limit is 16 MP (4096×4096).'
+        // A size refusal already carries the sentence a customer should read.
+        e instanceof PixelBudgetError
+          ? `${msg} The limit is 16 MP (4096×4096).`
           : /fetch|network/i.test(msg) || !msg
             ? 'Engine failed to load — check your connection and try again.'
             : `Engine error: ${msg}`,

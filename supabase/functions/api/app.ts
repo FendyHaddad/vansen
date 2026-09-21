@@ -10,6 +10,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import type { JWSTransactionDecodedPayload } from "npm:@apple/app-store-server-library@1.6.0";
 import type Stripe from "npm:stripe@17";
 import {
+  CATALOG_VERSION,
   CREDIT_PACKS,
   creditCost,
   editToolById,
@@ -40,11 +41,31 @@ import {
   type StorageBackend,
   thumbPath,
 } from "./_shared/storage/index.ts";
+import {
+  enqueueDeletions,
+  holdObject,
+  markObjectLive,
+  type ObjectPurpose,
+  registerObject,
+} from "./_shared/storage/registry.ts";
 import { finishJob as storeFinishedJob } from "./_shared/jobs/store.ts";
 import type { StoredPayload } from "./_shared/jobs/payload.ts";
 import { bodyHash, readIdempotencyKey } from "./services/idempotency.ts";
+import { captureSnapshot } from "./_shared/request-snapshot.ts";
+import type { GenerationRequestSnapshotV1 } from "./_shared/request-snapshot.ts";
+import {
+  planRetry,
+  planVariation,
+  REFUSAL_MESSAGE,
+  type RetryContext,
+  type RetryDecision,
+} from "./services/retry.ts";
 import { imageSize } from "./_shared/image-size.ts";
 import { validateSettings } from "./services/request-validation.ts";
+import {
+  publicCapabilities,
+  type ReleaseFlags,
+} from "./services/public-capabilities.ts";
 import {
   normalizeGenerationRequest,
   type NormalizedRequest,
@@ -77,6 +98,8 @@ export interface ApiEnv {
   appOrigins: string[];
   planPriceIds: Record<string, string | undefined>;
   launchCouponId: string | undefined;
+  /** Promises the deployment has been verified to keep. Default: none. */
+  releaseFlags: ReleaseFlags;
 }
 
 export interface ApiDeps {
@@ -103,6 +126,22 @@ export interface ApiDeps {
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+
+/** D2: quarantined evidence is kept for 12 months after the enforcement
+ * action, for appeals and legal defence. See the retention policy spec. */
+const EVIDENCE_HOLD_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** Which Supabase bucket a purpose lives in. There is no default: a delete
+ * aimed at the wrong bucket silently misses, which is how R11 happened. */
+const SUPABASE_BUCKETS: Record<ObjectPurpose, string> = {
+  media: "media",
+  thumb: "media",
+  upload: "uploads",
+  "persona-photo": "uploads",
+  "persona-zip": "uploads",
+  scratch: "uploads",
+  quarantine: "uploads",
+};
 
 /** Pre-allocation guard: nothing downstream needs more than 50 MP, and a larger
  * header is a decompression bomb, not a photo. */
@@ -378,6 +417,15 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     );
   });
 
+  // Public, unauthenticated: what this deployment can actually do. The
+  // pricing, landing, footer and login pages read it before anyone signs in,
+  // so they stop advertising models that are switched off. Whitelist only —
+  // see services/public-capabilities.ts.
+  app.get("/capabilities", async (c) => {
+    const { data } = await admin.from("models").select("id,enabled");
+    return c.json(publicCapabilities(data ?? [], deps.env.releaseFlags));
+  });
+
   app.use("*", async (c, next) => {
     const token = c.req.header("authorization")?.replace(/^Bearer /i, "");
     if (!token) return fail(c, 401, "unauthorized", "Missing token");
@@ -501,8 +549,62 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     };
   }
 
-  async function toGenerationDto(row: Record<string, unknown>, job?: JobRow) {
+  const FAILURE_CODES = new Set([
+    "cancelled",
+    "moderation",
+    "provider_error",
+    "timeout",
+    "store_failed",
+    "generation_failed",
+  ]);
+
+  /**
+   * The safe, stable reason a generation ended badly.
+   *
+   * P4 persists it, so a reload sees the same thing the live client saw — a
+   * cancelled video used to come back as "Generation failed · Retry" because
+   * cancellation lived only in a client-side patch. The raw provider text
+   * stays in `jobs.error` and never reaches a customer.
+   */
+  function failureDto(row: Record<string, unknown>) {
+    if (row.status !== "failed") return undefined;
+    const raw = String(row.failure_code ?? "");
+    const code = FAILURE_CODES.has(raw) ? raw : "generation_failed";
+    const message = typeof row.failure_message === "string" && row.failure_message
+      ? row.failure_message
+      : "Generation failed. Your credits were refunded.";
+    return {
+      code: code as
+        | "cancelled"
+        | "moderation"
+        | "provider_error"
+        | "timeout"
+        | "store_failed"
+        | "generation_failed",
+      message,
+      cancelled: code === "cancelled",
+    };
+  }
+
+  /** Options for the list shape; a grid needs a tile, not the original. */
+  interface DtoOpts {
+    /** Sign the thumbnail only. Full media is signed when an item is opened. */
+    thumbsOnly?: boolean;
+  }
+
+  async function toGenerationDto(
+    row: Record<string, unknown>,
+    job?: JobRow,
+    opts: DtoOpts = {},
+  ) {
     const backend = (row.storage_backend ?? "supabase") as StorageBackend;
+    const mediaPath = (row.media_path as string | null) ?? null;
+    const thumbPath = (row.thumb_path as string | null) ?? null;
+    // One signature per row in list shape. A row with no thumbnail yet
+    // (everything made before 0022, and a video whose poster has not been
+    // captured) signs its original instead, so the tile still renders and the
+    // poster capture still has something to read.
+    const listsMedia = opts.thumbsOnly && !thumbPath;
     return {
       id: row.id,
       kind: row.kind,
@@ -513,28 +615,128 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       settings: row.settings,
       priceCredits: Number(row.price_credits),
       status: row.status,
-      mediaUrl: await signStored(
-        backend,
-        (row.media_path as string | null) ?? null,
-      ),
-      thumbUrl: row.thumb_path
-        ? await signStored(backend, row.thumb_path as string)
-        : undefined,
+      mediaUrl: opts.thumbsOnly && !listsMedia
+        ? ""
+        : await signStored(backend, mediaPath),
+      thumbUrl: thumbPath ? await signStored(backend, thumbPath) : undefined,
       storageBackend: row.kind === MediaKind.Video ? backend : undefined,
       durationS: row.duration_s == null ? undefined : Number(row.duration_s),
       parentId: row.parent_id,
       createdAt: row.created_at,
       job: jobDto(row, job),
+      failure: failureDto(row),
     };
   }
 
   async function toGenerationDtos(
     rows: Record<string, unknown>[],
     jobs: Map<string, JobRow> = new Map(),
+    opts: DtoOpts = {},
   ) {
+    // Signing is independent per row; awaiting them in sequence made a
+    // 200-row page 400 round trips deep.
     return Promise.all(
-      rows.map((r) => toGenerationDto(r, jobs.get(String(r.id)))),
+      rows.map((r) => toGenerationDto(r, jobs.get(String(r.id)), opts)),
     );
+  }
+
+  const MAX_PAGE = 100;
+  const DEFAULT_PAGE = 50;
+
+  /**
+   * Keyset cursor: created_at plus id, so rows sharing a timestamp still order
+   * deterministically. Offset paging skips and repeats rows whenever a
+   * generation lands between two page fetches.
+   */
+  function encodeCursor(row: Record<string, unknown>): string {
+    return btoa(`${row.created_at}|${row.id}`);
+  }
+
+  /**
+   * The decoded halves are pasted into a PostgREST filter string, so anything
+   * that is not plainly a timestamp and an id is refused here rather than
+   * sent to the database.
+   */
+  function decodeCursor(raw: string): { createdAt: string; id: string } | null {
+    let decoded: string;
+    try {
+      decoded = atob(raw);
+    } catch {
+      return null;
+    }
+    const parts = decoded.split("|");
+    if (parts.length !== 2) return null;
+    const [createdAt, id] = parts;
+    if (!createdAt || !id) return null;
+    if (Number.isNaN(Date.parse(createdAt))) return null;
+    if (!/^[0-9T:.+\-]+Z?$/.test(createdAt)) return null;
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) return null;
+    return { createdAt, id };
+  }
+
+  function pageSize(raw: string | undefined): number {
+    const asked = Number(raw ?? DEFAULT_PAGE);
+    if (!Number.isFinite(asked) || asked < 1) return DEFAULT_PAGE;
+    return Math.min(Math.floor(asked), MAX_PAGE);
+  }
+
+  /**
+   * Ancestors (via parent_id) + the row itself + every descendant, oldest
+   * first — the same chain the client used to assemble from loaded rows only.
+   */
+  function versionChain(
+    all: Record<string, unknown>[],
+    root: Record<string, unknown>,
+  ): Record<string, unknown>[] {
+    const byId = new Map(all.map((r) => [String(r.id), r]));
+    const chain: Record<string, unknown>[] = [];
+    let current: Record<string, unknown> | undefined = byId.get(
+      String(root.id),
+    ) ?? root;
+    while (current) {
+      chain.unshift(current);
+      const parent: unknown = current.parent_id;
+      current = parent ? byId.get(String(parent)) : undefined;
+    }
+    let frontier = [String(root.id)];
+    const seen = new Set(chain.map((r) => String(r.id)));
+    while (frontier.length) {
+      const children = all.filter(
+        (r) => r.parent_id && frontier.includes(String(r.parent_id)),
+      );
+      for (const child of children) {
+        if (seen.has(String(child.id))) continue;
+        seen.add(String(child.id));
+        chain.push(child);
+      }
+      frontier = children.map((r) => String(r.id));
+    }
+    return chain.sort((a, b) =>
+      String(a.created_at).localeCompare(String(b.created_at))
+    );
+  }
+
+  /** Newest-first keyset page over `generations`, one extra row for "is there more?". */
+  function pageQuery(
+    userId: string,
+    limit: number,
+    cursor: { createdAt: string; id: string } | null,
+  ) {
+    let query = admin
+      .from("generations")
+      .select("*")
+      .eq("user_id", userId)
+      // A tombstoned row is gone as far as its owner is concerned; it exists
+      // only until its job settles and the cleanup worker has its bytes.
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+    if (!cursor) return query;
+    query = query.or(
+      `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+    );
+    return query;
   }
 
   async function isSuspended(userId: string): Promise<boolean> {
@@ -609,13 +811,30 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   /** Copy the bytes into quarantine for an appeal, then delete the original.
-   * A failed copy must not leave `moderation_events` pointing at nothing. */
+   * A failed copy must not leave `moderation_events` pointing at nothing.
+   *
+   * The copy is registered and immediately HELD: evidence is kept on purpose
+   * for the D2 appeal window (12 months), so no purge, account closure or
+   * inventory sweep may treat it as an orphan. */
   async function quarantine(
     userId: string,
     bucketPath: string,
     ext: string,
   ): Promise<string | null> {
     const target = `quarantine/${userId}/${crypto.randomUUID()}.${ext}`;
+    let objectId: string;
+    try {
+      objectId = await registerObject(admin, {
+        userId,
+        backend: "supabase",
+        bucket: "uploads",
+        path: target,
+        purpose: "quarantine",
+      });
+    } catch (e) {
+      console.error("quarantine_register_failed", String(e));
+      return null;
+    }
     const { error } = await admin.storage.from("uploads").copy(
       bucketPath,
       target,
@@ -624,7 +843,90 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       console.error("quarantine_copy_failed", error.message);
       return null;
     }
+    await holdObject(admin, objectId, new Date(Date.now() + EVIDENCE_HOLD_MS));
     return target;
+  }
+
+  /**
+   * The R2 bucket the deployment actually uses, as recorded in the database.
+   * There is no default: naming the wrong bucket is a delete that misses.
+   */
+  async function r2Bucket(): Promise<string> {
+    const { data, error } = await admin.rpc("fn_storage_config", {
+      p_key: "r2_bucket",
+    });
+    if (error || !data) throw new Error("r2_bucket is not configured");
+    return String(data);
+  }
+
+  /**
+   * Remove one object now, and fall back to the deletion outbox when storage
+   * refuses. The customer's request never fails on a bad minute at the storage
+   * provider, and the bytes are never forgotten either.
+   */
+  async function removeTracked(
+    c: Context,
+    userId: string,
+    purpose: ObjectPurpose,
+    path: string,
+    reason: string,
+  ): Promise<void> {
+    const bucket = SUPABASE_BUCKETS[purpose];
+    const { error } = await admin.storage.from(bucket).remove([path]);
+    if (!error) return;
+    console.error("object_delete_deferred", { bucket, path, reason });
+    try {
+      const id = await registerObject(admin, {
+        userId,
+        backend: "supabase",
+        bucket,
+        path,
+        purpose,
+      });
+      await enqueueDeletions(admin, [id], reason);
+    } catch (e) {
+      logError(c, "deletion_enqueue_failed", e);
+    }
+  }
+
+  /**
+   * Stage bytes where moderation can read them. Returns an error Response, or
+   * null when the write landed. The locator is registered first so a scratch
+   * object survives a crash between the write and its cleanup.
+   */
+  async function writeScratch(
+    c: Context,
+    userId: string,
+    path: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<Response | null> {
+    const registered = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS.scratch,
+      path,
+      purpose: "scratch",
+    }).catch((e) => {
+      logError(c, "scratch_register_failed", e);
+      return null;
+    });
+    if (!registered) {
+      return moderationFailure(c, {
+        state: "unavailable",
+        reason: "scratch_register_failed",
+        retryAfterSeconds: 10,
+      });
+    }
+    const { error } = await admin.storage
+      .from(SUPABASE_BUCKETS.scratch)
+      .upload(path, bytes, { contentType });
+    if (!error) return null;
+    return moderationFailure(c, {
+      state: "unavailable",
+      reason: "scratch_write_failed",
+      retryAfterSeconds: 10,
+    });
   }
 
   type ImageCheck =
@@ -650,12 +952,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       };
     }
     await recordStrike(userId, "upload", null, categories, kept);
-    const { error: removeError } = await admin.storage.from("uploads").remove([
-      path,
-    ]);
-    if (removeError) {
-      console.error("quarantined_original_cleanup_failed", { path });
-    }
+    // The evidence copy is kept; the original goes. A failed removal here used
+    // to be a log line and nothing else — it is now a durable cleanup job.
+    await removeTracked(c, userId, "upload", path, "moderation_blocked");
     return {
       ok: false,
       response: fail(
@@ -877,46 +1176,192 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     return c.json({ ok: true });
   });
 
-  /** Cancel any live Stripe sub, then hard-delete the account (data + auth row).
-   * Returns an error Response on failure, or null on success. Shared by
-   * DELETE /profile and the underage branch of POST /profile/age. */
+  /** What a delete request tells the customer: hidden now, bytes queued. */
+  function deletionStatus(data: unknown): Record<string, unknown> {
+    const result = (data ?? {}) as { status?: string; objects?: number };
+    return {
+      // `pending_job` means a render is still running and may yet hand us
+      // bytes; the content is already hidden either way.
+      status: result.status === "pending_job" ? "processing" : "accepted",
+      objectsQueued: result.objects ?? 0,
+    };
+  }
+
+  /** One subscription, as it actually stood when the closure was recorded. */
+  interface ClosureSubscription {
+    source: "stripe" | "apple";
+    id: string;
+    status: string;
+    action: "cancelled" | "already_final" | "manage_in_app_store";
+    checkedAt: string;
+  }
+
+  /**
+   * Stripe statuses that bill nothing and never will again. Everything else —
+   * active, trialing, past_due, unpaid, incomplete, paused — can still take
+   * money, so it is cancelled rather than assumed harmless. The old code
+   * looked only at `status: "active"` and left the rest collecting.
+   */
+  const FINAL_STRIPE_STATUSES = new Set(["canceled", "incomplete_expired"]);
+
+  /**
+   * Establish, from the provider, what every subscription is doing — and stop
+   * the ones we are able to stop.
+   *
+   * Throws on an operational failure: a closure recorded against a Stripe we
+   * could not reach would claim a reconciliation that never happened.
+   */
+  async function reconcileStripeSubscriptions(
+    customerId: string,
+  ): Promise<ClosureSubscription[]> {
+    const listed = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+    });
+    const out: ClosureSubscription[] = [];
+    for (const sub of listed.data) {
+      const checkedAt = new Date().toISOString();
+      if (FINAL_STRIPE_STATUSES.has(sub.status)) {
+        out.push({
+          source: "stripe",
+          id: sub.id,
+          status: sub.status,
+          action: "already_final",
+          checkedAt,
+        });
+        continue;
+      }
+      const cancelled = await stripe.subscriptions.cancel(sub.id);
+      out.push({
+        source: "stripe",
+        id: sub.id,
+        status: cancelled.status,
+        action: "cancelled",
+        checkedAt,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Apple subscriptions cannot be cancelled by us. Verifying a transaction
+   * proves what the customer is entitled to; it grants no power to end the
+   * purchase, which lives in their App Store account. We record the
+   * entitlement against the closure and tell them the one action that works.
+   */
+  async function appleSubscriptionOf(
+    userId: string,
+  ): Promise<ClosureSubscription | null> {
+    const { data } = await admin
+      .from("subscriptions")
+      .select("iap_original_transaction_id,status")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const id = data?.iap_original_transaction_id as string | undefined;
+    if (!id) return null;
+    return {
+      source: "apple",
+      id,
+      status: String(data?.status ?? "unknown"),
+      action: "manage_in_app_store",
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Request closure. Returns an error Response on failure, or the closure
+   * result. Shared by DELETE /profile and the underage branch of
+   * POST /profile/age.
+   *
+   * Nothing here deletes anything directly any more. The RPC hides the
+   * content, cancels what can be cancelled, queues every locator and
+   * anonymises what D2 keeps; the cleanup worker finishes the parts that need
+   * an HTTP call. A closure is reported "completed" only when it is.
+   */
   async function deleteAccount(
     c: ErrCtx & { json: (b: unknown, s: number) => Response },
     userId: string,
-  ): Promise<Response | null> {
+  ): Promise<{ error: Response } | { result: Record<string, unknown> }> {
     const { data: prof } = await admin
       .from("profiles")
       .select("stripe_customer_id")
       .eq("id", userId)
       .single();
+
+    const subscriptions: ClosureSubscription[] = [];
     if (prof?.stripe_customer_id) {
       try {
-        const subs = await stripe.subscriptions.list({
-          customer: prof.stripe_customer_id,
-          status: "active",
-        });
-        for (const sub of subs.data) await stripe.subscriptions.cancel(sub.id);
-      } catch (e) {
-        logError(c, "delete_failed", e);
-        return fail(
-          c,
-          400,
-          "delete_failed",
-          "Could not cancel Studio — try again",
+        subscriptions.push(
+          ...await reconcileStripeSubscriptions(prof.stripe_customer_id),
         );
+      } catch (e) {
+        // An unreconciled subscription is the one thing worth stopping for:
+        // closing the account around a live one would keep charging a
+        // customer who no longer has an account to show for it.
+        logError(c, "delete_failed", e);
+        return {
+          error: fail(
+            c,
+            503,
+            "delete_failed",
+            "Could not confirm your subscription is cancelled — try again",
+          ),
+        };
       }
     }
-    const { error } = await admin.rpc("fn_delete_account", { p_user: userId });
-    if (error) return fail(c, 400, "delete_failed", error.message);
-    const { error: authError } = await admin.auth.admin.deleteUser(userId);
-    if (authError) return fail(c, 400, "delete_failed", authError.message);
-    ageOkMemo.delete(userId); // hygiene — the auth row is gone anyway
-    return null;
+    const apple = await appleSubscriptionOf(userId);
+    if (apple) subscriptions.push(apple);
+
+    const { data, error } = await admin.rpc("fn_delete_account", {
+      p_user: userId,
+      p_subscriptions: subscriptions,
+    });
+    if (error) {
+      logError(c, "delete_failed", error);
+      return {
+        error: fail(c, 503, "delete_failed", "Could not delete — try again"),
+      };
+    }
+    const closure = (data ?? {}) as Record<string, unknown>;
+    await finishClosure(c, closure);
+    ageOkMemo.delete(userId);
+    return {
+      result: {
+        ...closure,
+        subscriptions,
+        // The only honest thing to say about an Apple subscription.
+        appleAction: apple ? "manage_in_app_store" : null,
+      },
+    };
+  }
+
+  /**
+   * Remove the auth user as soon as the data side is finalised, so a closed
+   * account cannot sign in while the worker's next tick is pending. A failure
+   * is not fatal: the same work is queued, and the cleanup worker retries it.
+   */
+  async function finishClosure(
+    c: ErrCtx,
+    closure: Record<string, unknown>,
+  ): Promise<void> {
+    const authUserId = closure.authUserId as string | undefined;
+    if (!authUserId) return;
+    const { error } = await admin.auth.admin.deleteUser(authUserId);
+    if (error && !/not.?found/i.test(error.message)) {
+      logError(c, "auth_delete_deferred", error);
+      return;
+    }
+    const { error: completeError } = await admin.rpc(
+      "fn_complete_account_deletion",
+      { p_request: closure.requestId },
+    );
+    if (completeError) logError(c, "closure_complete_deferred", completeError);
   }
 
   app.delete("/profile", async (c) => {
-    const err = await deleteAccount(c, c.get("userId"));
-    return err ?? c.json({ ok: true });
+    const outcome = await deleteAccount(c, c.get("userId"));
+    if ("error" in outcome) return outcome.error;
+    return c.json(outcome.result, 202);
   });
 
   /** Accept a strict, real, non-future, ≤120y-old YYYY-MM-DD string; else null. */
@@ -960,8 +1405,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
 
     if (ageFromBirthDate(birthDate) < 18) {
-      const err = await deleteAccount(c, c.get("userId"));
-      if (err) return err;
+      const outcome = await deleteAccount(c, c.get("userId"));
+      if ("error" in outcome) return outcome.error;
       return fail(c, 403, "underage", "You must be 18 or older to use Vansen");
     }
 
@@ -1040,25 +1485,120 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   });
 
   app.get("/ledger", async (c) => {
-    const { data, error } = await admin
+    const limit = pageSize(c.req.query("limit"));
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
+    }
+
+    let query = admin
       .from("ledger_entries")
       .select("*")
       .eq("user_id", c.get("userId"))
       .order("created_at", { ascending: false })
-      .limit(100);
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+    if (cursor) {
+      query = query.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+    }
+
+    const { data, error } = await query;
     if (error) return fail(c, 400, "query_failed", error.message);
-    return c.json({ entries: (data ?? []).map(toLedgerDto) });
+
+    // The old `.limit(100)` was not a page, it was a truncation: an account
+    // with more history than that could never see its oldest charges.
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return c.json({
+      entries: page.map(toLedgerDto),
+      nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
+    });
   });
 
   app.get("/generations", async (c) => {
+    const userId = c.get("userId") as string;
+    const limit = pageSize(c.req.query("limit"));
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
+    }
+
+    const { data, error } = await pageQuery(userId, limit, cursor);
+    if (error) return fail(c, 400, "query_failed", error.message);
+
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return c.json({
+      items: await toGenerationDtos(page, new Map(), { thumbsOnly: true }),
+      nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
+    });
+  });
+
+  /**
+   * One item, fully signed. The library is paged now, so an item the client
+   * wants — a deep link, an edit parent — may never have been in a loaded page.
+   */
+  app.get("/generations/:id", async (c) => {
+    const { data } = await admin
+      .from("generations")
+      .select("*")
+      .eq("id", c.req.param("id"))
+      .eq("user_id", c.get("userId") as string)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!data) return fail(c, 404, "not_found", "That item does not exist.");
+    return c.json({ item: await toGenerationDto(data) });
+  });
+
+  /**
+   * The version chain rooted at one item, oldest first. The client used to
+   * assemble this from whatever happened to be loaded, which silently lost
+   * ancestors once the library paged.
+   */
+  app.get("/generations/:id/versions", async (c) => {
+    const userId = c.get("userId") as string;
+    const limit = pageSize(c.req.query("limit"));
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
+    }
+
+    const { data: root } = await admin
+      .from("generations")
+      .select("*")
+      .eq("id", c.req.param("id"))
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!root) return fail(c, 404, "not_found", "That item does not exist.");
+
     const { data, error } = await admin
       .from("generations")
       .select("*")
-      .eq("user_id", c.get("userId"))
-      .order("created_at", { ascending: false })
-      .limit(200);
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(MAX_PAGE * 4);
     if (error) return fail(c, 400, "query_failed", error.message);
-    return c.json({ items: await toGenerationDtos(data ?? []) });
+
+    const chain = versionChain((data ?? []) as Record<string, unknown>[], root);
+    const start = cursor
+      ? chain.findIndex((r) => String(r.id) === cursor.id) + 1
+      : 0;
+    const page = chain.slice(start, start + limit);
+    const hasMore = start + limit < chain.length;
+    return c.json({
+      items: await toGenerationDtos(page),
+      nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
+    });
   });
 
   app.get("/models", async (c) => {
@@ -1131,7 +1671,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const { data: gens } = await admin.from("generations").select("*").eq(
       "user_id",
       userId,
-    ).in("id", ids);
+    ).in("id", ids).is("deleted_at", null);
     return c.json({ items: await toGenerationDtos(gens ?? [], jobsByGen) });
   });
 
@@ -1143,6 +1683,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .select("id,status,family_id,price_credits,kind")
       .eq("id", generationId)
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (!gen) return fail(c, 404, "not_found", "Generation not found.");
     if (gen.status !== "pending") {
@@ -1234,6 +1775,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .select("id,kind,status,media_path,storage_backend,settings,family_id")
       .eq("id", parentId)
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .maybeSingle();
     const usable = parent && parent.kind === MediaKind.Video &&
       parent.status === "done" && parent.media_path;
@@ -1388,9 +1930,136 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   app.post("/generations", async (c) => {
-    const userId = c.get("userId");
     const body = await c.req.json().catch(() => null);
     if (!body) return fail(c, 400, "invalid_payload", "JSON body required");
+    return await submitGeneration(c, body);
+  });
+
+  /**
+   * Rebuild the decision context for one generation.
+   *
+   * Everything `planRetry` needs, read once. `expressible` is the interesting
+   * one: a price move is NOT a refusal (the retry is re-quoted and the
+   * customer pays today's price), but a request that today's catalog can no
+   * longer express — a withdrawn family, an option that no longer exists —
+   * has no honest replay.
+   */
+  async function retryContextOf(
+    userId: string,
+    snapshotId: string | null,
+  ): Promise<RetryContext> {
+    const empty: RetryContext = {
+      snapshot: null,
+      liveUploadPaths: new Set<string>(),
+      familyEnabled: false,
+      entitled: false,
+      expressible: false,
+    };
+    if (!snapshotId) return empty;
+
+    const { data: row } = await admin.from("request_snapshots")
+      .select("body").eq("id", snapshotId).eq("user_id", userId).maybeSingle();
+    const snapshot = (row?.body ?? null) as GenerationRequestSnapshotV1 | null;
+    if (!snapshot) return empty;
+
+    const wanted = [...(snapshot.referenceUploadIds ?? [])];
+    if (snapshot.maskUploadId) wanted.push(snapshot.maskUploadId);
+    const live = new Set<string>();
+    if (wanted.length) {
+      const { data: uploads } = await admin.from("uploads")
+        .select("path").eq("user_id", userId).in("path", wanted);
+      for (const upload of uploads ?? []) live.add(upload.path as string);
+    }
+
+    const gate = await modelGate(snapshot.familyId);
+    const plan = await activePlan(userId);
+    const family = familyById(snapshot.familyId);
+    // A fixed-price edit tool or the upscaler has no catalog family to
+    // validate against; its options are the tool itself.
+    const expressible = family
+      ? validateSettings(family, snapshot.settings) === null
+      : !!(editToolById(snapshot.familyId) || snapshot.familyId === UPSCALER.id ||
+        snapshot.familyId === PERSONA_GEN.id);
+
+    return {
+      snapshot,
+      liveUploadPaths: live,
+      familyEnabled: gate.enabled,
+      entitled: !(gate.minPlan === "pro" && plan === "studio"),
+      expressible,
+    };
+  }
+
+  /** The generation, or a 404 — a stranger learns nothing either way. */
+  async function ownedGeneration(
+    c: Context,
+    userId: string,
+  ): Promise<{ id: string; snapshot_id: string | null } | Response> {
+    const { data } = await admin.from("generations")
+      .select("id,snapshot_id")
+      .eq("id", c.req.param("id")).eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!data) return fail(c, 404, "not_found", "Generation not found");
+    return data as { id: string; snapshot_id: string | null };
+  }
+
+  function refuse(c: Context, decision: Extract<RetryDecision, { ok: false }>): Response {
+    return fail(c, 409, decision.refusal, REFUSAL_MESSAGE[decision.refusal]);
+  }
+
+  // Re-run what the customer actually asked for. The body is rebuilt here and
+  // goes back through the normal submission path, so it is re-validated,
+  // re-moderated, re-quoted at today's price and re-snapshotted.
+  app.post("/generations/:id/retry", async (c) => {
+    const userId = c.get("userId");
+    const generation = await ownedGeneration(c, userId);
+    if (generation instanceof Response) return generation;
+
+    const decision = planRetry(await retryContextOf(userId, generation.snapshot_id));
+    if (!decision.ok) return refuse(c, decision);
+    return await submitGeneration(c, decision.body);
+  });
+
+  // Another take on the same prompt, hung off the original as its parent.
+  app.post("/generations/:id/variation", async (c) => {
+    const userId = c.get("userId");
+    const generation = await ownedGeneration(c, userId);
+    if (generation instanceof Response) return generation;
+
+    const context = await retryContextOf(userId, generation.snapshot_id);
+    const decision = planVariation(context, generation.id);
+    if (!decision.ok) return refuse(c, decision);
+    return await submitGeneration(c, decision.body);
+  });
+
+  // What the UI should enable. A disabled button with a reason is honest; a
+  // button that always fails is not.
+  app.get("/generations/:id/retryable", async (c) => {
+    const userId = c.get("userId");
+    const generation = await ownedGeneration(c, userId);
+    if (generation instanceof Response) return generation;
+
+    const context = await retryContextOf(userId, generation.snapshot_id);
+    const retry = planRetry(context);
+    const variation = planVariation(context, generation.id);
+    const blocked = retry.ok ? null : retry.refusal;
+    return c.json({
+      retry: retry.ok,
+      variation: variation.ok,
+      reason: blocked ? REFUSAL_MESSAGE[blocked] : undefined,
+    });
+  });
+
+  /**
+   * One submission path, whether the request came from the composer or was
+   * rebuilt by the server from a snapshot. Retry re-enters here so it gets the
+   * same validation, entitlement checks, moderation, quote and snapshot — the
+   * old client-side retry skipped all of it and guessed at the fields.
+   */
+  // deno-lint-ignore no-explicit-any
+  async function submitGeneration(c: Context, body: any): Promise<Response> {
+    const userId = c.get("userId");
 
     const op = body.op as string;
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -1469,6 +2138,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         .select("status, lora_url, trigger_word")
         .eq("id", personaId)
         .eq("user_id", userId)
+        .is("deleted_at", null)
         .maybeSingle();
       if (!data || data.status !== "ready" || !data.lora_url) {
         return fail(
@@ -1514,7 +2184,11 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         if (op !== GenerationOp.Edit) {
           return fail(c, 400, "invalid_op", "Edit tools use op=edit");
         }
-        if (editTool.needsMask && typeof body.maskPngBase64 !== "string") {
+        // A retry names a mask that is already stored; the composer sends
+        // bytes. Either satisfies the requirement.
+        const hasMask = typeof body.maskPngBase64 === "string" ||
+          (typeof body.maskUploadId === "string" && !!body.maskUploadId);
+        if (editTool.needsMask && !hasMask) {
           return fail(
             c,
             400,
@@ -1672,7 +2346,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     ): Promise<string | Response> {
       const { data: parent, error } = await admin.from("generations")
         .select("id,kind,status,media_path,storage_backend")
-        .eq("id", parentId).eq("user_id", userId).maybeSingle();
+        .eq("id", parentId).eq("user_id", userId).is("deleted_at", null)
+        .maybeSingle();
       if (error) {
         return fail(
           c,
@@ -1706,7 +2381,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const priced = quoteFamily
       ? priceRequest(c, quoteFamily, op, settings, {
         hasReference: !!referenceUrl,
-        hasMask: typeof body.maskPngBase64 === "string",
+        hasMask: typeof body.maskPngBase64 === "string" ||
+          (typeof body.maskUploadId === "string" && !!body.maskUploadId),
       })
       : null;
     if (priced instanceof Response) return priced;
@@ -1734,7 +2410,11 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // A mask is stored like any other input, with an owner and a moderation
     // record. Carrying base64 in the job payload would be an unbounded row
     // nothing owns.
-    const maskUploadId = await storeMask(c, userId, body.maskPngBase64);
+    // A retry names a mask that is already stored and owned; the composer
+    // sends fresh bytes. Both end up as an upload path.
+    const maskUploadId = typeof body.maskUploadId === "string" && body.maskUploadId
+      ? await existingMask(c, userId, body.maskUploadId)
+      : await storeMask(c, userId, body.maskPngBase64);
     if (maskUploadId instanceof Response) return maskUploadId;
 
     const sid = await safetyId(userId);
@@ -1757,6 +2437,40 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       trendId: trendId ?? undefined,
       mode: video?.mode,
     };
+
+    // The request, recorded once, by owned identity. This is the only thing a
+    // retry weeks from now has to work from, so it is built from the resolved
+    // identities rather than from the client's body.
+    // A persona run is stored and priced under the pseudo-family 'persona',
+    // which is not a model. The snapshot keeps the family the customer chose,
+    // because that is what a retry has to send.
+    const snapshotFamilyId = persona && typeof body.familyId === "string" && body.familyId
+      ? body.familyId
+      : familyId;
+
+    const snapshot = captureSnapshot({
+      // Checked against GenerationOp at the top of this route.
+      op: op as GenerationOp,
+      familyId: snapshotFamilyId,
+      prompt,
+      settings,
+      referenceUploadIds: video
+        ? [...video.referencePaths]
+        : (referenceUploadId ? [referenceUploadId] : []),
+      referenceSlots: {
+        first: video?.mode === "keyframes" ? (video.referencePaths[0] ?? null) : null,
+        last: video?.mode === "keyframes" ? (video.referencePaths[1] ?? null) : null,
+        references: video && video.mode !== "keyframes" ? [...video.referencePaths] : [],
+      },
+      maskUploadId: maskUploadId ?? null,
+      personaId: personaId ?? null,
+      styleId: styleId ?? null,
+      trendId: trendId ?? null,
+      mode: video?.mode ?? null,
+      parentId: parentId ?? null,
+      catalogVersion: normalized?.catalogVersion ?? CATALOG_VERSION,
+      quoteVersion: normalized?.quoteVersion ?? 0,
+    });
 
     const items = Array.from({ length: batch }, () => ({
       kind,
@@ -1788,7 +2502,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         catalogVersion: normalized?.catalogVersion ?? "",
         quoteVersion: normalized?.quoteVersion ?? 0,
       },
-      p_payload: payload,
+      // The snapshot rides beside the payload and is written by the RPC, in
+      // the same transaction as the charge. The client never names its id.
+      p_payload: { ...payload, snapshot },
     });
     if (reservation.error) {
       return await reservationFailure(c, userId, reservation.error.message);
@@ -1807,7 +2523,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       items: await toGenerationDtos(createdRows ?? []),
       credits: await creditsOf(userId),
     }, 202);
-  });
+  }
 
   /**
    * Persist an edit mask as an owned upload and return its path.
@@ -1833,6 +2549,19 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       return fail(c, 400, "invalid_payload", "Mask must be a PNG");
     }
     const path = `${userId}/${crypto.randomUUID()}.png`;
+    const objectId = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS.upload,
+      path,
+      purpose: "upload",
+    }).catch((e) => {
+      logError(c, "mask_register_failed", e);
+      return null;
+    });
+    if (!objectId) {
+      return fail(c, 503, "mask_unavailable", "Could not store your mask.");
+    }
     const { error: upErr } = await admin.storage.from("uploads").upload(
       path,
       bytes,
@@ -1841,6 +2570,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     if (upErr) {
       return fail(c, 503, "mask_unavailable", "Could not store your mask.");
     }
+    await markObjectLive(admin, objectId);
     // A mask is a shape, not a picture of anything — it is moderated by the
     // image it is applied to, so it is registered as allowed on arrival.
     const { error: regErr } = await admin.from("uploads").insert({
@@ -1854,10 +2584,35 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       moderation: "allowed",
     });
     if (regErr) {
-      await admin.storage.from("uploads").remove([path]).catch(() => undefined);
+      await removeTracked(c, userId, "upload", path, "mask_register_failed");
       return fail(c, 503, "mask_unavailable", "Could not store your mask.");
     }
     return path;
+  }
+
+  /**
+   * A mask this user already owns, for a retry. Re-verified rather than
+   * trusted: the path arrives from a snapshot, but a snapshot is data and the
+   * upload behind it may have been deleted or may never have been theirs.
+   */
+  async function existingMask(
+    c: Context,
+    userId: string,
+    path: string,
+  ): Promise<string | Response> {
+    const { data } = await admin.from("uploads")
+      .select("path")
+      .eq("user_id", userId).eq("path", path).eq("purpose", "mask")
+      .maybeSingle();
+    if (!data) {
+      return fail(
+        c,
+        409,
+        "reference_unavailable",
+        REFUSAL_MESSAGE.reference_unavailable,
+      );
+    }
+    return data.path as string;
   }
 
   /** Video reference slots, keeping first/last positional order. */
@@ -2586,6 +3341,21 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       : "reference";
     const mime = `image/${ext === "jpg" ? "jpeg" : ext}`;
     const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+    // The locator is recorded BEFORE the bytes exist. An upload whose response
+    // we never see still leaves something deletion can find.
+    const objectId = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS.upload,
+      path,
+      purpose: purpose === "persona-photo" ? "persona-photo" : "upload",
+    }).catch((e) => {
+      logError(c, "upload_register_failed", e);
+      return null;
+    });
+    if (!objectId) {
+      return fail(c, 500, "upload_failed", "Could not record the upload");
+    }
     const { error: upErr } = await admin.storage.from("uploads").upload(
       path,
       bytes,
@@ -2594,6 +3364,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     if (upErr) {
       return fail(c, 400, "upload_failed", "Storage rejected the file");
     }
+    await markObjectLive(admin, objectId);
 
     // Registry row first, as `pending`: an upload that never reaches `allowed`
     // can never be referenced, and deletion (P6/T08) still has its path.
@@ -2646,6 +3417,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .select("id,kind,status,storage_backend,thumb_path")
       .eq("id", generationId)
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (!gen || gen.kind !== MediaKind.Video) {
       return fail(c, 404, "not_found", "Video not found.");
@@ -2670,31 +3442,39 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // Posters are client-captured bytes, not a vetted server render: they cross
     // the same gate as any other user image before they are stored or served.
     const posterScratch = `scratch/${userId}/${crypto.randomUUID()}.jpg`;
-    const { error: posterErr } = await admin.storage
-      .from("uploads")
-      .upload(posterScratch, bytes, { contentType: "image/jpeg" });
-    if (posterErr) {
-      return moderationFailure(c, {
-        state: "unavailable",
-        reason: "scratch_write_failed",
-        retryAfterSeconds: 10,
-      });
-    }
+    const posterErr = await writeScratch(c, userId, posterScratch, bytes, "image/jpeg");
+    if (posterErr) return posterErr;
     let posterCheck: ImageCheck;
     try {
       posterCheck = await moderateStoredImage(c, userId, posterScratch, "jpg");
     } finally {
-      const { error: cleanupError } = await admin.storage.from("uploads")
-        .remove([posterScratch]);
-      if (cleanupError) {
-        console.error("scratch_cleanup_failed", { path: posterScratch });
-      }
+      await removeTracked(c, userId, "scratch", posterScratch, "scratch_cleanup");
     }
     if (!posterCheck.ok) return posterCheck.response;
 
-    const backend = (gen.storage_backend ?? "r2") as StorageBackend;
+    // The backend is the one RECORDED on the generation. The old `?? "r2"`
+    // guess could write a poster into a store the row does not name, which
+    // makes it undeletable and unsignable.
+    const backend = gen.storage_backend as StorageBackend;
+    if (backend !== "supabase" && backend !== "r2") {
+      return fail(c, 409, "thumb_failed", "This video has no recorded storage.");
+    }
     const path = thumbPath(userId, generationId);
+    const posterId = await registerObject(admin, {
+      userId,
+      backend,
+      bucket: backend === "r2" ? await r2Bucket() : SUPABASE_BUCKETS.thumb,
+      path,
+      purpose: "thumb",
+    }).catch((e) => {
+      logError(c, "thumb_register_failed", e);
+      return null;
+    });
+    if (!posterId) {
+      return fail(c, 503, "thumb_failed", "Could not record the thumbnail.");
+    }
     await storageFor(backend).put(path, bytes, "image/jpeg");
+    await markObjectLive(admin, posterId);
     const { error } = await admin.from("generations").update({
       thumb_path: path,
     }).eq("id", generationId);
@@ -2734,6 +3514,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .from("personas")
       .select("*")
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
     const plan = await activePlan(userId);
@@ -2774,7 +3555,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const { count } = await admin
       .from("personas")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      // A persona awaiting cleanup must not keep occupying a slot.
+      .is("deleted_at", null);
     if ((count ?? 0) >= PERSONA_SLOTS[plan]) {
       return fail(
         c,
@@ -2794,23 +3577,26 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     return c.json({ item: await toPersonaDto(row) });
   });
 
+  /**
+   * Same lifecycle as a generation, plus the model fal holds.
+   *
+   * The photos and the training ZIP are queued from the registry. The LoRA is
+   * recorded as a deletion REQUEST against the provider: those bytes are not
+   * ours to remove, and pretending otherwise was the previous behaviour.
+   */
   app.delete("/personas/:id", async (c) => {
-    const userId = c.get("userId");
-    const { data: rows, error } = await admin
-      .from("personas")
-      .delete()
-      .eq("id", c.req.param("id"))
-      .eq("user_id", userId)
-      .select("id, photo_paths");
-    if (error) return fail(c, 400, "delete_failed", error.message);
-    const row = rows?.[0];
-    if (!row) return fail(c, 404, "not_found", "Persona not found");
-    const paths = [
-      ...((row.photo_paths as string[]) ?? []),
-      `persona-zips/${userId}/${row.id}.zip`,
-    ];
-    await admin.storage.from("uploads").remove(paths); // best-effort cleanup
-    return c.json({ ok: true });
+    const { data, error } = await admin.rpc("fn_delete_persona", {
+      p_user: c.get("userId"),
+      p_id: c.req.param("id"),
+    });
+    if (error?.message?.includes("not_found")) {
+      return fail(c, 404, "not_found", "Persona not found");
+    }
+    if (error) {
+      logError(c, "delete_failed", error);
+      return fail(c, 503, "delete_failed", "Could not delete — try again.");
+    }
+    return c.json(deletionStatus(data), 202);
   });
 
   /** Charge 350 credits, zip the moderated photos, submit fal LoRA training. */
@@ -2881,11 +3667,25 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // The zip is built and stored BEFORE the charge: the worker signs it fresh
     // at dispatch time, so an hour-old signed URL never reaches the provider.
     const zipPath = `persona-zips/${userId}/${personaId}.zip`;
+    const zipObjectId = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS["persona-zip"],
+      path: zipPath,
+      purpose: "persona-zip",
+    }).catch((e) => {
+      logError(c, "persona_zip_register_failed", e);
+      return null;
+    });
+    if (!zipObjectId) {
+      return fail(c, 503, "train_failed", "Training could not be prepared");
+    }
     const { error: upErr } = await admin.storage.from("uploads").upload(
       zipPath,
       zipSync(files, { level: 0 }), // JPEGs don't compress
       { contentType: "application/zip", upsert: true },
     );
+    if (!upErr) await markObjectLive(admin, zipObjectId);
     if (upErr) {
       logError(c, "persona_zip_failed", new Error(upErr.message));
       return fail(c, 503, "train_failed", "Training could not be prepared");
@@ -2897,7 +3697,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .from("personas")
       .update({ photo_paths: photoIds, trigger_word: PERSONA_TRIGGER })
       .eq("id", personaId)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .is("deleted_at", null);
 
     const { error: reserveErr } = await admin.rpc("fn_reserve_training", {
       p_user: userId,
@@ -2976,6 +3777,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .select("id,prompt,settings")
       .eq("id", parentId)
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (!parent) {
       return fail(c, 404, "not_found", "Parent generation not found");
@@ -2989,25 +3791,13 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // Moderation BEFORE anything persists outside quarantine reach. A failed
     // scratch write is an outage: we must not write to `media` unchecked.
     const scratch = `scratch/${userId}/${crypto.randomUUID()}.png`;
-    const { error: scratchErr } = await admin.storage
-      .from("uploads")
-      .upload(scratch, bytes, { contentType: "image/png" });
-    if (scratchErr) {
-      return moderationFailure(c, {
-        state: "unavailable",
-        reason: "scratch_write_failed",
-        retryAfterSeconds: 10,
-      });
-    }
+    const scratchErr = await writeScratch(c, userId, scratch, bytes, "image/png");
+    if (scratchErr) return scratchErr;
     let saveCheck: ImageCheck;
     try {
       saveCheck = await moderateStoredImage(c, userId, scratch, "png");
     } finally {
-      const { error: cleanupError } = await admin.storage.from("uploads")
-        .remove([scratch]);
-      if (cleanupError) {
-        console.error("scratch_cleanup_failed", { path: scratch });
-      }
+      await removeTracked(c, userId, "scratch", scratch, "scratch_cleanup");
     }
     if (!saveCheck.ok) return saveCheck.response;
 
@@ -3036,6 +3826,20 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
 
     const path = `${userId}/${gen.id}.png`;
+    const objectId = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS.media,
+      path,
+      purpose: "media",
+    }).catch((e) => {
+      logError(c, "media_register_failed", e);
+      return null;
+    });
+    if (!objectId) {
+      await dropStagedRow(gen.id);
+      return fail(c, 503, "save_failed", "Could not record the file");
+    }
     const { error: upErr } = await admin.storage.from("media").upload(
       path,
       bytes,
@@ -3048,6 +3852,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       await dropStagedRow(gen.id);
       return fail(c, 400, "save_failed", "Storage rejected the file");
     }
+    await markObjectLive(admin, objectId);
     const { data: saved, error: saveError } = await admin.from("generations")
       .update({ media_path: path, status: "done" })
       .eq("id", gen.id)
@@ -3111,25 +3916,13 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
 
     // Moderate BEFORE the image enters the library.
     const scratch = `scratch/${userId}/${crypto.randomUUID()}.${ext}`;
-    const { error: scratchErr } = await admin.storage
-      .from("uploads")
-      .upload(scratch, bytes, { contentType });
-    if (scratchErr) {
-      return moderationFailure(c, {
-        state: "unavailable",
-        reason: "scratch_write_failed",
-        retryAfterSeconds: 10,
-      });
-    }
+    const scratchErr = await writeScratch(c, userId, scratch, bytes, contentType);
+    if (scratchErr) return scratchErr;
     let importCheck: ImageCheck;
     try {
       importCheck = await moderateStoredImage(c, userId, scratch, ext);
     } finally {
-      const { error: cleanupError } = await admin.storage.from("uploads")
-        .remove([scratch]);
-      if (cleanupError) {
-        console.error("scratch_cleanup_failed", { path: scratch });
-      }
+      await removeTracked(c, userId, "scratch", scratch, "scratch_cleanup");
     }
     if (!importCheck.ok) return importCheck.response;
 
@@ -3155,6 +3948,20 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
 
     const path = `${userId}/${gen.id}.${ext}`;
+    const objectId = await registerObject(admin, {
+      userId,
+      backend: "supabase",
+      bucket: SUPABASE_BUCKETS.media,
+      path,
+      purpose: "media",
+    }).catch((e) => {
+      logError(c, "media_register_failed", e);
+      return null;
+    });
+    if (!objectId) {
+      await dropStagedRow(gen.id);
+      return fail(c, 503, "save_failed", "Could not record the file");
+    }
     const { error: upErr } = await admin.storage.from("media").upload(
       path,
       bytes,
@@ -3167,6 +3974,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       await dropStagedRow(gen.id);
       return fail(c, 400, "save_failed", "Storage rejected the file");
     }
+    await markObjectLive(admin, objectId);
     const { data: saved, error: saveError } = await admin.from("generations")
       .update({ media_path: path, status: "done" })
       .eq("id", gen.id)
@@ -3188,30 +3996,31 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     });
   });
 
+  /**
+   * Hide it now, remove the bytes durably.
+   *
+   * The route no longer deletes objects itself: it could only ever be
+   * best-effort, and a failed `storage.delete` left bytes nobody could name
+   * again. `fn_delete_generation` tombstones the row, asks any running job to
+   * stop (it never settles one — only the lease holder may), and queues every
+   * registered locator for the cleanup worker. A generation whose job is
+   * still running keeps its row until the job settles, so a late provider
+   * output lands somewhere we can still delete it from.
+   */
   app.delete("/generations/:id", async (c) => {
     const userId = c.get("userId") as string;
-    const id = c.req.param("id");
-    const { data: row, error } = await admin
-      .from("generations")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId)
-      .select("id,media_path,thumb_path,storage_backend")
-      .maybeSingle();
-    if (error) return fail(c, 400, "delete_failed", error.message);
-    if (!row) return fail(c, 404, "not_found", "Generation not found.");
-    const backend = (row.storage_backend ?? "supabase") as StorageBackend;
-    const paths = [row.media_path, row.thumb_path].filter((p): p is string =>
-      !!p
-    );
-    for (const p of paths) {
-      try {
-        await storageFor(backend).delete(p);
-      } catch (e) {
-        logError(c, "storage_delete_failed", e);
-      }
+    const { data, error } = await admin.rpc("fn_delete_generation", {
+      p_user: userId,
+      p_id: c.req.param("id"),
+    });
+    if (error?.message?.includes("not_found")) {
+      return fail(c, 404, "not_found", "Generation not found.");
     }
-    return c.json({ ok: true });
+    if (error) {
+      logError(c, "delete_failed", error);
+      return fail(c, 503, "delete_failed", "Could not delete — try again.");
+    }
+    return c.json(deletionStatus(data), 202);
   });
 
   return app;

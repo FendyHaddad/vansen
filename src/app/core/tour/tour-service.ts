@@ -1,4 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import {
+  PLAN_CREDITS,
+  PLAN_PRICE_USD,
+  PLAN_PROMO_USD,
+} from '../catalog/model-families';
 import { PreferencesService } from '../preferences/preferences-service';
 import { ProfileStore } from '../profile/profile-store';
 
@@ -59,7 +64,7 @@ export const TOUR_STEPS: TourStep[] = [
     target: null,
     placement: 'center',
     title: 'Pick your plan',
-    body: 'Studio $15/mo (1,500 credits) or Pro $30/mo (3,750 credits + video). Launch offer: $10/$25 for your first 60 days.',
+    body: `Studio $${PLAN_PRICE_USD.studio}/mo (${PLAN_CREDITS.studio.toLocaleString()} credits) or Pro $${PLAN_PRICE_USD.pro}/mo (${PLAN_CREDITS.pro.toLocaleString()} credits + video). Launch offer: $${PLAN_PROMO_USD.studio}/$${PLAN_PROMO_USD.pro} for your first 60 days.`,
   },
 ];
 

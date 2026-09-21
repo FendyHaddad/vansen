@@ -1,5 +1,5 @@
 <div class="backdrop" (click)="closed.emit()">
-  <div class="panel" (click)="$event.stopPropagation()">
+  <div class="panel" appDialog (dialogClose)="closed.emit()" (click)="$event.stopPropagation()">
     <button type="button" class="close-btn" aria-label="Close" (click)="closed.emit()">
       <ng-icon name="lucideX" size="16" />
     </button>
@@ -21,7 +21,7 @@
       </div>
 
       <div class="meta">
-        <span class="meta-op">{{ item().op }} · {{ item().familyName }}</span>
+        <span class="meta-op" data-dialog-title>{{ item().op }} · {{ item().familyName }}</span>
         <p class="meta-prompt">{{ item().prompt }}</p>
 
         <div class="chip-row">
@@ -68,6 +68,22 @@
               Working…
             </div>
           }
+          @if (item().status === 'failed') {
+            <button
+              type="button"
+              class="action"
+              [disabled]="busy() || !retryable().retry"
+              [attr.aria-label]="retryLabel()"
+              [title]="retryLabel()"
+              (click)="retry.emit(item().id)"
+            >
+              <ng-icon name="lucideRefreshCw" size="15" />
+              Retry
+            </button>
+            @if (!retryable().retry && retryable().reason) {
+              <p class="action-reason">{{ retryable().reason }}</p>
+            }
+          }
           <button type="button" class="action" [disabled]="busy()" (click)="download.emit(item().id)">
             <ng-icon name="lucideDownload" size="15" />
             Download
@@ -77,7 +93,14 @@
               <ng-icon name="lucideSparkles" size="15" />
               Upscale · <span class="num">{{ upscaleCredits }} cr</span>
             </button>
-            <button type="button" class="action" [disabled]="busy()" (click)="variation.emit(item().id)">
+            <button
+              type="button"
+              class="action"
+              [disabled]="busy() || !retryable().variation"
+              [attr.aria-label]="variationLabel()"
+              [title]="variationLabel()"
+              (click)="variation.emit(item().id)"
+            >
               <ng-icon name="lucideSparkles" size="15" />
               Variation · <span class="num">{{ item().priceCredits }} cr</span>
             </button>

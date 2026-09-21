@@ -2,9 +2,9 @@
 
 <div
   class="pm-dialog"
-  role="dialog"
-  aria-modal="true"
+  appDialog
   aria-labelledby="pm-title"
+  (dialogClose)="close()"
   (click)="$event.stopPropagation()"
 >
   <button type="button" class="pm-close" aria-label="Close" (click)="close()">

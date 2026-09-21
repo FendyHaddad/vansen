@@ -2,9 +2,9 @@
 
 <div
   class="cf-dialog"
-  role="dialog"
-  aria-modal="true"
+  appDialog
   aria-labelledby="cf-title"
+  (dialogClose)="close()"
   (click)="$event.stopPropagation()"
 >
   <button type="button" class="cf-close" aria-label="Close" (click)="close()">
@@ -49,14 +49,14 @@
           } @else {
             your period ends.
           }
-          After that they're gone — pack credits included, 30 days later.
+          Plan credits go that day; pack credits last 30 days longer.
         </span>
       </li>
       <li>
         <ng-icon name="lucideCalendarClock" size="14" />
         <span>
-          Your library survives 30 days past the end, then it's deleted. Download anything you
-          want to keep.
+          Your library is deleted the day the plan ends — the paid period is the only grace
+          period. Download anything you want to keep before then.
         </span>
       </li>
     </ul>
@@ -70,7 +70,7 @@
         <div class="cf-tl-track"></div>
         <div class="cf-tl-point">
           <span class="cf-tl-chip">{{ periodEnd() | date: 'MMM d' }}</span>
-          <span class="cf-tl-label">plan ends</span>
+          <span class="cf-tl-label">plan ends, library deleted</span>
         </div>
       </div>
     }

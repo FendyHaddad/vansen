@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
 import {
   CreatePersonaRequest,
@@ -26,6 +27,10 @@ export class PersonaStore {
   readonly items = this.itemsSig.asReadonly();
   readonly slots = this.slotsSig.asReadonly();
   readonly loaded = this.loadedSig.asReadonly();
+
+  constructor() {
+    inject(SessionLifecycle).register('personas', this);
+  }
 
   readyById(id: string): PersonaDto | undefined {
     return this.itemsSig().find((p) => p.id === id && p.status === PersonaStatus.Ready);

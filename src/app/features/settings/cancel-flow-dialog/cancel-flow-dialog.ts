@@ -10,6 +10,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideCalendarClock, lucideCheck, lucideSparkles, lucideX } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
+import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
 export interface CancelReason {
   code: string;
@@ -37,7 +38,7 @@ const REASONS: CancelReason[] = [
   templateUrl: './cancel-flow-dialog.html',
   styleUrl: './cancel-flow-dialog.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, NgIcon, HlmButton],
+  imports: [DatePipe, DecimalPipe, NgIcon, HlmButton, DialogDirective],
   providers: [provideIcons({ lucideCalendarClock, lucideCheck, lucideSparkles, lucideX })],
 })
 export class CancelFlowDialog {

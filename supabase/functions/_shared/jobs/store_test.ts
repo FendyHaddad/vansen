@@ -159,7 +159,7 @@ Deno.test('the fallback content type is used when the response declares none', a
 // ---------------------------------------------------------------- finishJob
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { FakeDb, type Row } from '../testing/fakes.ts';
+import { FakeDb, installRegistryRpcs, type Row } from '../testing/fakes.ts';
 import { finishJob, type FinishDeps, type FinishJob } from './store.ts';
 import type { StorageAdapter } from '../storage/index.ts';
 
@@ -176,6 +176,8 @@ function harness(
   opts: { kind?: 'image' | 'video'; fetchImpl?: typeof fetch } = {},
 ): Harness {
   const db = new FakeDb();
+  // Objects are registered before they are written (P6).
+  installRegistryRpcs(db);
   db.tables.generations = [
     { id: 'g0', user_id: 'u0', kind: opts.kind ?? 'image', status: 'pending', media_path: null, charged_plan: 40 },
   ];
@@ -320,13 +322,17 @@ Deno.test('an unknown settlement keeps the object and releases the claim', async
   assertEquals(h.db.tables.jobs[0].phase, 'rendering');
 });
 
-Deno.test('a stale lease loses the race and its object is dropped', async () => {
+Deno.test('a stale lease loses the race and its object is queued for cleanup', async () => {
   const h = harness();
   // What a stale lease looks like from here: the RPC refuses and reports who won.
   h.db.rpcHandlers.fn_settle_job = () => ({ settled: false, previous: 'failed', refunded: 40 });
   await finishJob(h.deps, { ...JOB, lease_token: 'expired' }, inlineResult(new Uint8Array([1])));
   assertEquals(h.settles.length, 0, 'the stub replaced the recorder');
-  assertEquals(mediaKeys(h.db), []);
+  // The loser's bytes are handed to the cleanup worker, not deleted here: a
+  // best-effort delete that failed used to take the locator with it.
+  assertEquals(h.db.tables.deletion_outbox.length, 1);
+  assertEquals(h.db.tables.deletion_outbox[0].reason, 'orphaned_output');
+  assertEquals(h.db.tables.deletion_outbox[0].object_path, 'u0/g0-0.png');
 });
 
 Deno.test('the lease token is handed to the settlement', async () => {
@@ -344,9 +350,13 @@ Deno.test('a losing attempt can neither overwrite nor delete the winner object',
 
   await finishJob(h.deps, { ...JOB, attempts: 1 }, inlineResult(new Uint8Array([9, 9])));
 
-  assertEquals(mediaKeys(h.db), winner, "the winner's object must survive untouched");
   assertEquals(h.db.tables.generations[0].media_path, 'u0/g0-0.png');
   assertEquals(h.db.storage.objects.get('media/u0/g0-0.png')?.bytes.length, 1);
+  // Only the loser's own key is queued. The winner's is never touched.
+  assertEquals(
+    h.db.tables.deletion_outbox.map((r) => r.object_path),
+    ['u0/g0-1.png'],
+  );
 });
 
 Deno.test('an orphan check that cannot read the row keeps the object', async () => {
@@ -419,4 +429,67 @@ Deno.test('a body LONGER than its declared length is refused mid-stream', async 
     Error,
     'video exceeds byte budget',
   );
+});
+
+Deno.test('a stored object is registered BEFORE it is written and marked live after', async () => {
+  const h = harness();
+  const calls: string[] = [];
+  const inner = (h.db as unknown as { rpcHandlers: Record<string, unknown> }).rpcHandlers;
+  const wrap = (name: string) => {
+    const original = inner[name] as (a: Row, d: FakeDb) => unknown;
+    inner[name] = (a: Row, d: FakeDb) => {
+      calls.push(name);
+      return original(a, d);
+    };
+  };
+  wrap('fn_register_object');
+  wrap('fn_mark_object_live');
+  h.db.storage.onUpload = () => calls.push('upload');
+
+  await finishJob(h.deps, JOB, {
+    state: 'done',
+    bytes: new Uint8Array([1, 2, 3]),
+    contentType: 'image/png',
+  });
+
+  assertEquals(calls, ['fn_register_object', 'upload', 'fn_mark_object_live']);
+  const object = h.db.tables.storage_objects[0];
+  assertEquals(object.bucket, 'media');
+  assertEquals(object.state, 'live');
+});
+
+Deno.test('a registry that will not answer means no bytes are written', async () => {
+  const h = harness();
+  (h.db as unknown as { rpcHandlers: Record<string, unknown> }).rpcHandlers
+    .fn_register_object = () => {
+      throw new Error('registry unavailable');
+    };
+
+  await finishJob(h.deps, JOB, {
+    state: 'done',
+    bytes: new Uint8Array([1, 2, 3]),
+    contentType: 'image/png',
+  });
+
+  assertEquals([...h.db.storage.objects.keys()], [], 'untracked bytes are never written');
+  assertEquals(h.db.tables.generations[0].status, 'failed', 'and the customer is refunded');
+});
+
+Deno.test('a video object is registered against the configured R2 bucket', async () => {
+  const h = harness({
+    kind: 'video',
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { 'content-type': 'video/mp4', 'content-length': '3' },
+        }),
+      ),
+  });
+
+  await finishJob(h.deps, JOB, { state: 'done', url: 'https://provider/v.mp4', contentType: 'video/mp4' });
+
+  const object = h.db.tables.storage_objects[0];
+  assertEquals(object.backend, 'r2');
+  assertEquals(object.bucket, 'vansen-test');
+  assertEquals(object.state, 'live');
 });

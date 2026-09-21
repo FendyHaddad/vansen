@@ -425,3 +425,12 @@
   border-top-color: var(--foreground);
   animation: spin 0.7s linear infinite;
 }
+
+/* Sits below the last tile. Its only job is to cross into view. */
+.grid-sentinel {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+}

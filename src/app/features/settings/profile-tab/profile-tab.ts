@@ -81,7 +81,10 @@ export class ProfileTab {
 
   async deleteAccount(): Promise<void> {
     if (this.deleting()) return;
-    if (!confirm('Delete your account? Library, balance, and history are wiped. This cannot be undone.')) {
+    const warning = 'Delete your account? Your library, personas and balance are removed ' +
+      'immediately and permanently — this cannot be undone. Anonymised billing records are ' +
+      'kept for tax and chargeback purposes.';
+    if (!confirm(warning)) {
       return;
     }
     this.deleting.set(true);

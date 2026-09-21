@@ -2,10 +2,10 @@
 // Do not edit. Regenerate and copy in whenever CATALOG_VERSION changes.
 // ignore_for_file: prefer_single_quotes
 
-const String kCatalogVersion = "2026-09-20.2";
+const String kCatalogVersion = "2026-09-21.1";
 
 const Map<String, dynamic> kCatalogFixture = {
-  "catalogVersion": "2026-09-20.2",
+  "catalogVersion": "2026-09-21.1",
   "studioMargin": 0.4,
   "planCredits": {
     "studio": 1500,
@@ -79,6 +79,7 @@ const Map<String, dynamic> kCatalogFixture = {
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -114,6 +115,7 @@ const Map<String, dynamic> kCatalogFixture = {
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": true
       }
@@ -141,6 +143,20 @@ const Map<String, dynamic> kCatalogFixture = {
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": {
+          "4:3": [
+            "4MP"
+          ],
+          "3:4": [
+            "4MP"
+          ],
+          "16:9": [
+            "4MP"
+          ],
+          "9:16": [
+            "4MP"
+          ]
+        },
         "imageInput": false,
         "maskInput": false
       }
@@ -168,6 +184,7 @@ const Map<String, dynamic> kCatalogFixture = {
         "durations": null,
         "modes": null,
         "audio": null,
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -207,6 +224,7 @@ const Map<String, dynamic> kCatalogFixture = {
           "extend"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -245,6 +263,7 @@ const Map<String, dynamic> kCatalogFixture = {
           "edit"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -274,6 +293,7 @@ const Map<String, dynamic> kCatalogFixture = {
           "keyframes"
         ],
         "audio": "selectable",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -304,6 +324,7 @@ const Map<String, dynamic> kCatalogFixture = {
           "i2v"
         ],
         "audio": "none",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }
@@ -336,6 +357,7 @@ const Map<String, dynamic> kCatalogFixture = {
           "ref2v"
         ],
         "audio": "included",
+        "resolutionExclusions": null,
         "imageInput": true,
         "maskInput": false
       }

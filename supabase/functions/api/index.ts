@@ -4,6 +4,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import Stripe from "npm:stripe@17";
 import { createApp } from "./app.ts";
+import { releaseFlagsFromEnv } from "./services/public-capabilities.ts";
 import { adapterFor } from "./_shared/providers/index.ts";
 import { storageFor } from "./_shared/storage/index.ts";
 import { moderate } from "./_shared/moderation.ts";
@@ -42,6 +43,7 @@ const app = createApp({
       pro: Deno.env.get("STRIPE_PRO_PRICE_ID"),
     },
     launchCouponId: Deno.env.get("STRIPE_LAUNCH_COUPON_ID"), // $5 off, 2 months
+    releaseFlags: releaseFlagsFromEnv((k) => Deno.env.get(k)),
   },
   now: () => new Date(),
 });

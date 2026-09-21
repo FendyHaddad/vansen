@@ -77,10 +77,14 @@
         </p>
       } @else if (!isOwner()) {
         <p class="small">
-          Pick a plan to start creating — Studio <span class="num">$15</span>/mo
-          (1,500 cr) or Pro <span class="num">$30</span>/mo (3,750 cr + video).
+          Pick a plan to start creating — Studio
+          <span class="num">${{ studioPriceUsd }}</span>/mo ({{ studioCredits | number }} cr)
+          or Pro <span class="num">${{ proPriceUsd }}</span>/mo ({{ proCredits | number }} cr
+          + video).
         </p>
-        <p class="muted small">Launch offer: $10 / $25 for your first 60 days.</p>
+        <p class="muted small">
+          Launch offer: ${{ studioPromoUsd }} / ${{ proPromoUsd }} for your first 60 days.
+        </p>
       }
 
       @if (subscription(); as sub) {
@@ -93,16 +97,16 @@
         }
         @if (canceledPending()) {
           <p class="warn-text small">
-            Your plan ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — pack credits
-            expire 30 days after, and your library is deleted after the same grace period.
+            Your plan ends {{ sub.currentPeriodEnd | date: 'mediumDate' }} — your library is
+            deleted that day, and pack credits expire 30 days later.
           </p>
         } @else if (plan() && sub.currentPeriodEnd) {
           <p class="muted small">Renews {{ sub.currentPeriodEnd | date: 'mediumDate' }}</p>
         }
-        @if (graceDaysLeft(); as days) {
+        @if (daysUntilPurge(); as days) {
           <p class="warn-text small">
-            Subscription lapsed — <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }}
-            left to download your library or resubscribe before deletion.
+            <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }} left to download
+            your library or resubscribe — it is deleted when the paid period ends.
           </p>
         }
         <div class="studio-actions">

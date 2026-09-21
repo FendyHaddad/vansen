@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web';
 import { PixelBuffer, clonePixels } from '../pixel-buffer';
 import { depthModelProgress } from './engine-status';
-import { getOrtSession } from './model-loader';
+import { acquireOrtSession } from './model-loader';
 import { resizeBilinear, resizeFloatMap, toPlanarFloat } from './raster';
 
 /**
@@ -11,8 +11,6 @@ import { resizeBilinear, resizeFloatMap, toPlanarFloat } from './raster';
  * only re-render the blur.
  */
 
-const MODEL_URL =
-  'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model_quantized.onnx';
 const SIZE = 518;
 /** Long-side cap for the blur working copy — full-res sharp pixels stay. */
 const WORK_MAX = 1400;
@@ -23,13 +21,19 @@ const depthCache = new WeakMap<Uint8ClampedArray, Float32Array>();
 export async function depthMap(buf: PixelBuffer): Promise<Float32Array> {
   const hit = depthCache.get(buf.data);
   if (hit) return hit;
-  const session = await getOrtSession(MODEL_URL, depthModelProgress);
-  const small = resizeBilinear(buf, SIZE, SIZE);
-  const planes = toPlanarFloat(small, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]);
-  const results = await session.run({
-    [session.inputNames[0]]: new ort.Tensor('float32', planes, [1, 3, SIZE, SIZE]),
-  });
-  const raw = results[session.outputNames[0]].data as Float32Array;
+  const lease = await acquireOrtSession('bokeh-depth-anything', depthModelProgress);
+  let raw: Float32Array;
+  try {
+    const session = lease.session;
+    const small = resizeBilinear(buf, SIZE, SIZE);
+    const planes = toPlanarFloat(small, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]);
+    const results = await session.run({
+      [session.inputNames[0]]: new ort.Tensor('float32', planes, [1, 3, SIZE, SIZE]),
+    });
+    raw = results[session.outputNames[0]].data as Float32Array;
+  } finally {
+    await lease.release();
+  }
   let min = Infinity;
   let max = -Infinity;
   for (let i = 0; i < raw.length; i++) {

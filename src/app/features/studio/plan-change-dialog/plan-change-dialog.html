@@ -2,9 +2,9 @@
 
 <div
   class="pc-dialog"
-  role="dialog"
-  aria-modal="true"
+  appDialog
   aria-labelledby="pc-title"
+  (dialogClose)="close()"
   (click)="$event.stopPropagation()"
 >
   <button type="button" class="pc-close" aria-label="Close" (click)="close()">

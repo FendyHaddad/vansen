@@ -38,10 +38,17 @@ import {
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import {
+  LOCAL_TOOLS,
+  PRO_TOOLS,
+  toolLabels,
+  toolsFor,
+} from '../../../core/catalog/entitlements';
+import {
   EDIT_TOOLS,
   PLAN_CREDITS,
   PLAN_PRICE_USD,
   PLAN_PROMO_USD,
+  PRO_EXTRA_CREDIT_PERCENT,
 } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
@@ -51,53 +58,20 @@ import { ProfileStore } from '../../../core/profile/profile-store';
 import { StudioTool } from '../studio-tool';
 import { ToolOptions } from '../tool-options/tool-options';
 
-interface LocalToolDef {
-  id: StudioTool;
-  label: string;
-  icon: string;
-}
-
-const LOCAL_TOOLS: LocalToolDef[] = [
-  { id: 'crop', label: 'Crop', icon: 'lucideCrop' },
-  { id: 'adjust', label: 'Adjust', icon: 'lucideSlidersHorizontal' },
-  { id: 'filters', label: 'Filters', icon: 'lucidePalette' },
-  { id: 'sharpen', label: 'Sharpen', icon: 'lucideWand' },
-  { id: 'smooth', label: 'Smooth', icon: 'lucideWand' },
-  { id: 'heal', label: 'Spot Heal', icon: 'lucideBrush' },
-  { id: 'dehaze', label: 'Dehaze', icon: 'lucideCloudFog' },
-  { id: 'portraitsmooth', label: 'Portrait Smooth', icon: 'lucideSmile' },
-];
-
-/** Pro-tier locals — pro/owner subscribers only (see `proLocked`). */
-const PRO_TOOLS: LocalToolDef[] = [
-  { id: 'select', label: 'Ai Select', icon: 'lucideMousePointerClick' },
-  { id: 'upscale', label: 'Ai Upscale', icon: 'lucideMaximize2' },
-  { id: 'aisharpen', label: 'Ai Sharpen', icon: 'lucideFocus' },
-  { id: 'bgremove', label: 'Cut Out', icon: 'lucideImageOff' },
-  { id: 'bokeh', label: 'Bokeh', icon: 'lucideAperture' },
-  { id: 'enhance', label: 'Enhance', icon: 'lucideSun' },
-  { id: 'levels', label: 'Levels', icon: 'lucideChartNoAxesColumn' },
-  { id: 'clone', label: 'Clone', icon: 'lucideStamp' },
-  { id: 'retouch', label: 'Retouch', icon: 'lucideEclipse' },
-  { id: 'perspective', label: 'Perspective', icon: 'lucideMove3d' },
-  { id: 'liquify', label: 'Liquify', icon: 'lucideScan' },
-  { id: 'erase', label: 'Magic Erase', icon: 'lucideEraser' },
-];
-
 interface PlanPitch {
   title: string;
   sub: string;
   perks: string[];
 }
 
-/** Lock-card copy per tier. Prices/credits come from the catalog so this card,
- * the plans page and the pricing page can never drift apart. */
+/** Lock-card copy per tier. Prices, credits and tool names all come from the
+ * catalog, so this card, the plans page and the landing page cannot drift. */
 const PLAN_PITCH: Record<'studio' | 'pro', PlanPitch> = {
   studio: {
     title: 'Studio Editing',
     sub: 'Unlock the full editing suite for every image you generate.',
     perks: [
-      'Crop, adjust, filters, heal — free',
+      `${toolLabels(toolsFor('studio')).filter((l) => l !== 'Mask').slice(0, 4).join(', ')} and more — free`,
       'AI remove, fill & expand from 5 credits',
       `${PLAN_CREDITS.studio.toLocaleString()} credits included every month`,
       'Every edit saved as a new version',
@@ -108,9 +82,9 @@ const PLAN_PITCH: Record<'studio' | 'pro', PlanPitch> = {
     sub: 'Everything in Studio, plus the Pro tools and video generation.',
     perks: [
       'Everything in Studio',
-      'Cut Out, Bokeh, Upscale, AI Sharpen, Magic Erase — free',
+      `${toolLabels(toolsFor('pro')).join(', ')} — free`,
       'Video models — Pro only',
-      `${PLAN_CREDITS.pro.toLocaleString()} credits every month — 25% more per dollar`,
+      `${PLAN_CREDITS.pro.toLocaleString()} credits every month — ${PRO_EXTRA_CREDIT_PERCENT}% more per dollar`,
     ],
   },
 };

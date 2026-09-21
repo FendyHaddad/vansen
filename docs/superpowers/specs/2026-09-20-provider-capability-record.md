@@ -94,9 +94,10 @@ and `max` quality levels).
 | aspectRatio | **Not accepted by either endpoint.** Must be expressed through `image_size` | both pages | |
 | reference image | `image_url` is not in the documented `flux-2` schema; v1.1 has no reference either. A reference needs a different slug (kontext / image-to-image variant) | both pages | |
 
-**The catalog sells a model the code does not call.** The blurb, the per-megapixel
-price story and the MP axis all describe FLUX.2; the adapter calls FLUX 1.1 [pro]
-and sends it a parameter it does not accept.
+**The catalog sells a model the code does not call.** The blurb and the MP axis
+describe FLUX.2; the adapter calls FLUX 1.1 [pro] and sends it a parameter it
+does not accept. (Resolved by moving to `fal-ai/flux-2`. The per-megapixel
+*price* story was rejected — retail stays flat, see the foot of this file.)
 
 ---
 
@@ -128,10 +129,10 @@ prove reaches the provider and changes the output comes out of the catalog.
 | gpt-image resolution 1K/2K/4K | **wire** | `size` takes arbitrary WxH on v2+. Cap at the documented 3840×2160; compute WxH from aspect ratio and cap, both dims divisible by 16. Keep 2K/4K gated to v2. |
 | gpt-image quality | **wire** (already sent) | Real parameter; already transmitted correctly. |
 | gpt-image reference on generate | **remove** from generate | `/images/generations` has no reference input. Either route a reference to `/images/edits` or stop advertising it on generate. Carry-forward from P1. |
-| flux — which endpoint | **APPROVED: move to `fal-ai/flux-2`** | Owner decision 2026-09-21. This is what the blurb and the per-megapixel price story already describe. `slugFor` in `fal.ts` changes with it. |
-| flux resolution 1MP/2MP/4MP | **wire via `image_size: {width,height}`** | 512–2048 ceiling means 4MP = 2048×2048 exactly; 1MP = 1024×1024; 2MP = 1448×1448. Dimensions derive from the chosen aspect ratio at the target megapixel count, clamped to 512–2048. |
+| flux — which endpoint | **APPROVED: move to `fal-ai/flux-2`** | Owner decision 2026-09-21. `slugFor` in `fal.ts` changes with it. Retail stays flat per tier — see the resolved price section at the foot of this file. |
+| flux resolution 1MP/2MP/4MP | **wire via `image_size: {width,height}`** | 512–2048 ceiling means 4MP = 2048×2048 exactly; 1MP = 1024×1024; 2MP = 1448×1448. Dimensions derive from the chosen aspect ratio at the target megapixel count, clamped to 512–2048. Because the clamp puts 4MP out of reach off-square, that tier is not offered there at all. |
 | flux aspectRatio | **wire via `image_size`** | Currently dead on both endpoints. Derive WxH from ratio × target megapixels. |
-| flux provider cost | **re-derived — OWNER WANTS THIS REVISITED** | Catalog assumes $0.03/$0.06/$0.12. FLUX.2 quotes $0.012/MP → $0.012/$0.024/$0.048. The margin formula is being fed a cost ~2.5× too high. |
+| flux provider cost | **RESOLVED: flat tiers kept** | Owner decision 2026-09-21. $0.03/$0.06/$0.12 stands; fal's $0.012/MP is documentation, never an invoice. The 2048 clamp is answered by withholding 4MP off-square, not by discounting it. |
 | flux reference image | **APPROVED: remove** | Owner decision 2026-09-21. `fal-ai/flux-2` documents no reference parameter, so `capabilities.imageInput` becomes `false` for FLUX and the composer stops offering a reference on that family. P8 owns the copy change. |
 | seedream resolution 1K/2K/4K | **wire** | `auto_2K` / `auto_4K` are real enum values. |
 | seedream aspectRatio | **wire via `image_size`** | Currently dead. |
@@ -199,25 +200,55 @@ finalised, and P3 Tasks 2–6 can proceed.
 
 ---
 
-## OPEN: revisit the FLUX price before release
+## RESOLVED: the FLUX price stays flat; the 4MP tier is withheld off-square
 
-**Raised by the owner 2026-09-21.** P3 re-derived FLUX's provider cost from
-fal's published $0.012/MP, on the assumption that the old flat
-$0.03/$0.06/$0.12 tiers were a stale guess. **The owner believes those numbers
-may have been deliberate** — a margin buffer, a different endpoint's rate, or a
-negotiated price — not an error.
+**Raised by the owner 2026-09-21, decided the same day.** P3 had re-derived
+FLUX's provider cost from fal's published $0.012/MP, on the assumption that the
+old flat $0.03/$0.06/$0.12 tiers were a stale guess. They were not. The owner's
+decision: **keep the flat tiers, and fix the label instead.**
 
-What the change did, so it can be judged or undone in one place:
-- `providerCost` for `flux` now returns `FLUX_USD_PER_MP x actual megapixels`,
-  using `FLUX_DIMS` in `src/app/core/catalog/model-families.ts`.
-- 1MP square: 5 credits -> 3. "4MP" 16:9: 20 credits -> 5.
-- Price now varies by aspect ratio within one resolution label, because the
-  512-2048 clamp means only 1:1 reaches 4MP.
+### Why flat
 
-To restore the old behaviour: set `providerCost` back to the flat
-`{'1MP': 0.03, '2MP': 0.06, '4MP': 0.12}` table, revert the expectation in
-`src/app/core/catalog/model-families.spec.ts`, bump `CATALOG_VERSION`, and
-re-run `npm run sync-shared` + `npm run export-catalog`. The wiring work (the
-request actually carrying the size) is independent and stays either way.
+- The tiers are monotonic and legible — 5/10/20 credits, doubling, identical at
+  every aspect ratio. Per-megapixel pricing rounded to whole credits is not: two
+  adjacent sizes can cost the same, and a wide "4MP" can cost less than a square
+  2MP.
+- Realised margin under the formula swings between 43% and 59% purely on which
+  side of a credit boundary the pixel count lands, against a nominal 40%. The
+  flat tiers hold ~75%.
+- Gross profit per 1MP job would have fallen from 3.7c to 1.7c.
+- **$0.012/MP has never been seen on an invoice.** It is a number from a model
+  page, in a record whose own header says nothing here may be treated as proven.
+  The flat tiers have enough headroom to absorb being wrong about it.
 
-**Decide before the P9 release gate.**
+### The part of P3's finding that was real
+
+At 16:9 the old table charged 20 credits for a tier labelled "4MP" that the
+endpoint cannot produce: both edges clamp to 2048, so 16:9 tops out at
+2048x1152 = 2.36MP. That was 86% margin on a label that overstated the output,
+and worse, a trap — the 2MP tier at 16:9 gave 2.01MP for half the price, so the
+4MP tier was strictly bad value for 17% more pixels.
+
+**Fixed by withholding the tier, not by discounting it.** `capabilities.
+resolutionExclusions` on the flux family removes 4MP at 4:3, 3:4, 16:9 and 9:16.
+Every surviving tier now delivers what its label says.
+
+### Where it is enforced
+
+| Layer | Mechanism |
+|---|---|
+| Catalog | `resolutionExclusions` on the family; `resolutionsFor(family, aspectRatio)` is the one reader |
+| Composer | `resolutionOptions` filters by the current ratio; `setAxis('aspectRatio')` clamps a now-illegal selection up to the largest tier still offered |
+| Server | `validateSettings` checks the ratio first, then the tier against `resolutionsFor` — a stale client is refused before charge |
+| Mobile | `resolutionExclusions` is exported in `contracts/catalog/catalog.json` and the Dart fixture |
+| Drift | the catalog fingerprint now covers prices and exclusions, not just which chips exist, so a silent reprice fails a test |
+
+`CATALOG_VERSION` is `2026-09-21.1`; fingerprint `-1059c67b`. The mobile repo
+needs the regenerated Dart fixture.
+
+### Still unverified
+
+The flat tiers are a retail decision and need no provider evidence, but the
+**underlying fal rate has still never been checked against a bill**. If the real
+cost exceeds $0.018/MP the 1MP tier's margin starts eroding; above $0.03/MP it
+is underwater. First invoice after live smoke settles it.

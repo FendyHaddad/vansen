@@ -16,7 +16,8 @@
       <p class="hero-sub">
         Vansen puts Google, OpenAI, Black Forest Labs and ByteDance behind one prompt box —
         then hands you a full editor to finish the job. Your subscription comes back as
-        monthly credits: $15 buys 1,500, $30 buys 3,750 plus video.
+        monthly credits: ${{ studioPriceUsd }} buys {{ studioCredits | number }},
+        ${{ proPriceUsd }} buys {{ proCredits | number }} plus video.
       </p>
       <div class="hero-ctas">
         <a routerLink="/login" hlmBtn size="lg">
@@ -93,7 +94,7 @@
     </p>
 
     <div class="family-grid mt-10">
-      @for (family of imageFamilies; track family.id) {
+      @for (family of imageFamilies(); track family.id) {
         <div class="family-card" data-reveal>
           <div class="family-card-top">
             <img [src]="family.logo" [alt]="family.provider" class="family-card-logo" />
@@ -105,22 +106,25 @@
       }
     </div>
 
-    <div class="video-teaser mt-6" data-reveal>
-      <div class="video-teaser-head">
-        <ng-icon name="lucideVideo" size="16" />
-        <h3>Video is next</h3>
-        <span hlmBadge variant="secondary">Pro plan</span>
+    <!-- Named only while the deployment has them switched on. -->
+    @if (videoFamilies().length) {
+      <div class="video-teaser mt-6" data-reveal>
+        <div class="video-teaser-head">
+          <ng-icon name="lucideVideo" size="16" />
+          <h3>Video is next</h3>
+          <span hlmBadge variant="secondary">Pro plan</span>
+        </div>
+        <p class="video-teaser-body">
+          @for (f of videoFamilies(); track f.id; let last = $last) {
+            <span class="video-teaser-name">{{ f.name }}</span>{{ last ? '' : ' · ' }}
+          }
+        </p>
+        <p class="video-teaser-note">
+          The same per-clip credit pricing, the same private library — cinematic clips with
+          native audio, exclusive to the Pro plan.
+        </p>
       </div>
-      <p class="video-teaser-body">
-        @for (f of videoFamilies; track f.id; let last = $last) {
-          <span class="video-teaser-name">{{ f.name }}</span>{{ last ? '' : ' · ' }}
-        }
-      </p>
-      <p class="video-teaser-note">
-        The same per-clip credit pricing, the same private library — cinematic clips with
-        native audio, exclusive to the Pro plan.
-      </p>
-    </div>
+    }
   </section>
 
   <!-- Studio editing -->
@@ -130,14 +134,21 @@
       <h2 class="section-heading">Generating is half the work.<br />The editor is the other half.</h2>
       <p class="section-sub">
         Every image opens on a canvas with a full editing suite — the kind you'd otherwise
-        pay a photo app for, included with every plan.
+        pay a photo app for.
       </p>
 
       <div class="chip-cloud mt-10" data-reveal>
+        <span class="tool-chip tool-chip-free">Every plan</span>
         @for (chip of studioToolChips; track chip) {
           <span class="tool-chip">{{ chip }}</span>
         }
-        <span class="tool-chip tool-chip-free">all included</span>
+      </div>
+
+      <div class="chip-cloud mt-4" data-reveal>
+        <span class="tool-chip tool-chip-pro">Pro</span>
+        @for (chip of proToolChips; track chip) {
+          <span class="tool-chip">{{ chip }}</span>
+        }
       </div>
 
       <div class="pillar-grid mt-12">
@@ -178,9 +189,10 @@
           <p class="eyebrow">Pricing</p>
           <h2 class="section-heading">Two plans.<br />Full value back in credits.</h2>
           <p class="section-sub">
-            Studio is $15/mo for 1,500 credits and every image model. Pro is $30/mo for
-            3,750 credits — 25% more per dollar — plus video. Run low? Add a one-time
-            credit pack that rolls over while you stay subscribed.
+            Studio is ${{ studioPriceUsd }}/mo for {{ studioCredits | number }} credits and
+            every image model. Pro is ${{ proPriceUsd }}/mo for {{ proCredits | number }}
+            credits — {{ proExtraCreditPercent }}% more per dollar — plus video. Run low?
+            Add a one-time credit pack that rolls over while you stay subscribed.
           </p>
           <a routerLink="/pricing" hlmBtn variant="outline" class="mt-6">
             See full pricing

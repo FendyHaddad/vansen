@@ -1,0 +1,45 @@
+<main class="auth-shell">
+  <div class="auth-card">
+    <a routerLink="/" class="site-brand">Vansen</a>
+    <h1>Choose a new password</h1>
+
+    @if (ready()) {
+      <p class="auth-sub">At least 8 characters. You'll be signed in afterwards.</p>
+
+      <form (submit)="$event.preventDefault(); submit()" class="space-y-4">
+        <div class="space-y-2">
+          <label hlmLabel for="reset-password">New password</label>
+          <input
+            id="reset-password"
+            hlmInput
+            type="password"
+            autocomplete="new-password"
+            class="w-full"
+            placeholder="••••••••"
+            [value]="password()"
+            (input)="password.set($any($event.target).value)"
+          />
+        </div>
+
+        <p class="auth-live" role="status" aria-live="polite">{{ error() }}</p>
+
+        @if (expired()) {
+          <a href="/recover" class="linkish">Request a new link</a>
+        }
+
+        <button hlmBtn type="submit" class="w-full" [disabled]="pending()">
+          {{ pending() ? 'One moment…' : 'Set password' }}
+        </button>
+      </form>
+    } @else {
+      <p class="auth-sub">
+        Open the reset link from your email to set a new password. Links work once
+        and expire shortly after they're sent.
+      </p>
+      <div class="auth-actions">
+        <a href="/recover" class="linkish">Request a reset link</a>
+        <a routerLink="/login" class="linkish">Back to sign in</a>
+      </div>
+    }
+  </div>
+</main>

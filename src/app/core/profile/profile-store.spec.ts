@@ -132,3 +132,62 @@ describe('ProfileStore plan computeds', () => {
     expect(store.studioActive()).toBe(false);
   });
 });
+
+/**
+ * The countdown runs BEFORE the library goes. The old `graceDaysLeft` counted
+ * 30 days after the period had already ended — a window retention policy D2
+ * removed, and one the customer could no longer act inside anyway.
+ */
+describe('ProfileStore daysUntilPurge', () => {
+  const apiMock = { get: vi.fn(), patch: vi.fn(), delete: vi.fn() };
+  const ledgerMock = { setCredits: vi.fn() };
+  const prefsMock = { applyServerPrefs: vi.fn() };
+
+  function make(): ProfileStore {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ApiService, useValue: apiMock },
+        { provide: LedgerService, useValue: ledgerMock },
+        { provide: PreferencesService, useValue: prefsMock },
+      ],
+    });
+    return TestBed.inject(ProfileStore);
+  }
+
+  beforeEach(() => {
+    apiMock.get.mockReset();
+    ledgerMock.setCredits.mockReset();
+    prefsMock.applyServerPrefs.mockReset();
+  });
+
+  it('counts the days a cancelled plan has left', async () => {
+    const end = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'canceled', currentPeriodEnd: end }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.daysUntilPurge()).toBe(3);
+  });
+
+  it('says nothing once the period has ended — there is no grace after it', async () => {
+    const past = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'expired', currentPeriodEnd: past }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.daysUntilPurge()).toBeNull();
+  });
+
+  it('is silent while the subscription is simply renewing', async () => {
+    const end = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'pro', status: 'active', currentPeriodEnd: end }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.daysUntilPurge()).toBeNull();
+  });
+});

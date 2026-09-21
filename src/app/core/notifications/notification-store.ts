@@ -1,4 +1,5 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { currentUid, readCache, writeCache } from '../api/local-cache';
 
 export type NotificationKind = 'refund' | 'ready' | 'blocked';
@@ -44,6 +45,7 @@ export class NotificationStore {
 
   constructor() {
     this.ready = this.restore();
+    inject(SessionLifecycle).register('notifications', this);
   }
 
   private async restore(): Promise<void> {

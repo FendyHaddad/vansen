@@ -30,7 +30,7 @@ import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
 import { ApiError } from '../../core/api/api-service';
-import { clearAllCaches } from '../../core/api/local-cache';
+import type { RetryableDto } from '../../core/api/dtos';
 import { MediaCache } from '../../core/media/media-cache';
 import { GenerationOp } from '../../core/enums';
 import { referenceRoutingFor } from './reference-routing';
@@ -53,6 +53,7 @@ import { CreditPacksDialog } from './credit-packs-dialog/credit-packs-dialog';
 import { PersonaManager } from './persona-manager/persona-manager';
 import { VideoPickerDialog } from './video-picker-dialog/video-picker-dialog';
 import { PersonaStore } from '../../core/personas/persona-store';
+import { ConfirmService } from '../../shared/confirm/confirm-service';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
@@ -74,6 +75,31 @@ async function fetchBlob(url: string): Promise<Blob> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
   return res.blob();
+}
+
+/**
+ * Plain words for what just happened, for the polite live region.
+ *
+ * Deliberately short and countable: a screen reader reads this aloud over
+ * whatever the person is doing, so it says what changed and stops.
+ */
+export function announcementFor(changed: GenerationItem[]): string {
+  const done = changed.filter((i) => i.status === 'done').length;
+  const failed = changed.filter((i) => i.status === 'failed');
+  const cancelled = failed.filter((i) => i.failure?.cancelled).length;
+  const broken = failed.length - cancelled;
+
+  const parts: string[] = [];
+  if (done) parts.push(`${done} ${done === 1 ? 'generation is' : 'generations are'} ready`);
+  // "Failed" alone leaves the obvious question unanswered, and the refund is
+  // the part that decides whether to try again.
+  if (broken) {
+    parts.push(
+      `${broken} ${broken === 1 ? 'generation' : 'generations'} failed and ${broken === 1 ? 'was' : 'were'} refunded`,
+    );
+  }
+  if (cancelled) parts.push(`${cancelled} cancelled and refunded`);
+  return parts.join('. ');
 }
 
 @Component({
@@ -130,6 +156,7 @@ export class WorkspacePage {
   readonly tour = inject(TourService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly confirm = inject(ConfirmService);
 
   readonly rail = viewChild.required(LeftPanel);
   readonly viewport = viewChild(CanvasViewport);
@@ -149,8 +176,10 @@ export class WorkspacePage {
   readonly planCredits = this.ledger.planCredits;
   readonly isOwner = this.profileStore.isOwner;
   readonly studioActive = this.profileStore.studioActive;
-  readonly graceDaysLeft = this.profileStore.graceDaysLeft;
+  readonly daysUntilPurge = this.profileStore.daysUntilPurge;
   readonly generations = this.store.items;
+  readonly hasMoreItems = this.store.hasMore;
+  readonly loadingMoreItems = this.store.loadingMore;
   readonly pendingVideoCount = this.store.pendingVideoCount;
   readonly samplePrompts = SAMPLE_PROMPTS;
 
@@ -165,6 +194,8 @@ export class WorkspacePage {
 
   /** Open item in the detail overlay, null = closed. */
   readonly openedId = signal<string | null>(null);
+  /** Server's answer for the open item. Off until it says otherwise. */
+  readonly retryable = signal<RetryableDto>({ retry: false, variation: false });
   readonly openedItem = computed(() => {
     const id = this.openedId();
     return id ? (this.store.byId(id) ?? null) : null;
@@ -176,6 +207,19 @@ export class WorkspacePage {
 
   /** Inline notice banner (errors, phase hints). */
   readonly notice = signal('');
+
+  /**
+   * Spoken, not shown.
+   *
+   * A generation finishing rewrites a tile in the grid with nothing to mark
+   * the change, so a screen-reader user had no way to know a render they had
+   * been waiting on was done, refunded or lost. This is read out politely, on
+   * its own, without moving focus.
+   */
+  readonly liveMessage = signal('');
+
+  /** Statuses as of the last announcement, so only changes are spoken. */
+  private readonly lastStatus = new Map<string, string>();
 
   /** Set when 2 strikes suspend the account — blocks the whole workspace. */
   readonly suspended = signal(false);
@@ -209,6 +253,16 @@ export class WorkspacePage {
   }
 
   constructor() {
+    // The router guard cannot see a tab close or a reload. This is the only
+    // hook the browser offers, and it only counts when the handler is
+    // registered while the canvas is genuinely dirty.
+    effect((onCleanup) => {
+      if (!this.editSession.dirty()) return;
+      const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+      addEventListener('beforeunload', warn);
+      onCleanup(() => removeEventListener('beforeunload', warn));
+    });
+
     // Deep link from the absorbed /app/edit/:id route.
     const editParam = this.route.snapshot.paramMap.get('id');
     void this.refresh().then(() => {
@@ -227,6 +281,21 @@ export class WorkspacePage {
       });
     });
 
+    // Speak completions, failures and refunds as they land.
+    effect(() => {
+      const settled = this.store.items().filter((i) => i.status !== 'pending');
+      const changed = settled.filter((i) => this.lastStatus.get(i.id) !== i.status);
+      for (const item of settled) this.lastStatus.set(item.id, item.status);
+      // First load settles the whole library at once; announcing all of it
+      // would read the page aloud to someone who just arrived.
+      if (!this.announcedOnce) {
+        this.announcedOnce = true;
+        return;
+      }
+      if (changed.length === 0) return;
+      this.liveMessage.set(announcementFor(changed));
+    });
+
     // When an AI edit on the open session's chain completes, jump to the result.
     effect(() => {
       const items = this.store.items();
@@ -241,16 +310,25 @@ export class WorkspacePage {
           i.id !== this.editSession.item()?.id &&
           this.aiOpened !== i.id,
       );
-      if (ready) {
-        this.aiOpened = ready.id;
-        this.notice.set('AI edit ready — opening the result.');
-        void this.enterEdit(ready.id);
+      if (!ready) return;
+      this.aiOpened = ready.id;
+      // Opening it would replace the canvas. If there is unsaved work on it,
+      // that is the customer's to decide — the result is in the library
+      // either way.
+      if (this.editSession.dirty()) {
+        this.notice.set('AI edit ready — it is in your library.');
+        return;
       }
+      this.notice.set('AI edit ready — opening the result.');
+      void this.enterEdit(ready.id);
     });
   }
 
   /** Last AI-edit result auto-opened, so the effect fires once per result. */
   private aiOpened: string | null = null;
+
+  /** The library's first settle is history, not news. */
+  private announcedOnce = false;
 
   /**
    * Resume a plan picked on the pricing page before signing in. Runs after
@@ -425,16 +503,42 @@ export class WorkspacePage {
     }
   }
 
-  onReferencePicked(id: string): void {
-    const item = this.store.byId(id);
+  async onReferencePicked(id: string): Promise<void> {
+    const item = await this.store.fetchById(id);
     if (item && item.kind === 'image') {
       this.rail().setReference({ id, uploadId: null, url: item.mediaUrl });
     }
     this.pickingReference.set(false);
   }
 
-  onOpened(id: string): void {
+  /**
+   * A grid row carries a thumbnail, not the original. Opening it fetches the
+   * signed media — and its parent's, because the detail view shows both.
+   */
+  async onOpened(id: string): Promise<void> {
     this.openedId.set(id);
+    // Assume nothing until the server answers: a control that turns out to be
+    // dead is worse than one that appears a moment late.
+    this.retryable.set({ retry: false, variation: false });
+    void this.loadRetryable(id);
+    const item = await this.store.fetchById(id);
+    if (item?.parentId) void this.store.fetchById(item.parentId);
+  }
+
+  /** What the open item can actually do, and why not when it cannot. */
+  private async loadRetryable(id: string): Promise<void> {
+    try {
+      const answer = await this.store.retryable(id);
+      if (this.openedId() === id) this.retryable.set(answer);
+    } catch {
+      // The probe is an affordance, not the operation. If it cannot be
+      // reached, leave the controls off rather than promising anything.
+    }
+  }
+
+  /** The library asked for the next page — the end of the grid is in view. */
+  onMoreWanted(): void {
+    void this.store.loadMore();
   }
 
   async onDeleted(id: string): Promise<void> {
@@ -466,7 +570,7 @@ export class WorkspacePage {
 
   async onDownload(id: string): Promise<void> {
     await this.withBusy(id, async () => {
-      const item = this.store.byId(id);
+      const item = await this.store.fetchById(id);
       if (!item) return;
       // Images serve from the media cache — an already-viewed image downloads
       // free. Videos stream straight through: multi-MB clips have no business
@@ -512,23 +616,7 @@ export class WorkspacePage {
   }
 
   async onVariation(id: string): Promise<void> {
-    await this.withBusy(id, async () => {
-      const item = this.store.byId(id);
-      if (!item) return;
-      try {
-        await this.store.create({
-          familyId: item.familyId,
-          op: GenerationOp.Variation,
-          prompt: item.prompt,
-          settings: item.settings,
-          batch: 1,
-        });
-        this.notice.set('');
-        this.poller.watch();
-      } catch (e) {
-        this.showError(e, 'Variation failed');
-      }
-    });
+    await this.rerun(id, () => this.store.variation(id), 'Variation failed');
   }
 
   onEdit(id: string): void {
@@ -537,8 +625,11 @@ export class WorkspacePage {
   }
 
   async enterEdit(id: string): Promise<void> {
-    const item = this.store.byId(id);
+    const item = await this.store.fetchById(id);
     if (!item || item.kind !== 'image' || item.status !== 'done') return;
+    // Switching images inside the workspace never leaves the route, so the
+    // router guard cannot see it. Ask here too.
+    if (!(await this.confirmDiscard())) return;
     try {
       await this.editSession.open(item);
       this.mode.set('edit');
@@ -547,20 +638,41 @@ export class WorkspacePage {
     }
   }
 
-  exitEdit(): void {
-    if (this.editSession.dirty() && !confirm('Discard unsaved edits?')) return;
+  async exitEdit(): Promise<void> {
+    if (!(await this.confirmDiscard())) return;
     this.editSession.close();
     this.mode.set('library');
+  }
+
+  /** True when there is nothing to lose, or the customer said to go ahead. */
+  private async confirmDiscard(): Promise<boolean> {
+    if (!this.editSession.dirty()) return true;
+    return await this.confirm.ask({
+      title: 'Discard unsaved edits?',
+      body: 'Your edits to this image have not been saved. Continuing discards them.',
+      confirmLabel: 'Discard edits',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+    });
   }
 
   async onSaveEdit(): Promise<void> {
     const item = this.editSession.item();
     if (!item) return;
+    // Captured BEFORE the request leaves: what was saved is the state at this
+    // revision, of this opening.
+    const at = this.editSession.revision();
+    const token = this.editSession.openToken();
     try {
       const blob = await this.editSession.exportPngBlob();
       const saved = await this.store.saveEdit(blob, item.id);
-      this.editSession.adoptItem(saved);
-      this.notice.set('Saved as a new version.');
+      const outcome = this.editSession.adoptItem(saved, at, token);
+      if (outcome === 'adopted') {
+        this.notice.set('Saved as a new version.');
+        return;
+      }
+      // Telling them "saved" here would mean their newest strokes are safe.
+      this.notice.set('Saved — you have newer changes still unsaved.');
     } catch (e) {
       this.showError(e, 'Save failed');
     }
@@ -592,10 +704,12 @@ export class WorkspacePage {
       }
 
       // Persist the current canvas so the AI works on what the user sees.
+      const at = this.editSession.revision();
+      const token = this.editSession.openToken();
       const saved = this.editSession.dirty()
         ? await this.store.saveEdit(await this.editSession.exportPngBlob(), item.id)
         : item;
-      if (saved.id !== item.id) this.editSession.adoptItem(saved);
+      if (saved.id !== item.id) this.editSession.adoptItem(saved, at, token);
 
       const prompt =
         req.toolId === 'edit-fill'
@@ -659,22 +773,32 @@ export class WorkspacePage {
 
   /** Re-submit a failed generation with the same settings. */
   async onRetry(id: string): Promise<void> {
+    await this.rerun(id, () => this.store.retry(id), 'Retry failed');
+  }
+
+  /**
+   * Retry and variation are server operations now: it holds the snapshot of
+   * what was actually asked for, so it rebuilds the request. A 409 means the
+   * server can explain why it cannot, and that explanation is worth more to
+   * the customer than a generic failure.
+   */
+  private async rerun(
+    id: string,
+    run: () => Promise<unknown>,
+    fallback: string,
+  ): Promise<void> {
     await this.withBusy(id, async () => {
-      const item = this.store.byId(id);
-      if (!item) return;
       try {
-        await this.store.create({
-          familyId: item.familyId,
-          op: item.op === 'edit' || item.op === 'upscale' ? item.op : GenerationOp.Generate,
-          prompt: item.prompt,
-          settings: item.settings,
-          batch: 1,
-          parentId: item.parentId ?? undefined,
-        });
+        await run();
         this.notice.set('');
         this.poller.watch();
       } catch (e) {
-        this.showError(e, 'Retry failed');
+        const refusal = refusalMessage(e);
+        if (refusal) {
+          this.notice.set(refusal);
+          return;
+        }
+        this.showError(e, fallback);
       }
     });
   }
@@ -814,17 +938,25 @@ export class WorkspacePage {
   }
 
   async signOut(): Promise<void> {
+    // Teardown lives in SessionLifecycle now, driven by the auth event, so it
+    // also runs for an expiry or a sign-out performed in another tab. Doing
+    // it here as well was the reason none of those cases cleaned up.
     await this.auth.signOut();
-    this.ledger.reset();
-    this.store.reset();
-    this.profileStore.reset();
-    this.notifications.reset();
-    this.editSession.close();
-    // Wipe cached snapshots and media so nothing lingers on shared machines.
-    clearAllCaches();
-    void this.mediaCache.clear();
     this.router.navigate(['/']);
   }
+}
+
+/**
+ * The server's own explanation for a refused retry or variation.
+ *
+ * These are 409s with a message written for a customer — "the reference image
+ * this used is no longer available" beats "Retry failed", and there is
+ * nothing for them to retry, so no generic error banner either.
+ */
+function refusalMessage(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null;
+  if (e.status !== 409) return null;
+  return e.message;
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

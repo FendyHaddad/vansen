@@ -62,8 +62,13 @@
     @for (item of visible(); track item.id) {
       <figure
         class="gen-card"
+        role="button"
+        tabindex="0"
+        [attr.aria-label]="cardLabel(item)"
         [class.card-selected]="selectMode() && isSelected(item.id)"
         (click)="onCardClick(item)"
+        (keydown.enter)="onCardClick(item)"
+        (keydown.space)="$event.preventDefault(); onCardClick(item)"
       >
         <div class="gen-thumb">
           @if (selectMode()) {
@@ -80,7 +85,7 @@
               <span class="spinner"></span>
               Generating…
             </div>
-          } @else if (item.status === 'failed' && item.error === 'cancelled') {
+          } @else if (item.status === 'failed' && isCancelled(item)) {
             <div class="gen-failed gen-cancelled">
               <span class="failed-sub"
                 >Cancelled · Refunded <span class="num">{{ item.priceCredits }} cr</span></span
@@ -109,7 +114,7 @@
           } @else if (item.kind === 'video') {
             <div class="video-tile" (pointerenter)="poster.ensure(item)">
               @if (item.thumbUrl) {
-                <img [src]="item.thumbUrl" [alt]="item.prompt" loading="lazy" />
+                <img [src]="item.thumbUrl" [alt]="item.prompt" loading="lazy" decoding="async" />
               } @else {
                 <div class="video-dark"></div>
               }
@@ -144,7 +149,13 @@
               </div>
             }
           } @else {
-            <img [cachedSrc]="item.mediaUrl" [cacheKey]="item.id" [alt]="item.prompt" />
+            <img
+              [cachedSrc]="tileUrl(item)"
+              [cacheKey]="tileKey(item)"
+              [alt]="item.prompt"
+              loading="lazy"
+              decoding="async"
+            />
             @if (item.op === 'edit' || item.op === 'upscale') {
               <span class="op-tag">{{ item.op === 'edit' ? 'edited' : 'upscaled' }}</span>
             }
@@ -173,6 +184,7 @@
                     <button
                       type="button"
                       class="qa"
+                      aria-label="Make a variation"
                       (click)="variation.emit(item.id); $event.stopPropagation()"
                     >
                       <ng-icon name="lucideSparkles" size="13" />
@@ -199,6 +211,15 @@
           <p class="gen-prompt">{{ item.prompt }}</p>
         </figcaption>
       </figure>
+    }
+    @if (hasMore()) {
+      <!-- Crosses into view a screen early, which is when the next page is
+           asked for. Never a scroll handler. -->
+      <div #sentinel class="grid-sentinel" aria-hidden="true">
+        @if (loadingMore()) {
+          <span class="qa-spin" role="status" aria-label="Loading more"></span>
+        }
+      </div>
     }
   </div>
 }

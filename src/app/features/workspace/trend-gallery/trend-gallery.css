@@ -92,6 +92,24 @@
   background: var(--muted);
 }
 
+/* Same footprint as the thumbnail it replaces, so a missing asset does not
+   reflow the grid — it just reads as a plain tile. */
+.trend-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: center;
+}
+
 .trend-tile-name {
   font-size: 10px;
   color: var(--muted-foreground);

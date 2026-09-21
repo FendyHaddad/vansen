@@ -13,8 +13,10 @@ import {
   defaultSettings,
   editToolById,
   familyById,
+  fluxDims,
   packCredits,
   personaGenCreditCost,
+  resolutionsFor,
   upscaleCreditCost,
   videoFamilySupports,
 } from './model-families';
@@ -173,10 +175,8 @@ describe('credit pricing', () => {
     // provider $0.03 → $0.05 retail → 5 credits
     expect(creditCost(seedream, defaultSettings(seedream))).toBe(5);
     const flux = familyById('flux')!;
-    // FLUX.2 bills per megapixel: 1024x1024 = 1.048 MP x $0.012 = $0.0126
-    // provider -> $0.021 retail -> 3 credits. The old 5 came from an assumed
-    // flat $0.03 that fal never charged (capability record, 2026-09-21).
-    expect(creditCost(flux, defaultSettings(flux))).toBe(3);
+    // FLUX.2 is priced as a flat tier, not per megapixel: $0.03 -> 5 credits.
+    expect(creditCost(flux, defaultSettings(flux))).toBe(5);
   });
 
   it('always yields a positive integer for every family/default', () => {
@@ -224,5 +224,64 @@ describe('persona pricing', () => {
     expect(PERSONA_SLOTS.studio).toBe(2);
     expect(PERSONA_SLOTS.pro).toBe(5);
     expect(PERSONA_SLOTS.owner).toBe(5);
+  });
+});
+
+/**
+ * FLUX.2 clamps both edges to 2048, so the "4MP" label is only true at 1:1.
+ * The tier is priced flat, which means an off-square 4MP would charge 20
+ * credits for 2.36 megapixels — the tier is withheld instead of discounted.
+ */
+describe('FLUX resolution tiers match what the endpoint can produce', () => {
+  const flux = () => familyById('flux')!;
+
+  it('prices each tier flat, the same at every aspect ratio', () => {
+    for (const aspectRatio of ['1:1', '16:9', '9:16', '4:3', '3:4']) {
+      expect(flux().providerCost({ aspectRatio, resolution: '1MP' })).toBeCloseTo(0.03);
+      expect(flux().providerCost({ aspectRatio, resolution: '2MP' })).toBeCloseTo(0.06);
+    }
+    expect(flux().providerCost({ aspectRatio: '1:1', resolution: '4MP' })).toBeCloseTo(0.12);
+    expect(creditCost(flux(), { aspectRatio: '1:1', resolution: '4MP' })).toBe(20);
+  });
+
+  it('offers 4MP at 1:1, where 2048x2048 really is 4 megapixels', () => {
+    const values = resolutionsFor(flux(), '1:1').map((o) => o.value);
+    expect(values).toEqual(['1MP', '2MP', '4MP']);
+    const { width, height } = fluxDims({ aspectRatio: '1:1', resolution: '4MP' });
+    expect((width * height) / 1_000_000).toBeGreaterThanOrEqual(4);
+  });
+
+  it('withholds 4MP at every ratio the clamp keeps below 4 megapixels', () => {
+    for (const aspectRatio of ['16:9', '9:16', '4:3', '3:4']) {
+      const values = resolutionsFor(flux(), aspectRatio).map((o) => o.value);
+      expect(values).toEqual(['1MP', '2MP']);
+      // The reason it is withheld, asserted rather than asserted-about.
+      const { width, height } = fluxDims({ aspectRatio, resolution: '4MP' });
+      expect((width * height) / 1_000_000).toBeLessThan(4);
+    }
+  });
+
+  it('leaves families without an exclusion list untouched', () => {
+    const seedream = familyById('seedream')!;
+    for (const aspectRatio of seedream.capabilities.aspectRatios) {
+      expect(resolutionsFor(seedream, aspectRatio)).toBe(seedream.capabilities.resolutions);
+    }
+  });
+
+  it('never sells a tier whose real pixels cost more than the tier above', () => {
+    // The trap the old table set: 4MP at 16:9 was 20 credits for 2.36MP,
+    // while 2MP at 16:9 was 10 credits for 2.01MP.
+    for (const aspectRatio of flux().capabilities.aspectRatios) {
+      const offered = resolutionsFor(flux(), aspectRatio);
+      const megapixels = offered.map((o) => {
+        const { width, height } = fluxDims({ aspectRatio, resolution: o.value });
+        return (width * height) / 1_000_000;
+      });
+      const perMp = offered.map(
+        (o, i) => creditCost(flux(), { aspectRatio, resolution: o.value }) / megapixels[i],
+      );
+      // Paying more per megapixel for a bigger size is a tier nobody should pick.
+      for (let i = 1; i < perMp.length; i++) expect(perMp[i]).toBeLessThanOrEqual(perMp[0] * 1.05);
+    }
   });
 });

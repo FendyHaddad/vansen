@@ -27,3 +27,18 @@ export function expectedSecondsFor(family: ModelFamily, durationS: number | unde
   if (!perS) return FALLBACK_EXPECTED_S;
   return perS * dur;
 }
+
+/**
+ * Modes where the input frame decides the output shape.
+ *
+ * The composer hides the aspect control in these modes, but the value was
+ * still being transmitted — so a 16:9 default could fight a portrait first
+ * frame, and the provider resolved that however it liked. Send nothing and
+ * let the frame speak.
+ */
+export const FRAME_DRIVEN_MODES: ReadonlySet<string> = new Set(['i2v', 'keyframes']);
+
+/** True when this mode's shape comes from its reference frame, not a setting. */
+export function frameDrivenShape(mode: string | undefined): boolean {
+  return FRAME_DRIVEN_MODES.has(mode ?? 't2v');
+}

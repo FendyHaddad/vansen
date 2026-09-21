@@ -9,6 +9,7 @@ import { createApp } from './app.ts';
 import { fakeAdapter, FakeDb, TEST_USER, testDeps } from './testing/fakes.ts';
 import { runWorkerTick } from './_shared/testing/worker.ts';
 import { finishJob } from './_shared/jobs/store.ts';
+import { Image } from 'jsr:@matmen/imagescript@1.3.1';
 import type { ClaimedJob } from './_shared/jobs/lease.ts';
 import type { CheckResult } from './_shared/providers/types.ts';
 import type { StorageAdapter } from './_shared/storage/index.ts';
@@ -247,7 +248,7 @@ Deno.test('a cancel before dispatch refunds without asking any provider', async 
   assertEquals(db.tables.generations[0].status, 'failed');
 });
 
-Deno.test('losing the settlement race drops the object instead of overwriting the winner', async () => {
+Deno.test('losing the settlement race queues the object instead of overwriting the winner', async () => {
   const provider = fakeAdapter({ submit: inlineDone });
   const deps = testDeps({ adapterFor: () => provider.adapter });
   const db = deps.admin as unknown as FakeDb;
@@ -256,5 +257,66 @@ Deno.test('losing the settlement race drops the object instead of overwriting th
 
   await runWorkerTick(db, { adapterFor: () => provider.adapter, finish: finisher(db) });
 
-  assertEquals([...db.storage.objects.keys()].filter((k) => k.startsWith('media/')), []);
+  // The losing attempt's bytes belong to the cleanup worker now. Deleting
+  // them inline could only ever be best-effort, and a failure lost the
+  // locator along with the attempt.
+  assertEquals(db.tables.deletion_outbox.length, 1);
+  assertEquals(db.tables.deletion_outbox[0].reason, 'orphaned_output');
+  assertEquals(db.tables.generations[0].media_path, null);
+});
+
+/** A real PNG, big enough that the thumbnail has to shrink it. */
+async function realPng(width = 900, height = 600): Promise<Uint8Array> {
+  const image = new Image(width, height);
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      image.setPixelAt(x + 1, y + 1, Image.rgbaToColor(x % 256, y % 256, 90, 255));
+    }
+  }
+  return await image.encode();
+}
+
+Deno.test('R17: a settled image gets a thumbnail beside its original', async () => {
+  const bytes = await realPng();
+  const provider = fakeAdapter({
+    submit: () =>
+      Promise.resolve({
+        providerRef: 'inline',
+        inline: { state: 'done' as const, bytes, contentType: 'image/png' },
+      }),
+  });
+  const deps = testDeps({ adapterFor: () => provider.adapter });
+  const db = deps.admin as unknown as FakeDb;
+  await submit(db, deps);
+
+  await runWorkerTick(db, { adapterFor: () => provider.adapter, finish: finisher(db) });
+
+  const row = db.tables.generations.find((g) => g.id === 'g0')!;
+  assertEquals(row.status, 'done');
+  assertEquals(row.thumb_state, 'ready');
+  assertEquals(String(row.thumb_path).endsWith('.thumb.jpg'), true);
+  const stored = db.storage.objects.get(`media/${row.thumb_path}`)!;
+  assertEquals(stored.contentType, 'image/jpeg');
+  // The whole point: the tile is a fraction of the original's bytes.
+  assertEquals(stored.bytes.length < bytes.length, true);
+});
+
+Deno.test('R17: a thumbnail failure never costs the customer the generation', async () => {
+  const provider = fakeAdapter({
+    submit: () =>
+      Promise.resolve({
+        providerRef: 'inline',
+        // Claims to be a PNG, decodes as nothing.
+        inline: { state: 'done' as const, bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' },
+      }),
+  });
+  const deps = testDeps({ adapterFor: () => provider.adapter });
+  const db = deps.admin as unknown as FakeDb;
+  await submit(db, deps);
+
+  await runWorkerTick(db, { adapterFor: () => provider.adapter, finish: finisher(db) });
+
+  const row = db.tables.generations.find((g) => g.id === 'g0')!;
+  assertEquals(row.status, 'done');
+  assertEquals(row.thumb_state, 'failed');
 });

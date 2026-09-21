@@ -13,6 +13,7 @@ import { ApiError } from '../../../core/api/api-service';
 import { BillingService } from '../../../core/billing/billing-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { CREDIT_PACKS, packCredits } from '../../../core/catalog/model-families';
+import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
 /** Add-on credit packs, right where the balance lives — the topbar. Same packs
  * as the Billing tab; this exists so a low balance never costs a page switch. */
@@ -21,7 +22,7 @@ import { CREDIT_PACKS, packCredits } from '../../../core/catalog/model-families'
   templateUrl: './credit-packs-dialog.html',
   styleUrl: './credit-packs-dialog.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, NgIcon],
+  imports: [DecimalPipe, NgIcon, DialogDirective],
   providers: [provideIcons({ lucideX })],
 })
 export class CreditPacksDialog {

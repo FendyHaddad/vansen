@@ -481,10 +481,23 @@
   color: var(--foreground);
 }
 
-.tool-chip-free {
+ /* Tier markers lead each cloud: what every plan includes, and what Pro adds.
+    One undifferentiated cloud read as "all of this, free". */
+.tool-chip-free,
+.tool-chip-pro {
   border-style: dashed;
   color: var(--muted-foreground);
   font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+}
+
+.tool-chip-pro {
+  border-style: solid;
+  border-color: var(--foreground);
+  color: var(--foreground);
+  font-style: normal;
 }
 
 .pillar-grid {

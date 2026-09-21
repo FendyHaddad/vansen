@@ -66,6 +66,8 @@ export interface LedgerEntryDto {
 
 export interface LedgerResponse {
   entries: LedgerEntryDto[];
+  /** Opaque marker for the next page; null on the last page. */
+  nextCursor: string | null;
 }
 
 export type JobPhase = 'queued' | 'rendering' | 'saving';
@@ -95,6 +97,24 @@ export interface GenerationDto {
   durationS?: number;
   /** Failure reason from the job row; 'cancelled' when the user stopped it. */
   error?: string;
+  /**
+   * A safe, stable reason the client can render. The raw provider text stays
+   * in `jobs.error` and never reaches a customer. Persisted by the server, so
+   * a reload shows what the live client showed — a cancelled video used to
+   * come back as "Generation failed" because cancellation lived only in a
+   * client-side patch.
+   */
+  failure?: {
+    code:
+      | 'cancelled'
+      | 'moderation'
+      | 'provider_error'
+      | 'timeout'
+      | 'store_failed'
+      | 'generation_failed';
+    message: string;
+    cancelled: boolean;
+  };
   job?: JobProgressDto;
   parentId: string | null;
   createdAt: string;
@@ -102,6 +122,24 @@ export interface GenerationDto {
 
 export interface GenerationsResponse {
   items: GenerationDto[];
+  /** Opaque marker for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+export interface GenerationResponse {
+  item: GenerationDto;
+}
+
+/**
+ * Whether retry and variation can actually do what their buttons say.
+ *
+ * A disabled control with a reason is honest; one that always fails is not.
+ */
+export interface RetryableDto {
+  retry: boolean;
+  variation: boolean;
+  /** Present only when retry is refused — why, in the customer's words. */
+  reason?: string;
 }
 
 export interface CreateGenerationRequest {

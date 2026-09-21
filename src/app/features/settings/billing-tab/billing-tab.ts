@@ -12,6 +12,7 @@ import {
   CREDIT_PACKS,
   PLAN_CREDITS,
   PLAN_PRICE_USD,
+  PLAN_PROMO_USD,
   familyById,
   packCredits,
 } from '../../../core/catalog/model-families';
@@ -49,6 +50,13 @@ export class BillingTab {
   readonly profileStore = inject(ProfileStore);
   private readonly billing = inject(BillingService);
 
+  readonly studioPriceUsd = PLAN_PRICE_USD.studio;
+  readonly proPriceUsd = PLAN_PRICE_USD.pro;
+  readonly studioPromoUsd = PLAN_PROMO_USD.studio;
+  readonly proPromoUsd = PLAN_PROMO_USD.pro;
+  readonly studioCredits = PLAN_CREDITS.studio;
+  readonly proCredits = PLAN_CREDITS.pro;
+
   readonly planCredits = this.ledger.planCredits;
   readonly packCreditsBal = this.ledger.packCredits;
   readonly totalCredits = this.ledger.totalCredits;
@@ -57,7 +65,7 @@ export class BillingTab {
   readonly isOwner = this.profileStore.isOwner;
   readonly profileLoaded = this.profileStore.loaded;
   readonly subscription = this.profileStore.subscription;
-  readonly graceDaysLeft = this.profileStore.graceDaysLeft;
+  readonly daysUntilPurge = this.profileStore.daysUntilPurge;
 
   readonly packs = CREDIT_PACKS;
   readonly busy = signal(false);

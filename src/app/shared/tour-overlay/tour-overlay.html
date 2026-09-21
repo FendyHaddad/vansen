@@ -11,9 +11,8 @@
     [class.tour-card-center]="!rect()"
     [style]="cardStyle()"
     tabindex="-1"
-    role="dialog"
-    aria-modal="true"
-    [attr.aria-label]="tour.current().title"
+    appDialog
+    [appDialogLabel]="tour.current().title"
   >
     <p class="tour-kicker">Step {{ stepNumber() }} of {{ total() }}</p>
 

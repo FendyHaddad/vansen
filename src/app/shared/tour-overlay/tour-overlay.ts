@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { TourService } from '../../core/tour/tour-service';
+import { DialogDirective } from '../a11y/dialog.directive';
 
 interface SpotRect {
   top: number;
@@ -30,6 +31,7 @@ const EDGE = 16;
   templateUrl: './tour-overlay.html',
   styleUrl: './tour-overlay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [DialogDirective],
 })
 export class TourOverlay {
   readonly tour = inject(TourService);
@@ -125,6 +127,12 @@ export class TourOverlay {
     this.rect.set({ top: r.top, left: r.left, width: r.width, height: r.height });
   }
 
+  /**
+   * Document level, not the dialog directive's Escape: a spotlight tour invites
+   * clicking the highlighted control, and once focus leaves the card a
+   * card-scoped Escape would stop working. The directive still supplies the
+   * role, the name, the Tab trap and focus restore.
+   */
   private onKeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') this.tour.skip();
     else if (e.key === 'ArrowRight' || e.key === 'Enter') this.tour.next();

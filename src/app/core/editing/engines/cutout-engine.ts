@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web';
 import { PixelBuffer, clonePixels } from '../pixel-buffer';
 import { cutoutModelProgress } from './engine-status';
-import { getOrtSession } from './model-loader';
+import { acquireOrtSession } from './model-loader';
 import { resizeBilinear, resizeFloatMap, toFloat16Bits, toPlanarFloat } from './raster';
 
 /**
@@ -11,12 +11,23 @@ import { resizeBilinear, resizeFloatMap, toFloat16Bits, toPlanarFloat } from './
  * Loaded via dynamic import only when the user runs Cut Out.
  */
 
-const MODEL_URL = 'https://huggingface.co/imgly/isnet-general-onnx/resolve/main/onnx/model_fp16.onnx';
 const SIZE = 1024;
 
 /** Returns the image with background alpha = 0 (soft matte edges). */
 export async function removeBackground(buf: PixelBuffer): Promise<PixelBuffer> {
-  const session = await getOrtSession(MODEL_URL, cutoutModelProgress);
+  const lease = await acquireOrtSession('cutout-isnet', cutoutModelProgress);
+  try {
+    return await runCutout(lease.session, buf);
+  } finally {
+    // 88 MB of weights stay resident until the last owner lets go.
+    await lease.release();
+  }
+}
+
+async function runCutout(
+  session: ort.InferenceSession,
+  buf: PixelBuffer,
+): Promise<PixelBuffer> {
   const small = resizeBilinear(buf, SIZE, SIZE);
   const planes = toPlanarFloat(small, [0.5, 0.5, 0.5], [1, 1, 1]);
   const inputName = session.inputNames[0];

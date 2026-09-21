@@ -43,8 +43,9 @@
     "9:16:4K": "2160x3840"
   },
   "fluxSlug": "fal-ai/flux-2",
-  "_fluxSizeRule": "fal-ai/flux-2 takes image_size as {width,height} with BOTH edges clamped to 512-2048. It does NOT accept aspect_ratio. The 2048 ceiling means only 1:1 can actually reach 4MP; every other ratio is capped below its label, so the price must be computed from the real pixel count, not the label. The dimension table itself lives in the catalog (model-families FLUX_DIMS) because providerCost bills from it; duplicating it here would let the quote and the request drift.",
-  "fluxUsdPerMegapixel": 0.012,
+  "_fluxSizeRule": "fal-ai/flux-2 takes image_size as {width,height} with BOTH edges clamped to 512-2048. It does NOT accept aspect_ratio. The 2048 ceiling means only 1:1 can actually reach 4MP; 16:9 tops out at 2.36MP. Retail is a flat price per tier (see fluxTierUsd), so the 4MP tier is WITHHELD at every non-square ratio rather than sold at a size the endpoint cannot produce - resolutionExclusions on the flux family, enforced in request-validation. The dimension table lives in the catalog (model-families FLUX_DIMS) because the request builder reads it; duplicating it here would let the offer and the request drift.",
+  "_fluxProviderRate": "fal quotes $0.012 per megapixel on the flux-2 model page (documentation only, never seen on an invoice). Retail does NOT track it; the flat tiers below are the deliberate price.",
+  "fluxTierUsd": { "1MP": 0.03, "2MP": 0.06, "4MP": 0.12 },
   "seedreamSlug": "fal-ai/bytedance/seedream/v4/text-to-image",
   "seedreamResolutionParameter": "image_size",
   "_seedreamSizeRule": "image_size accepts auto, auto_2K, auto_4K and the preset enums, or {width,height}; total pixels between 960x960 and 4096x4096. No aspect_ratio parameter, so a non-square ratio must be sent as explicit dimensions.",

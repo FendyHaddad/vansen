@@ -25,6 +25,8 @@ import {
   VIDEO_CONTENT_TYPES,
 } from '../storage/index.ts';
 import { settleDone, settleFailed } from './settlement.ts';
+import { enqueueDeletions, markObjectLive, registerObject } from '../storage/registry.ts';
+import { canThumbnail, makeThumbnail, THUMB_CONTENT_TYPE, thumbPathFor } from '../thumbnail.ts';
 
 export { MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, VIDEO_CONTENT_TYPES };
 
@@ -166,14 +168,16 @@ async function storeInlineResult(
   }
 
   const key = mediaKey(job, budget, contentType);
-  const stored = await putObject(deps, budget, key, result.bytes, contentType);
+  const stored = await putObject(deps, budget, key, result.bytes, contentType, job);
   if (!stored) {
     // No object, no `done`. The refund is the honest outcome: the customer
     // paid for a file we could not keep.
     await failJob(deps, job, 'store_failed');
     return;
   }
-  await settleStored(deps, job, budget, key, {});
+  const outcome = await settleStored(deps, job, budget, key, {});
+  if (outcome !== 'done') return;
+  await storeThumbnail(deps, job, budget, key, result.bytes, contentType);
 }
 
 async function storeUrlResult(
@@ -199,6 +203,7 @@ async function storeUrlResult(
   if (!budget) return await releaseClaim(deps, job);
 
   let key: string;
+  let payload: { bytes: Uint8Array; contentType: string };
   try {
     const { bytes, contentType } = await downloadBounded(result.url, {
       headers: result.headers,
@@ -209,8 +214,9 @@ async function storeUrlResult(
       fetchImpl: deps.fetch,
     });
     key = mediaKey(job, budget, contentType);
-    const stored = await putObject(deps, budget, key, bytes, contentType);
+    const stored = await putObject(deps, budget, key, bytes, contentType, job);
     if (!stored) throw new Error('storage write failed');
+    payload = { bytes, contentType };
   } catch (e) {
     await retryOrFail(deps, job, e);
     return;
@@ -222,8 +228,64 @@ async function storeUrlResult(
     height: result.height,
   };
   const outcome = await settleStored(deps, job, budget, key, meta);
+  if (outcome === 'done') {
+    await storeThumbnail(deps, job, budget, key, payload.bytes, payload.contentType);
+  }
   if (outcome !== 'unknown') return;
   await releaseClaim(deps, job);
+}
+
+/**
+ * A tile-sized copy, written after the generation is safely settled.
+ *
+ * It is a convenience, never a reason to fail something the customer already
+ * paid for: anything that goes wrong is recorded on the row and the backfill
+ * script picks it up later.
+ */
+async function storeThumbnail(
+  deps: FinishDeps,
+  job: FinishJob,
+  budget: Budget,
+  mediaPath: string,
+  bytes: Uint8Array,
+  contentType: string,
+): Promise<void> {
+  if (budget.kind !== 'image') return;
+  if (!canThumbnail(contentType)) {
+    await setThumbState(deps, job.generation_id, null, 'unsupported');
+    return;
+  }
+  try {
+    const thumb = await makeThumbnail(bytes, contentType);
+    const path = thumbPathFor(mediaPath);
+    const objectId = await registerObject(deps.admin, {
+      userId: job.user_id,
+      backend: budget.backend,
+      bucket: 'media',
+      path,
+      purpose: 'thumb',
+    });
+    const { error } = await deps.admin.storage
+      .from('media')
+      .upload(path, thumb, { contentType: THUMB_CONTENT_TYPE, upsert: true });
+    if (error) throw new Error(error.message);
+    await markObjectLive(deps.admin, objectId);
+    await setThumbState(deps, job.generation_id, path, 'ready');
+  } catch (e) {
+    console.error('thumbnail_failed', job.generation_id, String(e).slice(0, 200));
+    await setThumbState(deps, job.generation_id, null, 'failed');
+  }
+}
+
+async function setThumbState(
+  deps: FinishDeps,
+  generationId: string,
+  path: string | null,
+  state: 'ready' | 'failed' | 'unsupported',
+): Promise<void> {
+  const patch: Record<string, unknown> = { thumb_state: state };
+  if (path) patch.thumb_path = path;
+  await deps.admin.from('generations').update(patch).eq('id', generationId);
 }
 
 async function retryOrFail(
@@ -277,7 +339,7 @@ async function settleStored(
   if (!outcome.settled) {
     // A cancel, the stale sweep or another attempt got there first. Their
     // decision stands; this object is an orphan.
-    await dropLostObject(deps, job.generation_id, key, budget.backend);
+    await dropLostObject(deps, job.generation_id, job.user_id, key, budget.backend);
     return 'lost';
   }
   return 'done';
@@ -291,6 +353,7 @@ async function settleStored(
 export async function dropLostObject(
   deps: FinishDeps,
   generationId: string,
+  userId: string,
   key: string,
   backend: StorageBackend,
 ): Promise<void> {
@@ -305,25 +368,74 @@ export async function dropLostObject(
   }
   if (row?.media_path === key) return;
   console.warn('[finishJob] generation already settled, dropping object', generationId);
-  await deleteObject(deps, backend, key);
+  await queueOrphan(deps, userId, backend, key);
 }
 
-async function deleteObject(
+/**
+ * Hand the orphan to the cleanup worker rather than deleting it here.
+ *
+ * A best-effort `storage.delete` at this point was the old behaviour: when it
+ * failed, the bytes stayed and the only record of them went. The object is
+ * already registered (`putObject` registers before it writes), so re-running
+ * the registration returns that same id and the outbox owns it from here.
+ */
+async function queueOrphan(
   deps: FinishDeps,
+  userId: string,
   backend: StorageBackend,
   key: string,
 ): Promise<void> {
-  if (backend !== 'supabase') {
-    // P6 turns a failed delete into a durable cleanup job; for now it has to
-    // at least be findable in the logs.
-    await deps.storageFor(backend).delete(key).catch((e) =>
-      console.error('orphan_delete_failed', key, String(e))
-    );
-    return;
+  try {
+    const bucket = backend === 'supabase' ? 'media' : await r2Bucket(deps);
+    const id = await registerObject(deps.admin, {
+      userId,
+      backend,
+      bucket,
+      path: key,
+      purpose: 'media',
+    });
+    await enqueueDeletions(deps.admin, [id], 'orphaned_output');
+  } catch (e) {
+    // Losing the locator is the failure that matters; say so loudly.
+    console.error('orphan_queue_failed', key, String(e).slice(0, 200));
   }
-  const { error } = await deps.admin.storage.from('media').remove([key]);
-  if (!error) return;
-  console.error('orphan_delete_failed', key, error.message);
+}
+
+/**
+ * Record the locator before the bytes exist (P6). A generation that is
+ * settled, failed or deleted later can then be cleaned up by name — the old
+ * code wrote objects whose only record was the row that referenced them.
+ *
+ * A registry that will not answer means we do not write: untracked bytes are
+ * exactly what R11 was.
+ */
+async function trackObject(
+  deps: FinishDeps,
+  job: FinishJob,
+  budget: Budget,
+  key: string,
+): Promise<string | null> {
+  try {
+    const bucket = budget.backend === 'supabase' ? 'media' : await r2Bucket(deps);
+    return await registerObject(deps.admin, {
+      userId: job.user_id,
+      backend: budget.backend,
+      bucket,
+      path: key,
+      purpose: 'media',
+    });
+  } catch (e) {
+    console.error('object_register_failed', job.generation_id, String(e).slice(0, 200));
+    return null;
+  }
+}
+
+async function r2Bucket(deps: FinishDeps): Promise<string> {
+  const { data, error } = await deps.admin.rpc('fn_storage_config', {
+    p_key: 'r2_bucket',
+  });
+  if (error || !data) throw new Error('r2_bucket is not configured');
+  return String(data);
 }
 
 async function putObject(
@@ -332,9 +444,13 @@ async function putObject(
   key: string,
   bytes: Uint8Array,
   contentType: string,
+  job: FinishJob,
 ): Promise<boolean> {
+  const objectId = await trackObject(deps, job, budget, key);
+  if (!objectId) return false;
   if (budget.backend !== 'supabase') {
     await deps.storageFor(budget.backend).put(key, bytes, contentType);
+    await markObjectLive(deps.admin, objectId);
     return true;
   }
   // Images stay on the service-role client: it is the same connection the rest
@@ -343,7 +459,10 @@ async function putObject(
   const { error } = await deps.admin.storage
     .from('media')
     .upload(key, bytes, { contentType, upsert: true });
-  if (!error) return true;
+  if (!error) {
+    await markObjectLive(deps.admin, objectId);
+    return true;
+  }
   console.error('media_upload_failed', key, error.message);
   return false;
 }

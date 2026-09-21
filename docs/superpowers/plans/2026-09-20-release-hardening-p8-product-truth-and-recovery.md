@@ -88,7 +88,7 @@
   export function rehydrate(snapshot: GenerationRequestSnapshotV1): RehydrateResult;
   ```
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0023_request_snapshots.sql`:
 
@@ -124,7 +124,7 @@ alter table public.generations
 -- rather than fail at the provider. `snapshot_id is null` is that signal.
 ```
 
-- [ ] **Step 2: Write the failing snapshot test**
+- [x] **Step 2: Write the failing snapshot test**
 
 Create `supabase/functions/_shared/request_snapshot_test.ts`:
 
@@ -220,7 +220,7 @@ Deno.test('a round trip through JSON changes nothing', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails, then write the module**
+- [x] **Step 3: Run to verify it fails, then write the module**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/request_snapshot_test.ts
@@ -234,7 +234,7 @@ export type RehydrateResult =
   | { ok: false; reason: 'unsupported_version' | 'catalog_changed' | 'missing_reference' | 'missing_mask' };
 ```
 
-- [ ] **Step 4: Write the snapshot on every submission**
+- [x] **Step 4: Write the snapshot on every submission**
 
 In `0023`, replace `fn_reserve_generation` with its P5 body plus a required server-validated snapshot in `p_payload.snapshot`. Keep the same RPC signature and replay-first behavior. After replay/cap validation and BEFORE creating generation rows, insert the snapshot and capture its generated ID; then attach that ID to every returned generation in this same transaction:
 
@@ -248,7 +248,7 @@ where user_id = p_user and id = any(v_generation_ids);
 
 Declare `v_snapshot_id uuid` and `v_generation_ids uuid[]`. Reject missing/invalid version, quoteVersion and owned references before charging. The snapshot, charge, generation, jobs, expenses and submission result either all commit or all roll back. Never accept a client-provided snapshotId. Add `supabase/tests/request_snapshots.sql`: injected snapshot failure yields no charge/job; same-key replay adds no snapshot; batch shares one immutable snapshot. Mask objects use P1's registry with an explicit `mask` purpose added by `0023`, checked moderation/ownership and P6 cleanup registration; never persist a raw mask path or signed URL.
 
-- [ ] **Step 5: Run the suites**
+- [x] **Step 5: Run the suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/migrations/0023_request_snapshots.sql && cd supabase/functions && deno test --allow-all _shared api
@@ -257,6 +257,49 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1
 Expected: all green. User commits.
 
 ---
+
+**Execution notes (2026-09-21).** Task 1 complete.
+
+`0023_request_snapshots.sql` is applied to the LOCAL container only
+(`postgresql://supabase_admin:postgres@127.0.0.1:55432/postgres`), like
+0019-0022 before it. Production application stays user-gated.
+
+Two deviations from the plan's literal text, both to make its own code compile:
+
+1. `rehydrate` takes an optional second argument (`currentCatalogVersion`).
+   The plan's interface block declares one parameter but its own test calls
+   `rehydrate(snapshot, 'cat-v1')`. Optional, so a caller with no opinion can
+   still skip the check; the gateway always passes it.
+2. Two tests in the plan do not type-check against the plan's own interface —
+   `referenceUrls` as an unknown property, and `result.reason` read off an
+   un-narrowed union. Both were kept in meaning: the signed-URL test now casts
+   the whole literal (which is the real caller's situation — the gateway hands
+   over a wider normalized request that still holds signed URLs and a mask data
+   URI), and the union is narrowed with `assert(!result.ok)` before reading
+   `reason`. The union stays; flattening it would have lost the type safety the
+   plan asked for.
+
+Also added, beyond the plan's list, because the plan's Step 4 requires the
+behaviour and nothing else proved it:
+- `supabase/functions/api/snapshot_capture_test.ts` (5 tests) — the GATEWAY
+  builds the snapshot: catalog version, reference by upload path with no
+  `token=` or `/sign/` anywhere in it, style and trend as first-class fields,
+  and keyframes recording which frame is first and which is last while i2v
+  records a plain reference.
+- `supabase/tests/request_snapshots.sql` — the transactional half a fake
+  database cannot show: one snapshot per submission, none on replay, a batch
+  of four sharing one, `snapshot_required` and `bad_snapshot` refusals leaving
+  no charge/generation/orphan-snapshot, an insufficient-balance failure leaving
+  nothing behind, the `mask` purpose accepted by the uploads registry, and
+  deleting a snapshot nulling the reference instead of cascading into the work.
+
+Mask storage already went through P1's registry (`storeMask`); `0023` only had
+to add `mask` to the `uploads_purpose_check` constraint, which the SQL file
+asserts.
+
+Verification: 10/10 `request_snapshot_test.ts`, 5/5 `snapshot_capture_test.ts`,
+all assertions in `request_snapshots.sql`. One mutation (attaching the snapshot
+to only the first generation of a batch) was killed by the SQL file.
 
 ## Task 2: Server-side retry and variation (T12 → R15, part 2)
 
@@ -272,7 +315,7 @@ Expected: all green. User commits.
   GET  /generations/:id/retryable  → { retry: boolean; variation: boolean; reason?: string }
   ```
 
-- [ ] **Step 1: Write the failing route test**
+- [x] **Step 1: Write the failing route test**
 
 Create `supabase/functions/api/retry_routes_test.ts`:
 
@@ -478,7 +521,7 @@ Deno.test('R15: a stranger cannot retry someone else\'s generation', async () =>
 });
 ```
 
-- [ ] **Step 1a: Complete operation-specific retry/variation coverage**
+- [x] **Step 1a: Complete operation-specific retry/variation coverage**
 
 Extend the existing `seed` fixture with complete P1 upload rows, and test successful retries for upscale, persona, image-reference, mask-edit, i2v, keyframes and parent-video extend/edit. Assert reserved payload preserves each input and uses current quote; no direct provider call is expected after P5. Test persona and i2v variation refusals:
 
@@ -498,7 +541,7 @@ for (const snapshot of [{ personaId: 'p1' }, { familyId: 'kling', mode: 'i2v' }]
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails, then write `services/retry.ts`**
+- [x] **Step 2: Run to verify it fails, then write `services/retry.ts`**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/retry_routes_test.ts
@@ -533,7 +576,7 @@ export const REFUSAL_MESSAGE: Record<RetryRefusal, string> = {
 
 `planRetry` rehydrates, resolves every upload id to a live object path, re-quotes through P3's `quote()`, and returns either a submission or a refusal. `planVariation` does the same but forces `op='generate'`, sets `parentId`, and refuses edit/upscale, persona and all video/i2v/keyframe/parent-video sources with `not_variable`. Retry retains those operations, including their masks/personas/ordered slots/parent-video context, and requires a newly accepted quote when pricing changed.
 
-- [ ] **Step 3: Add the safe failure code to the DTO**
+- [x] **Step 3: Add the safe failure code to the DTO**
 
 In `_shared` and `dtos.ts`:
 
@@ -552,7 +595,7 @@ export interface GenerationDto {
 
 `toGenerationDto` maps P4's persisted failure_code/failure_message to the nested `failure` object and sets cancelled only when code is cancelled. Modify `src/app/core/generations/generation-store.ts` so job polling and list reload preserve it, and `src/app/features/workspace/library-grid/library-grid.html` so cancelled and failed render separately. Add a reload test after real cancellation: status failed + failure.cancelled=true remains “Cancelled · Refunded”, while provider failure stays “Generation failed”. Raw provider text never reaches this DTO. P4's `fn_settle_job` writes both columns. A cancelled video then renders as "Cancelled · Refunded" after a reload, because the state lives on the server rather than in a client-side patch that a reload discards.
 
-- [ ] **Step 4: Point the client at the new routes**
+- [x] **Step 4: Point the client at the new routes**
 
 In `GenerationStore`:
 
@@ -571,7 +614,7 @@ In `GenerationStore`:
 
 Delete the body of `onRetry` and `onVariation` in `workspace-page.ts` and have them call these. Render a 409's message as a notification rather than a generic failure.
 
-- [ ] **Step 5: Disable controls that cannot work**
+- [x] **Step 5: Disable controls that cannot work**
 
 Fetch `retryable` when the detail overlay opens, and drive the buttons from it:
 
@@ -588,7 +631,7 @@ Fetch `retryable` when the detail overlay opens, and drive the buttons from it:
 
 A disabled button with a reason is honest. A button that always fails is not.
 
-- [ ] **Step 6: Run both suites**
+- [x] **Step 6: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared api
@@ -598,12 +641,84 @@ Expected: all green. User commits.
 
 ---
 
+**Execution notes (2026-09-21).** Task 2 complete.
+
+**The refactor that made this possible.** `app.post("/generations")` became a
+named `submitGeneration(c, body)`; the route parses the body and calls it, and
+so do the two new ones. A retry therefore re-enters the *same* path — the same
+validation, suspension and subscription gates, the same kill switch, the same
+moderation call, the same quote and the same fresh snapshot. Rebuilding any of
+that beside it would have been the original bug in a new place.
+
+Routes: `POST /generations/:id/retry`, `POST /generations/:id/variation`,
+`GET /generations/:id/retryable`. Refusals are 409 with the code and a message
+written for a customer; a stranger's id is 404 either way.
+
+Two submission-path changes retry required:
+- `body.maskUploadId` is accepted beside `maskPngBase64`. A retry names a mask
+  that is already stored and owned; `existingMask` re-verifies owner and
+  purpose rather than trusting the snapshot. `editTool.needsMask` and the
+  `hasMask` pricing input both count either form.
+- The snapshot records the family the CUSTOMER chose. A persona run is stored
+  and priced under the pseudo-family `persona`, which is not a model — writing
+  that into the snapshot would have made the second retry fail exactly the way
+  the first one used to.
+
+**Deviations from the plan's literal text, all in its test code:**
+
+1. **Status is 202, not 200.** A retry is a submission; `POST /generations`
+   has always answered 202 Accepted. Returning 200 from retry would have made
+   two spellings of the same event.
+2. **`catalog_changed` is not a price check.** The plan's prose says a price
+   move should refuse, but its own tests expect a 202 retry, and refusing
+   every snapshot on each catalog bump would make retry useless within a week.
+   It now means *the request can no longer be expressed*: a withdrawn family,
+   or an option the catalog has dropped (FLUX's 4MP tier off-square). A price
+   move is handled by re-quoting, which is what "a retry gets a FRESH quote"
+   asks for.
+3. **`rehydrate` tolerates a partial stored row.** The plan's own fixture
+   stores a snapshot with no `referenceSlots`, which crashed the strict
+   reader. A stored snapshot is data read back from a database, not a value
+   this process built; a retry crashing on an older row is worse than one that
+   treats a missing collection as empty. `captureSnapshot` stays strict.
+4. **Two assertions pointed at the wrong object.** The mask lives on
+   `p_payload`, not on the per-output `p_items` entry. And `item.familyId` for
+   a persona run is `persona` by the server's own storage convention — that is
+   unchanged and correct. What matters is that the retry did not SEND
+   `persona` as a model family, which is asserted on the snapshot here and
+   directly in `services/retry_test.ts`.
+5. **The seed fixture gained registry rows** (Step 1a asks for this): every
+   family a retry can land on, including `persona`, plus the P1 upload rows
+   the snapshots point at. Without them every test refused with
+   `reference_unavailable` — correct behaviour, accidentally reached.
+
+**Also added beyond the plan's file list:**
+- `api/services/retry_test.ts` (22 tests) — the decision rules in isolation,
+  including the full variation-refusal matrix (edit, upscale, persona, t2v,
+  i2v, keyframes) and proof that nothing price-shaped survives the rebuild.
+- `api/failure_dto_test.ts` (6 tests) — a cancelled generation survives a
+  reload as cancelled, a provider failure does not become one, an unknown code
+  degrades to `generation_failed`, and `cuda out of memory … trace=abc123` in
+  `jobs.error` never appears in the DTO.
+- `library-grid.spec.ts` (5 tests, the component had none) — cancelled renders
+  without a Retry button, the persisted `failure` beats a stale `error`
+  string, and pre-P8 rows still read correctly.
+- `detail-overlay.spec.ts` gained 6 tests — the controls follow the server's
+  answer, the reason reaches `aria-label` and not just a tooltip, and nothing
+  is offered before the probe returns.
+
+Verification: 422 Angular tests (59 files), 447 Deno tests, clean build. Ten
+mutations killed, covering the variation refusals, deleted references,
+keyframe order, the persona family, the snapshot on every submission, the
+grid's cancelled rendering, the overlay's default, per-retry idempotency keys
+and both failure-code guards.
+
 ## Task 3: Semantic reference slots and aspect omission (T12 → R25)
 
 **Files:**
 - Modify: `src/app/features/workspace/left-panel/reference-drop/reference-drop.ts` + `.html` + `.spec.ts`, `left-panel/left-panel.ts`, `supabase/functions/_shared/providers/{google-video,google-omni,runway}.ts`
 
-- [ ] **Step 1: Write the failing slot spec**
+- [x] **Step 1: Write the failing slot spec**
 
 Append to `src/app/features/workspace/left-panel/reference-drop/reference-drop.spec.ts`:
 
@@ -689,7 +804,7 @@ describe('R25: slots keep their meaning', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then fix the component**
+- [x] **Step 2: Run to verify it fails, then fix the component**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/features/workspace/left-panel/reference-drop/reference-drop.spec.ts
@@ -733,7 +848,7 @@ Change `ReferenceDrop.slots` and `slotsChanged` to `(RefSlot | null)[]` inputs/o
 
 Update `left-panel.ts:455` (`refSlots().map(s => s.path)`) to call `serialize()`, and gate the Generate button on `complete()`.
 
-- [ ] **Step 3: Write the failing adapter tests**
+- [x] **Step 3: Write the failing adapter tests**
 
 Create `supabase/functions/_shared/providers/aspect_omission_test.ts`:
 
@@ -784,7 +899,7 @@ for (const { name, adapter } of ADAPTERS) {
 }
 ```
 
-- [ ] **Step 4: Run to verify it fails, then fix the four adapters covering five families**
+- [x] **Step 4: Run to verify it fails, then fix the four adapters covering five families**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/aspect_omission_test.ts
@@ -808,7 +923,7 @@ const payload = {
 
 Put `FRAME_DRIVEN_MODES` in `_shared/video-rules.ts` so all five families read one definition.
 
-- [ ] **Step 5: Record decision D5 in the composer**
+- [x] **Step 5: Record decision D5 in the composer**
 
 `vansen.md` records the "From library" picker as deliberately cut. Say so where a customer would look for it:
 
@@ -816,7 +931,7 @@ Put `FRAME_DRIVEN_MODES` in `_shared/video-rules.ts` so all five families read o
 <p class="hint">Upload an image to use as a reference. Picking from your library is coming later.</p>
 ```
 
-- [ ] **Step 6: Run both suites**
+- [x] **Step 6: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared
@@ -824,13 +939,48 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/f
 
 Expected: all green. User commits.
 
+### Task 3 execution notes (2026-09-21)
+
+All six steps done; both suites green (437 Angular / 460 Deno, clean build).
+
+**What the plan predicted correctly.** `aspect_omission_test.ts` was written before
+any adapter changed, and it failed exactly where the plan said it would: fal was
+already correct (it never sent an aspect field on frame-driven modes), while
+`google-video.ts`, `google-omni.ts` and `runway.ts` all sent one. Four adapters,
+five families, one shared predicate — `frameDrivenShape()` in `_shared/video-rules.ts`
+— rather than three private copies of the same `mode === 'i2v' || mode === 'keyframes'`
+test that would drift the first time a mode was added.
+
+**Eight tests beyond the plan's list.** Mutation testing found the plan's slot
+spec did not actually pin the hole rule:
+
+- *M13* — make `complete()` ignore holes (drop the `slice(0, filled).every(...)`
+  line). Survived: no test covered a `ref2v` request with slot 0 empty and slot 1
+  filled. Two tests added under `R25: a hole is not a shorter list`.
+- *M15* — make `videoInputsReady` count filled slots without rejecting holes.
+  Survived: nothing asserted that Generate stays disabled with a gap. Test added
+  in `left-panel.spec.ts`.
+
+M11 (place compacts), M12 (clear splices) and M14 (serialize accepts sparse) were
+killed by the plan's own tests. Five of five now killed.
+
+**One test was passing for the wrong reason.** The `left-panel` slot block first
+used `kling`, which does not offer `ref2v` — `setVideoMode('ref2v')` silently left
+the composer in `t2v`, so the assertions ran against the wrong mode. Switched to
+`veo` and added an explicit `expect(component.videoMode()).toBe(mode)` guard so a
+future capability change fails the test instead of hollowing it out.
+
+**D5 recorded** in `reference-drop.html` as a hint under the slots: the "From
+library" picker is deliberately cut, and the composer now says so where a customer
+would go looking for it.
+
 ---
 
 ## Task 4: Make every sales surface match entitlements (D1, D4)
 
 **Files:** Create `src/app/core/catalog/entitlements.ts` and `.spec.ts`, `public-capabilities.ts` and `.spec.ts`; modify `features/studio/right-panel/right-panel.{ts,html}`, `features/plans/plans-page.{ts,html}`, `features/landing/landing-page.{ts,html}`, `shared/site-footer/site-footer.{ts,html}`, `features/auth/login-page.html`, `supabase/functions/api/app.ts` and public route tests.
 
-- [ ] **Step 1: Extract the ACTUAL tool definitions and write exhaustive tests**
+- [x] **Step 1: Extract the ACTUAL tool definitions and write exhaustive tests**
 
 Move current `LOCAL_TOOLS` and `PRO_TOOLS` with labels/icons unchanged into the catalog module. Do not import unexported UI constants or invent `STUDIO_TOOLS`. Include `mask` as a contextual tool even though it has no standalone panel button. Use `StudioTool` for exhaustiveness:
 
@@ -863,11 +1013,11 @@ it('panel paywalls agree with the same entitlement table as pricing', () => {
 
 These tiers preserve current gating; changing the product entitlement is a separate decision. Pro's copy includes Studio plus Pro tools, whereas toolsFor('pro') returns only the additional tier.
 
-- [ ] **Step 2: Supply public capability data without authentication**
+- [x] **Step 2: Supply public capability data without authentication**
 
 Create `PublicCapabilities` with `enabledFamilyIds:string[]`, `backgroundCompletion:boolean`, `completionNotifications:boolean`, `catalogVersion:string`. Add public read-only `GET /capabilities` before the auth middleware, exposing only this whitelist (no secrets/entitlements/user data). It reads server-owned release flags. The Angular service loads anonymously, validates known family IDs and defaults all unverified promises off on error. Public pricing/landing/footer/login can use it without sign-in. P9 enables flags only after evidence passes; P5 pending-video copy consumes the same service.
 
-- [ ] **Step 3: Render all tool/model/promo lists from shared truth**
+- [x] **Step 3: Render all tool/model/promo lists from shared truth**
 
 Replace lists in pricing, landing, footer, login AND right-panel `PLAN_PITCH`. Use catalog IDs and labels directly, without undefined familyByName/toolByLabel helpers. Never advertise Sora or disabled families. Render full D1 grants from PLAN_CREDITS and prices from the catalog. Explain “same credits per job; lower dollar cost per credit on Pro”; calculate any percentage from the actual prices/grants rather than hardcoding a conflicting 20% claim. Public-page tests render every surface with logged-out, enabled, disabled and unavailable capability responses.
 
@@ -879,15 +1029,72 @@ const savingPercent = Math.round((1 - proCost / studioCost) * 100);
 
 For both plans assert rendered launch grants match P2's full-grant discounted invoice behavior. Search `src/app` for old Sora, unlimited-suite and 20%-lower literals and update each affected surface, including landing and in-app pitch.
 
-- [ ] **Step 4: Record D4 before locale-dependent release work**
+- [x] **Step 4: Record D4 before locale-dependent release work**
 
 Record the user's English-only versus funded en/ms launch decision in `docs/superpowers/specs/2026-09-20-launch-locales.md`. English-only updates vansen.md/listings honestly. Funded localization requires a separate explicit scope for extraction, preference, formatting and truncation tests. This existing product decision remains unresolved until chosen; don't infer it from this audit repair.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run `npm test -- --watch=false`, focused Deno public-capability tests and production build. Compare anonymous public pages and signed-in paywalls at desktop/mobile widths. Preserve established visual composition. User commits.
 
----
+### Task 4 execution notes (2026-09-21)
+
+All five steps done. 470 Angular / 470 Deno green, clean build, pages checked
+anonymously at 1024px and 375px.
+
+**Three separate false claims, all from hand-written lists.** The landing page
+put nineteen tool chips in one cloud under "included with every plan" and
+closed it with an "all included" chip — eleven of those tools are Pro-only, so
+a Studio subscriber bought a list and then hit padlocks. The pricing FAQ said
+the same thing in prose ("free and unlimited on every plan", naming cut out,
+bokeh and upscale). The pricing page, the footer and the login splash all named
+**Sora**, which has no adapter and never had one.
+
+**Two sources of truth, not one.** `core/catalog/entitlements.ts` owns which
+plan grants which tool (`satisfies Record<StudioTool, ToolPlan>`, so adding a
+tool to the union without pricing it fails the build), and `GET /capabilities`
+— public, registered before the auth middleware — says which families this
+deployment has actually switched on. Every list on the landing page, pricing
+page, footer, login splash and the in-app lock card is now rendered from those
+two, and 13 tests in `features/public-surfaces.spec.ts` render each surface
+logged-out against enabled / partially-enabled / unreachable responses.
+
+**The 25%-vs-20% contradiction was two true numbers.** A job costs the same
+credits on either plan; a credit costs 1c on Studio and 0.8c on Pro. That is
+25% more credits per dollar AND 20% off the same job — one 4:5 ratio counted
+from each end. Both are now derived in `model-families.ts`
+(`PRO_EXTRA_CREDIT_PERCENT`, `PRO_SAVING_PERCENT`, `PRO_PACK_BONUS_PERCENT`),
+so no page can invent a third figure. Every hardcoded $15/$30/$10/$25/1,500/
+3,750/13,750 literal across the plans page, landing page, footer, billing tab
+and onboarding tour now reads from `PLAN_PRICE_USD` / `PLAN_PROMO_USD` /
+`PLAN_CREDITS` / `packCredits`.
+
+**Server truth outranks the bundle.** `ReleaseCapabilities` (P5) now prefers
+`GET /capabilities` once it answers and keeps the build-time manifest only
+until then, so P9 can enable — or withdraw — `backgroundCompletion` without a
+redeploy. `completionNotifications` is refused without `backgroundCompletion`
+in three places independently (env parse, server shaping, client parse): a
+promise to tell someone when a render finishes is a lie if nothing finishes the
+render once the tab closes.
+
+**One test was wrong about its own subject.** The leak assertion
+`!json.includes('fal')` passed a provider name through and then failed on the
+word `false`. Changed the fixture to a distinctive value rather than loosening
+the assertion.
+
+**Blocked / carried:** `GET /capabilities` is code-complete but NOT live — `api`
+has not been redeployed, so every public page currently falls back to naming no
+models at all. That is the intended safe state, and it was checked visually, but
+the deployment must happen before launch or the landing page ships with an empty
+catalog section. `RELEASE_BACKGROUND_COMPLETION` and
+`RELEASE_COMPLETION_NOTIFICATIONS` are unset (off), which is correct until P9's
+rehearsal passes.
+
+**D4 recorded** in `docs/superpowers/specs/2026-09-20-launch-locales.md` as
+OPEN, with both options costed. It is the user's product decision and nothing in
+this task inferred it: `vansen.md:259` still promises en + ms while `:290` lists
+i18n as not started, and one of those has to change.
+
 
 ## Task 5: Accessibility and missing assets (T17 → R26)
 
@@ -895,7 +1102,7 @@ Run `npm test -- --watch=false`, focused Deno public-capability tests and produc
 - Create: `src/app/shared/a11y/focus-trap.ts` + `.spec.ts`, `src/app/shared/a11y/dialog.directive.ts`, `scripts/check-assets.mjs`
 - Modify: `detail-overlay.{ts,html}`, `library-grid.html` + `.ts`
 
-- [ ] **Step 1: Write the failing overlay spec**
+- [x] **Step 1: Write the failing overlay spec**
 
 Append to `src/app/features/workspace/detail-overlay/detail-overlay.spec.ts`:
 
@@ -947,7 +1154,7 @@ describe('R26: the detail overlay is a real dialog', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then build the primitive**
+- [x] **Step 2: Run to verify it fails, then build the primitive**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/features/workspace/detail-overlay/detail-overlay.spec.ts
@@ -963,7 +1170,7 @@ cd /Users/user/IdeaProjects/vansen && grep -rln 'role="dialog"' src/app
 
 Each file in that list adopts the directive.
 
-- [ ] **Step 3: Make library cards keyboard-operable**
+- [x] **Step 3: Make library cards keyboard-operable**
 
 `library-grid.html:63-67` is a `<figure>` with `(click)` and no `tabindex`, `role` or keydown, so a keyboard user cannot open any item.
 
@@ -1008,7 +1215,7 @@ it('R26: every interactive element in the grid has an accessible name', () => {
 });
 ```
 
-- [ ] **Step 4: Announce async state changes**
+- [x] **Step 4: Announce async state changes**
 
 A generation finishing changes the grid with no announcement. Add a polite live region in the workspace template:
 
@@ -1018,7 +1225,7 @@ A generation finishing changes the grid with no announcement. Add a polite live 
 
 `liveMessage()` reports completions, failures and refunds in plain words. Style `.sr-only` in the component stylesheet, never with an inline style.
 
-- [ ] **Step 5: Fix the trend assets**
+- [x] **Step 5: Fix the trend assets**
 
 All twelve trend presets bind `/trends/${id}.webp` and `public/` has no `trends/` directory, so every thumbnail 404s and the gallery renders as broken images.
 
@@ -1062,7 +1269,7 @@ Add a visual fallback regardless, so a missing asset degrades to a labelled tile
 
 P9 wires `check-assets.mjs` into CI.
 
-- [ ] **Step 6: Run everything and build**
+- [x] **Step 6: Run everything and build**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && node scripts/check-assets.mjs; export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build 2>&1 | tail -10
@@ -1070,7 +1277,61 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && node scripts/
 
 Expected: specs green, the asset check reporting honestly, build succeeds. User commits.
 
----
+### Task 5 execution notes (2026-09-21)
+
+All six steps done. 508 Angular / 470 Deno green, clean build.
+
+**The overlay had no dialog semantics at all.** It was a `<div class="panel">`:
+no role, no name, no focus management. Escape worked only because of a
+document-level listener, which fired whether or not the overlay had focus. The
+plan's spec failed on six of seven assertions before any code changed.
+
+**One primitive, seven dialogs.** `shared/a11y/focus-trap.ts` is pure functions
+over an element (13 tests, no component needed) and `dialog.directive.ts`
+applies role, `aria-modal`, the name, the Tab trap, Escape and focus restore.
+All seven hand-rolled dialogs now use it — six already declared
+`role="dialog" aria-modal="true"` by hand and none of them trapped Tab or
+restored focus. The directive never overwrites a name the template already
+supplies, so the four dialogs with a working `aria-labelledby` kept theirs.
+
+**The tour overlay keeps its own Escape, deliberately.** It is a spotlight
+coach mark that invites clicking the highlighted control, so once focus leaves
+the card a card-scoped Escape would stop working — its existing spec caught
+this the moment I moved Escape to the directive. It takes the role, name, Tab
+trap and focus restore from the directive and keeps its document-level key
+handling. Uniformity was not worth regressing a working interaction.
+
+**`announce()` had to move out of the constructor.** The element that names a
+dialog does not exist in the DOM until its content has rendered, so the first
+implementation deferred with `queueMicrotask` — which passed the async tests
+and failed the synchronous focus-restore one. `ngAfterViewInit` is both correct
+and synchronous within `detectChanges`.
+
+**The library was unusable by keyboard.** Every tile was a `<figure>` with a
+click handler and no `tabindex`, `role` or key binding, so no generation could
+be opened without a mouse; the variation button was the one quick action with
+no label. Cards are now `role="button" tabindex="0"` with Enter and Space, and
+`cardLabel()` names each one by its prompt — without it every tile announces
+identically and the grid is unusable by ear.
+
+**Announcements say what the refund did.** A generation settling rewrote a tile
+in place with nothing to mark it. `announcementFor()` reports completions,
+failures and cancellations in one polite utterance, never reads a prompt aloud
+(private, and already in the grid), and skips the library's first settle —
+otherwise arriving on the page reads the whole library out.
+
+**Trend assets: gate built, art pending.** All twelve presets bind
+`/trends/<id>.webp` and `public/trends/` does not exist, so every tile rendered
+as a broken-image icon — invisible to a unit test, because the DOM is identical
+either way. `scripts/check-assets.mjs` (`npm run check:assets`) is the
+deterministic gate and currently reports **0/12, exit 1**, honestly. A named
+fallback tile now takes the thumbnail's exact footprint, so a missing asset
+reads as a plain tile instead of a broken app and the preset stays pickable.
+The user chose to generate the real thumbnails with
+`scripts/gen-trend-thumbs.mjs`; that needs their own `OPENAI_API_KEY` and about
+$0.50 of their OpenAI spend, so it is a command for them to run. **Until they
+do, `check:assets` fails and must not be wired into CI as a blocking step (P9).**
+
 
 ## Task 6: Password recovery and confirmation resend
 
@@ -1082,13 +1343,13 @@ Expected: specs green, the asset check reporting honestly, build succeeds. User 
 - Public routes `/recover`, `/reset`, `/confirm`; login links both “Forgot password?” and “Resend confirmation”.
 - Recovery page methods `email.set(value)`, `submit():Promise<void>`, `pending()`, `sent()`; reset exposes `password.set(value)`, `submit()`, `error()`; confirmation page follows the recovery form contract.
 
-- [ ] **Step 1: Add service tests through the existing P7 auth mock seam**
+- [x] **Step 1: Add service tests through the existing P7 auth mock seam**
 
 Use TestBed.inject(AuthService) in each test and add spies to the same mocked Supabase auth object from P7; do not reference undeclared `service/mockAuth`. Test resetPasswordForEmail receives the fixed allowed `/reset` origin, resend receives `{type:'signup',email,options:{emailRedirectTo:...}}`, and known/unknown/rate-limited requests show the same safe response. Network/configuration failures use a generic retry state and never echo vendor token text. No recovery token/code goes to logs, analytics or persistence.
 
 Test completion with no session, ordinary signed-in session without recovery intent, valid PASSWORD_RECOVERY event, expiry, used code, and A signed in while opening B's recovery link. Only the validated recovery identity can update the password; P7 invalidates A's user state first.
 
-- [ ] **Step 2: Implement the auth methods and restricted recovery state**
+- [x] **Step 2: Implement the auth methods and restricted recovery state**
 
 Use Supabase's supported recovery callback/PKCE flow for the installed client. Parse/exchange the recovery code through that API, wait for verification, then clear sensitive URL parameters with replaceState. Track a short-lived recovery state scoped to the verified user/session and invalidate it on success, expiry, sign-out, navigation cancellation or another identity. A normal getSession result cannot create recovery permission.
 
@@ -1107,7 +1368,7 @@ async completePasswordReset(password: string): Promise<void> {
 
 Define `recoveryState` as a signal of `{userId:string;expiresAt:number}|null`, initialized only by the verified callback. Use a configured public origin allowlist for redirects, not arbitrary query parameters or an unvalidated return URL. No backend reset endpoint is needed when calling Supabase Auth directly; its server enforces the email rate limit.
 
-- [ ] **Step 3: Write executable page tests before building each page**
+- [x] **Step 3: Write executable page tests before building each page**
 
 Create standalone TestBed fixtures with stubbed AuthService methods and Router. This pattern supplies all helpers explicitly:
 
@@ -1135,17 +1396,17 @@ it('recover shows generic confirmation and prevents duplicate submission', async
 
 Import TestBed, vi/expect/it, AuthService, RecoverPage and provideRouter in that file. Duplicate this explicit fixture setup for ConfirmPage with resendConfirmation. ResetPage tests stub completePasswordReset: reject short password without calling it, display safe expired-link error, successful update navigates to the app, rejected update remains retryable. Add DOM assertions for input labels, busy disable, generic confirmation and request-another-link controls.
 
-- [ ] **Step 4: Implement and route all three pages**
+- [x] **Step 4: Implement and route all three pages**
 
 Each component is standalone/signals/OnPush with separate HTML/CSS, labels and live-region feedback. submit uses guard clauses for pending/cooldown/invalid input, awaits its auth method in try/finally and always clears pending. Local cooldown is convenience; do not present it as a server-side abuse limit. Reset does not route to the app until password update succeeds; back/cancel invalidates recovery state.
 
 Configure exact local/staging/production callback URLs, email templates, sender and Supabase server-side recovery/resend rate limits. Test direct API rapid repeats to prove bypassing the UI still meets the configured limit. Keep secrets/tokenized URLs out of evidence.
 
-- [ ] **Step 5: Verify real recovery links and account transitions**
+- [~] **Step 5: Verify real recovery links and account transitions**  ← PARTIAL: see the log; live-email checks are BLOCKED
 
 Record in `docs/superpowers/plans/2026-09-20-recovery-verification-log.md`: valid same-device link, expired/reused link, different browser/device, unknown address, rapid repeats bypassing local cooldown, confirmation resend/resumption, signed-in A opening B's link, and cancel/back navigation. A reused link never changes the password; an already successful reset's old password must no longer work. Local mailbox tests precede real staging delivery in P9.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 ```bash
 npm test -- --watch=false
@@ -1154,23 +1415,70 @@ npx ng build
 
 Run focused auth/page tests first, then the suite. Complete staging delivery, redirect and rate-limit proof in P9 before release. User commits.
 
----
+### Task 6 execution notes (2026-09-21)
+
+Steps 1–4 and 6 done; Step 5 is **partial and blocked**, not skipped. 554
+Angular / 470 Deno green, clean build.
+
+**Being signed in is not permission to set a password.** That is the whole
+design. `completePasswordReset` needs three separate things — a live recovery
+grant, an unexpired one, and a session whose user is the one that grant was
+issued for — because each one alone has been somebody's CVE. The grant is
+created ONLY by a verified `PASSWORD_RECOVERY` event and is cleared on success,
+expiry, sign-out, a different identity, and leaving the reset page. A plain
+`getSession()` result can never produce one.
+
+**Every answer the recovery form gives is the same answer.** Known, unknown and
+rate-limited addresses are indistinguishable, and the vendor's own
+`User not found` and `you can only request this after 47 seconds` are swallowed
+for the same reason: a different answer for a rate-limited address says "this
+one is worth rate limiting", which is the same disclosure by another route.
+Only a failure that means *we never reached the vendor at all* is reported, and
+then in our words — `ECONNREFUSED 10.0.0.4` tells a customer nothing and an
+attacker something.
+
+**The code is scrubbed from the address bar.** Supabase consumes it before the
+page renders, but it stays in the URL and therefore in history, in a bookmark
+and in the Referer of the next request. `/reset?code=…` and
+`/reset#access_token=…` are both cleared with `replaceState`, verified in the
+spec and live in the browser.
+
+**Four mutations, four kills.** Identity match, expiry, minimum length and grant
+invalidation each fail the suite when broken, so none of the gates is
+decoration.
+
+**Step 5 is blocked on infrastructure, and the reason is concrete.** There is no
+staging project, and `supabase start` cannot run because two migrations share
+the `0008` prefix (`0008_age_gate.sql`, `0008_credit_plans.sql`) — so there is
+no local Inbucket mailbox either. Everything that needs a real email or a
+second device is listed as BLOCKED in
+`docs/superpowers/plans/2026-09-20-recovery-verification-log.md`, along with the
+four pieces of Supabase configuration P9 must do: the `/reset` and `/confirm`
+redirect allowlist, server-side recovery and resend rate limits, the email
+templates and sender, and a server link lifetime no longer than the 30-minute
+client grant.
+
+**The "do not submit twice" guard is convenience, and the log says so.** It is a
+disabled button, not an abuse limit; anyone calling the API directly bypasses
+it, which is why the server-side limit is a release blocker rather than a nice
+to have.
+
 
 ## Exit criteria for P8
 
-- [ ] Retry works for every exposed operation: image, edit with a mask, upscale, video i2v and keyframes, and persona. Each re-runs the same intended inputs with a new submission identity and a fresh quote.
-- [ ] Variation carries `parentId` and refuses, with an explanation, where it cannot mean what the control says.
-- [ ] A generation with no snapshot, or whose reference was deleted, refuses with a message a customer can act on rather than failing at the provider.
-- [ ] A cancelled video still reads "Cancelled · Refunded" after a reload.
-- [ ] No raw provider error text reaches a customer.
-- [ ] Filling the end frame first, clearing the first frame, replacing the last, and two uploads resolving out of order all keep their slot roles.
-- [ ] No family sends an aspect ratio in `i2v` or `keyframes`, proven by an adapter test across all five video families.
-- [ ] Public pricing, the landing page, the footer, the login page, the in-app pitch and the actual entitlement table agree, enforced by a spec rather than a grep.
-- [ ] No copy advertises Sora or any model absent from the enabled catalog.
-- [ ] The advertised promotional grant equals what `cycleGrant` actually grants for both tiers.
-- [ ] The launch locale decision is recorded and `vansen.md` matches it.
-- [ ] Every dialog declares a role, traps focus and restores it; library cards open from the keyboard; every interactive element has an accessible name.
-- [ ] `scripts/check-assets.mjs` exits zero, or the trend gallery is hidden behind a flag.
-- [ ] A customer who forgets their password can recover it, and the reset form reveals nothing about which addresses have accounts.
+- [x] Retry works for every exposed operation: image, edit with a mask, upscale, video i2v and keyframes, and persona. Each re-runs the same intended inputs with a new submission identity and a fresh quote.
+- [x] Variation carries `parentId` and refuses, with an explanation, where it cannot mean what the control says.
+- [x] A generation with no snapshot, or whose reference was deleted, refuses with a message a customer can act on rather than failing at the provider.
+- [x] A cancelled video still reads "Cancelled · Refunded" after a reload.
+- [x] No raw provider error text reaches a customer.
+- [x] Filling the end frame first, clearing the first frame, replacing the last, and two uploads resolving out of order all keep their slot roles.
+- [x] No family sends an aspect ratio in `i2v` or `keyframes`, proven by an adapter test across all five video families.
+- [x] Public pricing, the landing page, the footer, the login page, the in-app pitch and the actual entitlement table agree, enforced by a spec rather than a grep.
+- [x] No copy advertises Sora or any model absent from the enabled catalog.
+- [x] The advertised promotional grant equals what `cycleGrant` actually grants for both tiers.
+- [~] The launch locale decision is recorded and `vansen.md` matches it. **Recorded as OPEN** in `docs/superpowers/specs/2026-09-20-launch-locales.md`; the decision is the user's and is unmade, so `vansen.md:259` still promises en + ms while `:290` lists i18n as not started. One of those has to change once they choose.
+- [~] Every dialog declares a role, traps focus and restores it; library cards open from the keyboard; every interactive element has an accessible name. Dialogs and the library grid are done and specced. The accessible-name sweep is enforced **for the library grid only** — no app-wide scan exists, so other surfaces are unproven.
+- [ ] **BLOCKED** `scripts/check-assets.mjs` exits zero, or the trend gallery is hidden behind a flag. It exits 1 at **0/12**. The user chose to generate the real thumbnails rather than hide the gallery; that needs their own `OPENAI_API_KEY` and about $0.50 of their OpenAI spend, so it is a command for them to run. A named fallback tile means nothing broken renders in the meantime.
+- [~] A customer who forgets their password can recover it, and the reset form reveals nothing about which addresses have accounts. The code path is complete and specced, including anti-enumeration parity for known, unknown and rate-limited addresses. **No real email has been sent**: there is no staging project and `supabase start` is blocked by the duplicate `0008` migration prefix, so there is no local mailbox. See `docs/superpowers/plans/2026-09-20-recovery-verification-log.md`.
 
 **Known carry-forward:** CI, the deployment manifest, telemetry, staged rollout and the production runs of the thumbnail backfill and the trend-thumbnail generator are P9. If the user chose to fund Malay localization at Task 4 Step 7, that becomes its own plan.

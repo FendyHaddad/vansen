@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
 import { JobsResponse } from '../api/dtos';
 import { GenerationStore } from '../generations/generation-store';
@@ -30,6 +31,13 @@ export class JobPoller {
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private startedAt = 0;
+
+  constructor() {
+    // The poller writes provider results into the store. Left running across
+    // an account switch it would write the previous account's results into
+    // the new one's library.
+    inject(SessionLifecycle).register('job-poller', { reset: () => this.stop() });
+  }
 
   /** Idempotent — safe to call whenever new pending items may exist. */
   watch(): void {

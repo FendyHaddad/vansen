@@ -97,3 +97,12 @@
     transform: rotate(360deg);
   }
 }
+
+/* D5: the library picker is deliberately cut for launch. Say so where
+   someone would go looking for it, rather than leaving them hunting. */
+.ref-hint {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}

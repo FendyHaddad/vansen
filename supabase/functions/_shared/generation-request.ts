@@ -133,9 +133,9 @@ export function normalizeGenerationRequest(
     };
   }
   if (family.id === 'flux') {
-    // The dimensions come from the catalog's own FLUX_DIMS, which is also what
-    // `providerCost` bills per megapixel — one table, so the size we request
-    // and the size we charge for cannot drift apart.
+    // The dimensions come from the catalog's own FLUX_DIMS, the same table
+    // `resolutionExclusions` was derived from — so a tier we sell is always a
+    // size this endpoint will actually render.
     return {
       ...base,
       providerModel: verified.fluxSlug,

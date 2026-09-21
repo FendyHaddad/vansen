@@ -221,3 +221,11 @@
     transform: rotate(360deg);
   }
 }
+
+/* Why a control is off. Sits under the button it explains. */
+.action-reason {
+  margin: -2px 0 2px;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}

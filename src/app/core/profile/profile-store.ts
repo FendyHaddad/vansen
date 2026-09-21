@@ -1,4 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
 import { ProfileDto, ProfileResponse, SubscriptionDto } from '../api/dtos';
 import { SubscriptionPlan, SubscriptionStatus } from '../enums';
@@ -61,15 +62,28 @@ export class ProfileStore {
     return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
   });
 
-  /** Days left in the 30-day post-lapse grace window; null when not lapsed/out of grace. */
-  readonly graceDaysLeft = computed(() => {
+  /**
+   * Days until the library is purged — i.e. until `currentPeriodEnd`.
+   *
+   * There is no window after the period ends (retention policy D2: the paid
+   * period *is* the grace), so this counts down while the customer can still
+   * act and returns null once the date has passed. It replaces the old
+   * `graceDaysLeft`, which counted 30 days AFTER the lapse and told people
+   * they had time they no longer have.
+   */
+  readonly daysUntilPurge = computed(() => {
     const sub = this.subscriptionSig();
-    if (!sub || !sub.currentPeriodEnd) return null;
-    const ended = new Date(sub.currentPeriodEnd).getTime();
-    if (this.studioActive() || ended > Date.now()) return null;
-    const left = 30 - Math.floor((Date.now() - ended) / 86_400_000);
+    if (!sub?.currentPeriodEnd) return null;
+    // Only a subscription that is actually ending is counting down.
+    if (sub.status === SubscriptionStatus.Active) return null;
+    const ends = new Date(sub.currentPeriodEnd).getTime();
+    const left = Math.ceil((ends - Date.now()) / 86_400_000);
     return left > 0 ? left : null;
   });
+
+  constructor() {
+    inject(SessionLifecycle).register('profile', this);
+  }
 
   async load(): Promise<void> {
     // Boot from the last snapshot (profile, settings, balance) instantly,

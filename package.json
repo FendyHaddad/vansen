@@ -11,6 +11,7 @@
     "sync-shared": "node scripts/sync-shared.mjs",
     "export-catalog": "tsx scripts/export-catalog.mjs",
     "check:catalog": "tsx scripts/export-catalog.mjs --check",
+    "check:assets": "tsx scripts/check-assets.mjs",
     "check:shared": "node scripts/sync-shared.mjs --check",
     "test:scripts": "node --test scripts/catalog-check.test.mjs"
   },

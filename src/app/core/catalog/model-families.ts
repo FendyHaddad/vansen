@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-20.2';
+export const CATALOG_VERSION = '2026-09-21.1';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -54,6 +54,12 @@ export interface ModelFamily {
     versions?: FamilyOption[];
     aspectRatios: string[];
     resolutions?: FamilyOption[];
+    /**
+     * Resolution tiers this family cannot actually deliver at a given aspect
+     * ratio, keyed by ratio. A tier the provider will clamp must not be
+     * offered at a price that describes the unclamped size.
+     */
+    resolutionExclusions?: Record<string, string[]>;
     qualities?: FamilyOption[];
     durations?: number[];
     audio?: AudioCapability;
@@ -70,12 +76,11 @@ const AR_IMAGE = ['1:1', '3:4', '4:3', '16:9', '9:16'];
 
 /**
  * FLUX.2 (`fal-ai/flux-2`) takes `image_size` as `{width, height}` with BOTH
- * edges clamped to 512–2048, and bills per megapixel. The clamp means only 1:1
- * actually reaches 4MP — 16:9 tops out at 2.36MP — so the price is computed
- * from the pixels we will really ask for, never from the label. Keyed
- * `aspectRatio:resolution`; the same table drives the provider request in
- * `_shared/generation-request.ts`, so a price can never describe a size we do
- * not send.
+ * edges clamped to 512–2048. The clamp means only 1:1 actually reaches 4MP —
+ * 16:9 tops out at 2.36MP — which is why the 4MP tier is withheld from every
+ * other ratio. Keyed `aspectRatio:resolution`; this table drives the provider
+ * request in `_shared/generation-request.ts`, so a tier we sell is always a
+ * size we send.
  */
 export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
   '1:1:1MP': { width: 1024, height: 1024 },
@@ -95,8 +100,19 @@ export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
   '9:16:4MP': { width: 1152, height: 2048 },
 };
 
-/** fal's published FLUX.2 rate (provider capability record, 2026-09-21). */
-export const FLUX_USD_PER_MP = 0.012;
+/**
+ * Flat price per tier. fal quotes FLUX.2 per megapixel, but a per-megapixel
+ * charge makes the credit ladder non-monotonic once it is rounded to whole
+ * credits — two adjacent sizes can cost the same, and a wide 4MP can cost less
+ * than a square 2MP. These tiers are the deliberate retail shape; the 2048
+ * clamp is handled by not offering a tier we cannot fill (see
+ * `resolutionExclusions` on the family) rather than by discounting it.
+ */
+export const FLUX_TIER_USD: Record<string, number> = {
+  '1MP': 0.03,
+  '2MP': 0.06,
+  '4MP': 0.12,
+};
 
 export function fluxDims(s: GenerationSettings): { width: number; height: number } {
   return FLUX_DIMS[`${s.aspectRatio ?? '1:1'}:${s.resolution ?? '1MP'}`] ?? FLUX_DIMS['1:1:1MP'];
@@ -137,8 +153,33 @@ export const PLAN_CREDITS = { studio: 1500, pro: 3750 } as const;
 export const PLAN_PRICE_USD = { studio: 15, pro: 30 } as const;
 export const PLAN_PROMO_USD = { studio: 10, pro: 25 } as const;
 
-/** Pro buyers get 25% more credits per dollar — same jobs cost 20% less. */
+/** Add-on packs bought on Pro carry this multiplier. */
 export const PRO_PURCHASE_RATE = 1.25;
+
+/**
+ * Two true numbers about the same fact, which read as a contradiction when a
+ * page picks one and another page picks the other.
+ *
+ * A job costs the same number of credits on either plan. What changes is what
+ * a credit costs: 1c on Studio, 0.8c on Pro. That is 25% more credits per
+ * dollar and 20% off the same job — the same 4:5 ratio, counted from opposite
+ * ends. Both are derived here so no page can invent a third figure.
+ */
+const STUDIO_USD_PER_CREDIT = PLAN_PRICE_USD.studio / PLAN_CREDITS.studio;
+const PRO_USD_PER_CREDIT = PLAN_PRICE_USD.pro / PLAN_CREDITS.pro;
+
+/** How much less the same job costs on Pro. */
+export const PRO_SAVING_PERCENT = Math.round(
+  (1 - PRO_USD_PER_CREDIT / STUDIO_USD_PER_CREDIT) * 100,
+);
+
+/** How many more credits a dollar buys on Pro. */
+export const PRO_EXTRA_CREDIT_PERCENT = Math.round(
+  (STUDIO_USD_PER_CREDIT / PRO_USD_PER_CREDIT - 1) * 100,
+);
+
+/** The same bonus, applied to one-time add-on packs (PRO_PURCHASE_RATE). */
+export const PRO_PACK_BONUS_PERCENT = Math.round((PRO_PURCHASE_RATE - 1) * 100);
 
 /** Add-on packs: one-time purchases, tier rate × size bonus. Subscriber-only. */
 export const CREDIT_PACKS: { usd: number; bonusPct: number }[] = [
@@ -264,7 +305,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Black Forest Labs',
     logo: '/logos/bfl.svg',
     kind: 'image',
-    blurb: 'FLUX.2 — photoreal detail, billed per megapixel.',
+    blurb: 'FLUX.2 — photoreal detail at a flat price per size.',
     capabilities: {
       aspectRatios: AR_IMAGE,
       resolutions: [
@@ -273,18 +314,24 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         {
           value: '4MP',
           label: '4MP',
-          tooltip: 'Largest FLUX.2 renders: 2048×2048 square. Wider crops are capped at 2048px on the long edge, so they land below 4MP — and cost proportionally less.',
+          tooltip: 'Square only: 2048×2048. FLUX.2 caps every edge at 2048px, so a wide or tall crop cannot reach 4 megapixels and is not offered this tier.',
         },
       ],
+      // FLUX.2 clamps BOTH edges to 2048. Only 1:1 reaches 4MP — 16:9 tops out
+      // at 2.36MP. Selling a "4MP" tier at those ratios would charge the 4MP
+      // price for an image the endpoint cannot produce.
+      resolutionExclusions: {
+        '4:3': ['4MP'],
+        '3:4': ['4MP'],
+        '16:9': ['4MP'],
+        '9:16': ['4MP'],
+      },
       // fal-ai/flux-2 documents no reference-image input (capability record,
       // 2026-09-21), so the family no longer offers one.
       imageInput: false,
       maskInput: false,
     },
-    providerCost: (s) => {
-      const { width, height } = fluxDims(s);
-      return FLUX_USD_PER_MP * ((width * height) / 1_000_000);
-    },
+    providerCost: (s) => FLUX_TIER_USD[s.resolution ?? '1MP'] ?? FLUX_TIER_USD['1MP'],
   },
   {
     id: 'seedream',
@@ -521,6 +568,20 @@ export function editToolById(id: string): EditTool | undefined {
 
 export function familyById(id: string): ModelFamily | undefined {
   return MODEL_FAMILIES.find((f) => f.id === id);
+}
+
+/**
+ * The resolution tiers a family really offers at one aspect ratio.
+ *
+ * The composer and the server both ask this, so a stale client cannot buy a
+ * tier the provider would clamp: the chip is absent in the UI and the request
+ * is refused before charge.
+ */
+export function resolutionsFor(family: ModelFamily, aspectRatio: string): FamilyOption[] {
+  const all = family.capabilities.resolutions ?? [];
+  const excluded = family.capabilities.resolutionExclusions?.[aspectRatio];
+  if (!excluded) return all;
+  return all.filter((o) => !excluded.includes(o.value));
 }
 
 export function defaultSettings(family: ModelFamily): GenerationSettings {

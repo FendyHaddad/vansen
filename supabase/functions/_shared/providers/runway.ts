@@ -6,6 +6,7 @@ import type {
   SubmitResult,
 } from './types.ts';
 import { classifyStatus } from './provider-errors.ts';
+import { frameDrivenShape } from '../video-rules.ts';
 
 const API_BASE = 'https://api.dev.runwayml.com/v1';
 const API_VERSION = '2024-11-06';
@@ -62,7 +63,8 @@ export const runwayAdapter: ProviderAdapter = {
     const body: Record<string, unknown> = {
       model: MODEL,
       promptText: ctx.prompt,
-      ratio: runwayRatio(s.aspectRatio, s.resolution),
+      // i2v takes its shape from promptImage; a ratio here would crop it.
+      ...(frameDrivenShape(mode) ? {} : { ratio: runwayRatio(s.aspectRatio, s.resolution) }),
       duration: typeof s.durationS === 'number' ? s.durationS : 5,
     };
     const endpoint = mode === 'i2v' ? 'image_to_video' : 'text_to_video';

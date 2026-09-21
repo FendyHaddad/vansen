@@ -1,11 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, HostListener, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucidePlay, lucideX } from '@ng-icons/lucide';
 import type { GenerationItem } from '../../../core/generations/generation-store';
+import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
 @Component({
   selector: 'app-video-picker-dialog',
-  imports: [NgIcon],
+  imports: [NgIcon, DialogDirective],
   providers: [provideIcons({ lucidePlay, lucideX })],
   templateUrl: './video-picker-dialog.html',
   styleUrl: './video-picker-dialog.css',
@@ -26,10 +27,6 @@ export class VideoPickerDialog {
     });
   });
 
-  @HostListener('document:keydown.escape')
-  onEscape(): void {
-    this.closed.emit();
-  }
 
   onBackdrop(event: MouseEvent): void {
     if (event.target !== event.currentTarget) return;

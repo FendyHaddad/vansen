@@ -1,6 +1,7 @@
 import { encodeBase64 } from 'jsr:@std/encoding/base64';
 import type { CheckResult, ProviderAdapter, SubmitCtx, SubmitResult } from './types.ts';
 import { GOOGLE_API_BASE, googleHeaders, googleKey } from './google-common.ts';
+import { frameDrivenShape } from '../video-rules.ts';
 
 const SUPPORTED = new Set(['t2v', 'i2v', 'ref2v', 'keyframes', 'extend']);
 
@@ -44,7 +45,9 @@ async function instanceFor(ctx: SubmitCtx): Promise<Record<string, unknown>> {
 function parametersFor(ctx: SubmitCtx): Record<string, unknown> {
   const s = ctx.settings;
   return {
-    aspectRatio: s.aspectRatio ?? '16:9',
+    // The frame decides the shape in i2v and keyframes; sending an aspect
+    // ratio there tells the provider to argue with the image it was given.
+    ...(frameDrivenShape(ctx.mode) ? {} : { aspectRatio: s.aspectRatio ?? '16:9' }),
     resolution: s.resolution ?? '1080p',
     durationSeconds: typeof s.durationS === 'number' ? s.durationS : 8,
     personGeneration: 'allow_adult',

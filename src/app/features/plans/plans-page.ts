@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
@@ -19,7 +19,19 @@ import { SiteFooter } from '../../shared/site-footer/site-footer';
 import { AuthService } from '../../core/auth/auth-service';
 import { BillingService } from '../../core/billing/billing-service';
 import { CheckoutIntent } from '../../core/billing/checkout-intent';
-import { CREDIT_PACKS, PLAN_CREDITS, packCredits } from '../../core/catalog/model-families';
+import {
+  CREDIT_PACKS,
+  MODEL_FAMILIES,
+  PLAN_CREDITS,
+  PLAN_PRICE_USD,
+  PLAN_PROMO_USD,
+  PRO_EXTRA_CREDIT_PERCENT,
+  PRO_PACK_BONUS_PERCENT,
+  PRO_SAVING_PERCENT,
+  packCredits,
+} from '../../core/catalog/model-families';
+import { toolLabels, toolsFor } from '../../core/catalog/entitlements';
+import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 
 interface PlanCard {
   id: 'studio' | 'pro';
@@ -75,6 +87,23 @@ export class PlansPage {
   private readonly billing = inject(BillingService);
   private readonly intent = inject(CheckoutIntent);
   private readonly router = inject(Router);
+  private readonly capabilities = inject(PublicCapabilitiesService);
+
+  constructor() {
+    void this.capabilities.load();
+  }
+
+  /** Model names, drawn from what this deployment has switched on. */
+  private readonly liveNames = computed(() => {
+    const enabled = this.capabilities.enabledFamilyIds();
+    const of = (kind: 'image' | 'video') =>
+      MODEL_FAMILIES.filter((f) => f.kind === kind && enabled.includes(f.id))
+        .map((f) => f.name);
+    return { image: of('image'), video: of('video') };
+  });
+
+  private readonly studioToolNames = toolLabels(toolsFor('studio')).filter((l) => l !== 'Mask');
+  private readonly proToolNames = toolLabels(toolsFor('pro'));
 
   /** The plan whose CTA is mid-redirect — Stripe takes a beat to answer. */
   readonly busyPlan = signal<'studio' | 'pro' | null>(null);
@@ -104,40 +133,64 @@ export class PlansPage {
     }
   }
 
-  readonly plans: PlanCard[] = [
-    {
+  /**
+   * D1: every line here is derived. The hand-written version promised "full
+   * on-device editing suite, free and unlimited" on Studio and named the Pro
+   * tools in the same breath, and listed a video model (Sora) that has no
+   * adapter — so a Studio subscriber paid for a list and then hit padlocks.
+   */
+  readonly plans = computed<PlanCard[]>(() => {
+    const names = this.liveNames();
+    const imageLine = names.image.length
+      ? `All image models — ${names.image.join(', ')}`
+      : 'Every image model in the catalog';
+    const studio: PlanCard = {
       id: 'studio',
       name: 'Studio',
-      priceUsd: 15,
-      promoUsd: 10,
+      priceUsd: PLAN_PRICE_USD.studio,
+      promoUsd: PLAN_PROMO_USD.studio,
       credits: PLAN_CREDITS.studio,
-      tagline: 'Every image model plus the full editing suite.',
+      tagline: 'Every image model plus the on-device editing basics.',
       perks: [
         `${PLAN_CREDITS.studio.toLocaleString()} credits every month`,
-        'All image models — Nano Banana, GPT Image, FLUX, Seedream',
-        'Full on-device editing suite, free and unlimited',
+        imageLine,
+        `On-device editing — ${this.studioToolNames.join(', ')}`,
         'AI edit tools from 5 credits per run',
         'Private full-resolution library, no watermarks',
       ],
       featured: false,
-    },
-    {
-      id: 'pro',
-      name: 'Pro',
-      priceUsd: 30,
-      promoUsd: 25,
-      credits: PLAN_CREDITS.pro,
-      tagline: 'Everything in Studio, plus video and the cheapest credits.',
-      perks: [
-        'Everything in Studio, plus:',
-        `${PLAN_CREDITS.pro.toLocaleString()} credits every month — 25% more per dollar`,
-        'Video models — Veo, Sora, Kling, Runway, Seedance',
-        'Same jobs cost 20% less than on Studio',
-        'Biggest add-on packs: up to 13,750 credits for $100',
-      ],
-      featured: true,
-    },
-  ];
+    };
+    const proPerks = [
+      'Everything in Studio, plus:',
+      `${PLAN_CREDITS.pro.toLocaleString()} credits every month — ${PRO_EXTRA_CREDIT_PERCENT}% more per dollar`,
+      `Pro on-device tools — ${this.proToolNames.join(', ')}`,
+      `The same job costs ${PRO_SAVING_PERCENT}% less than on Studio`,
+      `Biggest add-on packs: up to ${packCredits(100, 'pro').toLocaleString()} credits for $100`,
+    ];
+    // Video is a Pro headline, but only where a video family is switched on.
+    if (names.video.length) {
+      proPerks.splice(2, 0, `Video models — ${names.video.join(', ')}`);
+    }
+    return [
+      studio,
+      {
+        id: 'pro',
+        name: 'Pro',
+        priceUsd: PLAN_PRICE_USD.pro,
+        promoUsd: PLAN_PROMO_USD.pro,
+        credits: PLAN_CREDITS.pro,
+        tagline: 'Everything in Studio, plus the Pro tools and the cheapest credits.',
+        perks: proPerks,
+        featured: true,
+      },
+    ];
+  });
+
+  readonly proPackBonusPercent = PRO_PACK_BONUS_PERCENT;
+  readonly studioPriceUsd = PLAN_PRICE_USD.studio;
+  readonly proPriceUsd = PLAN_PRICE_USD.pro;
+  readonly studioPromoUsd = PLAN_PROMO_USD.studio;
+  readonly proPromoUsd = PLAN_PROMO_USD.pro;
 
   readonly packs: PackRow[] = CREDIT_PACKS.map((p) => ({
     usd: p.usd,
@@ -150,7 +203,7 @@ export class PlansPage {
     {
       question: 'How do credits work?',
       answer:
-        'Every generation has a fixed credit price shown before you run it — most images cost 5–25 credits, AI edits 5–10. Your plan grants a fresh batch every billing cycle: 1,500 on Studio, 3,750 on Pro.',
+        `Every generation has a fixed credit price shown before you run it — most images cost 5–25 credits, AI edits 5–10. Your plan grants a fresh batch every billing cycle: ${PLAN_CREDITS.studio.toLocaleString()} on Studio, ${PLAN_CREDITS.pro.toLocaleString()} on Pro.`,
     },
     {
       question: 'Do credits roll over?',
@@ -160,17 +213,17 @@ export class PlansPage {
     {
       question: 'What if I run out mid-month?',
       answer:
-        'Add a one-time credit pack ($10–$100) from the Subscription tab. Bigger packs carry a bonus, Pro subscribers get 25% more credits per dollar, and pack credits never reset while you stay subscribed.',
+        `Add a one-time credit pack ($10–$100) from the Subscription tab. Bigger packs carry a bonus, Pro subscribers get ${PRO_EXTRA_CREDIT_PERCENT}% more credits per dollar, and pack credits never reset while you stay subscribed.`,
     },
     {
       question: 'What does editing cost?',
       answer:
-        'The on-canvas suite — crop, filters, heal, cut out, bokeh, upscale and more — runs on your own device, so it is free and unlimited on every plan. Generative AI edits (remove, fill, expand, background) cost 5–10 credits per run, and saving an edited version costs nothing.',
+        'The on-canvas suite runs on your own device, so it never costs credits. Crop, adjust, filters, sharpen, smooth, spot heal, dehaze and portrait smooth come with every plan; cut out, bokeh, upscale, AI sharpen, smart select, magic erase and the rest are the Pro tier. Generative AI edits (remove, fill, expand, background) cost 5–10 credits per run, and saving an edited version costs nothing.',
     },
     {
       question: 'Why is video Pro-only?',
       answer:
-        'Video generations cost many times more to run than images, so they live on the plan with the bigger grant and cheaper credits. Pro also makes every image cheaper — the same job costs 20% less than on Studio.',
+        `Video generations cost many times more to run than images, so they live on the plan with the bigger grant and cheaper credits. Pro also makes every image cheaper: a job costs the same number of credits on either plan, but a credit costs ${PRO_SAVING_PERCENT}% less on Pro.`,
     },
     {
       question: 'What happens if I cancel?',

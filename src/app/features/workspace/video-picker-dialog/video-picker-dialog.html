@@ -1,5 +1,5 @@
 <div class="backdrop" (click)="onBackdrop($event)">
-  <div class="panel" role="dialog" aria-label="Pick a video">
+  <div class="panel" appDialog appDialogLabel="Pick a video" (dialogClose)="closed.emit()">
     <div class="panel-head">
       <h2>Pick a video</h2>
       <button type="button" class="close-btn" (click)="closed.emit()" aria-label="Close">

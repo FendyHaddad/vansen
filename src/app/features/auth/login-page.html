@@ -10,9 +10,9 @@
         <p class="text-2xl font-medium leading-snug">
           “Every model worth using, one prompt box, one balance.”
         </p>
-        <footer class="artwork-caption mt-4 text-sm">
-          Veo · Sora · Nano Banana · FLUX · Kling · Seedance
-        </footer>
+        @if (modelCaption()) {
+          <footer class="artwork-caption mt-4 text-sm">{{ modelCaption() }}</footer>
+        }
       </blockquote>
     </div>
   </aside>
@@ -83,7 +83,13 @@
         </button>
       </form>
 
-      <p class="muted mt-6 text-center text-sm">
+      <p class="muted mt-4 text-center text-sm">
+        <a routerLink="/recover" class="linkish">Forgot password?</a>
+        <span aria-hidden="true"> · </span>
+        <a routerLink="/confirm" class="linkish">Resend confirmation</a>
+      </p>
+
+      <p class="muted mt-4 text-center text-sm">
         {{ mode() === 'signin' ? 'New to Vansen?' : 'Already have an account?' }}
         <button type="button" class="linkish" (click)="toggleMode()">
           {{ mode() === 'signin' ? 'Create an account' : 'Sign in' }}

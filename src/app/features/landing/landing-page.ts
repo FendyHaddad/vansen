@@ -3,8 +3,10 @@ import {
   Component,
   ElementRef,
   afterNextRender,
+  computed,
   inject,
 } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -25,7 +27,15 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmBadge } from '@spartan-ng/helm/badge';
 import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
-import { MODEL_FAMILIES, ModelFamily } from '../../core/catalog/model-families';
+import {
+  MODEL_FAMILIES,
+  ModelFamily,
+  PLAN_CREDITS,
+  PLAN_PRICE_USD,
+  PRO_EXTRA_CREDIT_PERCENT,
+} from '../../core/catalog/model-families';
+import { toolLabels, toolsFor } from '../../core/catalog/entitlements';
+import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 
 interface ProviderLogo {
   name: string;
@@ -49,7 +59,7 @@ interface StudioPillar {
   templateUrl: './landing-page.html',
   styleUrl: './landing-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter],
+  imports: [DecimalPipe, RouterLink, NgIcon, HlmButton, HlmBadge, SiteHeader, SiteFooter],
   providers: [
     provideIcons({
       lucideArrowRight,
@@ -69,8 +79,10 @@ interface StudioPillar {
 })
 export class LandingPage {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly capabilities = inject(PublicCapabilitiesService);
 
   constructor() {
+    void this.capabilities.load();
     afterNextRender(() => this.setupReveals());
   }
 
@@ -90,38 +102,42 @@ export class LandingPage {
     'portrait in golden hour, 85mm, shallow depth of field',
   ];
 
-  readonly imageFamilies: ModelFamily[] = MODEL_FAMILIES.filter((f) => f.kind === 'image');
+  /**
+   * Only what this deployment has switched on. A family behind its kill
+   * switch is not for sale, so the landing page does not name it.
+   */
+  private readonly live = computed(() => {
+    const enabled = this.capabilities.enabledFamilyIds();
+    return MODEL_FAMILIES.filter((f) => enabled.includes(f.id));
+  });
 
-  readonly videoFamilies: ModelFamily[] = MODEL_FAMILIES.filter((f) => f.kind === 'video');
+  readonly imageFamilies = computed<ModelFamily[]>(() =>
+    this.live().filter((f) => f.kind === 'image'),
+  );
 
-  /** On-canvas tools included with Studio — mirrors the workspace right panel. */
-  readonly studioToolChips = [
-    'Crop',
-    'Adjust',
-    '17 Filters',
-    'Sharpen',
-    'Smooth',
-    'Spot Heal',
-    'Magic Erase',
-    'Smart Select',
-    'AI Upscale',
-    'Cut Out',
-    'Bokeh',
-    'Enhance',
-    'Levels',
-    'Clone',
-    'Retouch',
-    'Perspective',
-    'Liquify',
-    'Dehaze',
-    'Portrait Smooth',
-  ];
+  readonly videoFamilies = computed<ModelFamily[]>(() =>
+    this.live().filter((f) => f.kind === 'video'),
+  );
+
+  /**
+   * Two lists, because they are two prices. This page used to show one cloud
+   * of nineteen chips under "included with every plan" — eleven of which the
+   * panel locks behind Pro.
+   */
+  readonly studioToolChips = toolLabels(toolsFor('studio')).filter((l) => l !== 'Mask');
+  readonly proToolChips = toolLabels(toolsFor('pro'));
+
+  readonly studioPriceUsd = PLAN_PRICE_USD.studio;
+  readonly proPriceUsd = PLAN_PRICE_USD.pro;
+  readonly studioCredits = PLAN_CREDITS.studio;
+  readonly proCredits = PLAN_CREDITS.pro;
+  readonly proExtraCreditPercent = PRO_EXTRA_CREDIT_PERCENT;
 
   readonly studioPillars: StudioPillar[] = [
     {
       icon: 'lucideCpu',
       title: 'AI that runs on your device',
-      body: 'Cut Out, Bokeh, AI Upscale and Smart Select run entirely in your browser on open-source models. No upload, no queue, no charge — your pixels never leave the tab.',
+      body: 'Cut Out, Bokeh, AI Upscale and Smart Select run entirely in your browser on open-source models — included with Pro. No upload, no queue, no credits spent; your pixels never leave the tab.',
     },
     {
       icon: 'lucideEraser',
@@ -139,12 +155,12 @@ export class LandingPage {
     {
       step: '01',
       title: 'Pick your plan',
-      body: 'Studio $15/mo (1,500 credits) or Pro $30/mo (3,750 credits + video). Switch or add credits any time.',
+      body: `Studio $${PLAN_PRICE_USD.studio}/mo (${PLAN_CREDITS.studio.toLocaleString()} credits) or Pro $${PLAN_PRICE_USD.pro}/mo (${PLAN_CREDITS.pro.toLocaleString()} credits + video). Switch or add credits any time.`,
     },
     {
       step: '02',
       title: 'Pick the model',
-      body: 'Nano Banana, GPT Image, FLUX, Seedream — switch per prompt, with the exact price shown before you run.',
+      body: 'Every image model in the catalog — switch per prompt, with the exact price shown before you run.',
     },
     {
       step: '03',

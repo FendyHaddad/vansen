@@ -15,7 +15,16 @@
       <div class="trend-grid">
         @for (trend of trends; track trend.id) {
           <button type="button" hlmDropdownMenuItem class="trend-tile" (triggered)="pick(trend)">
-            <img [src]="trend.thumb" [alt]="trend.name" loading="lazy"/>
+            @if (missing().has(trend.id)) {
+              <span class="trend-fallback">{{ trend.name }}</span>
+            } @else {
+              <img
+                [src]="trend.thumb"
+                [alt]="trend.name"
+                loading="lazy"
+                (error)="markMissing(trend.id)"
+              />
+            }
             <span class="trend-tile-name">{{ trend.name }}</span>
           </button>
         }

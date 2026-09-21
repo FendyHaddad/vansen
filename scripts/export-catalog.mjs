@@ -37,6 +37,9 @@ const catalog = {
       durations: f.capabilities.durations ?? null,
       modes: f.capabilities.modes ?? null,
       audio: f.capabilities.audio ?? null,
+      // Tiers the provider cannot deliver at a given ratio. The phone has to
+      // know, or it offers a size the server will refuse.
+      resolutionExclusions: f.capabilities.resolutionExclusions ?? null,
       imageInput: f.capabilities.imageInput,
       maskInput: f.capabilities.maskInput,
     },
