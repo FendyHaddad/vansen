@@ -22,9 +22,9 @@
 #
 # Environment:
 #   VANSEN_PROJECT_REF  Supabase project ref (default: the production project)
-#   VANSEN_LOCAL_DB     Postgres URL for the SQL gates. Without it the SQL
-#                       gates are scored as a FAILURE, by design.
-#                       Start one with `npm run db:test:start`.
+#   VANSEN_LOCAL_DB     Postgres URL for the SQL gates. Unset (the normal
+#                       case) the script starts the local Supabase stack
+#                       itself, runs the gates against it, and stops it after.
 
 set -euo pipefail
 
@@ -56,7 +56,7 @@ done
 LOG="$(mktemp -t vansen-deploy)"
 STEP_OUT="$(mktemp -t vansen-step)"
 TTY=0; [ -t 1 ] && TTY=1
-TOTAL=6
+TOTAL=7
 DONE=0
 
 clearline() { [ "$TTY" = "1" ] && printf '\r\033[K'; return 0; }
@@ -76,8 +76,23 @@ progress() {
 
 tick() { DONE=$(( DONE + 1 )); }
 
+# The local database we started, if any. Stopped before every exit so a
+# failed run never leaves Docker containers behind.
+STARTED_DB=0
+LOCAL_DB_URL='postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+
+cleanup() {
+  [ "$STARTED_DB" = "1" ] || return 0
+  STARTED_DB=0
+  progress "stopping local database"
+  npm run db:test:stop >>"$LOG" 2>&1 || true
+}
+trap cleanup EXIT
+
 # fail REASON [DETAIL]: the last thing printed, always says why.
 fail() {
+  trap - ERR
+  cleanup
   clearline
   printf '\033[31m✗ DEPLOY FAILED\033[0m — %s\n' "$1" >&2
   [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/    /' >&2
@@ -92,6 +107,8 @@ trap 'fail "unexpected error at line $LINENO: $BASH_COMMAND"' ERR
 detail() {
   if grep -q '─── verify-all ───' "$STEP_OUT"; then
     awk '/─── verify-all ───/{f=1;next} f && /^(FAIL|SKIPPED)/' "$STEP_OUT"
+    # The failing check's own last words, from before the summary table.
+    awk '/─── verify-all ───/{exit} /[Ee][Rr][Rr][Oo][Rr]|FAIL|failed/' "$STEP_OUT" | tail -n 4 | sed 's/^/  /'
     return 0
   fi
   grep -v '^\s*$' "$STEP_OUT" | tail -n 8
@@ -149,13 +166,26 @@ LIVE_CATALOG="$(printf '%s' "$LIVE" | jq -r '.catalogVersion // "unknown"')"
 tick
 
 # ---------------------------------------------------------------------------
-# 2. Gates (or a bare build when skipped)
+# 2. Local database for the SQL gates
 # ---------------------------------------------------------------------------
 if [ "$SKIP_VERIFY" = "1" ] && [ "$ASSUME_YES" != "1" ]; then
   clearline
   read -r -p "Deploy to PRODUCTION with no gates? type 'unverified': " reply
   [ "$reply" = "unverified" ] || fail "aborted"
 fi
+
+if [ "$SKIP_VERIFY" != "1" ] && [ -z "${VANSEN_LOCAL_DB:-}" ]; then
+  progress "starting local database"
+  docker info >>"$LOG" 2>&1 || fail "Docker is not running — the SQL gates need the local Supabase stack"
+  STARTED_DB=1
+  run "could not start the local database for the SQL gates" npm run db:test:start
+  export VANSEN_LOCAL_DB="$LOCAL_DB_URL"
+fi
+tick
+
+# ---------------------------------------------------------------------------
+# 3. Gates (or a bare build when skipped)
+# ---------------------------------------------------------------------------
 
 if [ "$SKIP_VERIFY" = "1" ]; then
   progress "building (gates skipped)"
@@ -168,6 +198,7 @@ if [ "$SKIP_VERIFY" != "1" ]; then
 fi
 
 [ -d dist/vansen/browser ] || fail "dist/vansen/browser missing — nothing to upload"
+cleanup
 tick
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -186,7 +217,7 @@ if [ "$ASSUME_YES" != "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. api first (it owns pricing)
+# 4. api first (it owns pricing)
 # ---------------------------------------------------------------------------
 progress "deploying edge function api"
 # --no-verify-jwt: the gateway authenticates itself and serves public routes.
@@ -198,7 +229,7 @@ API_VERSION="$(apiVersion)"
 tick
 
 # ---------------------------------------------------------------------------
-# 4. Web bundle
+# 5. Web bundle
 # ---------------------------------------------------------------------------
 progress "deploying cloudflare worker"
 run "worker deploy failed — api is already on $CATALOG_VERSION, rerun this script" \
@@ -206,7 +237,7 @@ run "worker deploy failed — api is already on $CATALOG_VERSION, rerun this scr
 tick
 
 # ---------------------------------------------------------------------------
-# 5. Stamp the manifest
+# 6. Stamp the manifest
 # ---------------------------------------------------------------------------
 progress "stamping manifest"
 # Setting secrets redeploys the function and bumps its version by one, so
@@ -223,7 +254,7 @@ run "could not stamp the manifest" \
 tick
 
 # ---------------------------------------------------------------------------
-# 6. Prove it
+# 7. Prove it
 # ---------------------------------------------------------------------------
 progress "verifying running system"
 sleep 5  # the function restarts on a secret change
