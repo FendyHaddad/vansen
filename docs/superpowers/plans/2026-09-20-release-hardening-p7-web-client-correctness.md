@@ -22,7 +22,7 @@
 - **No third-party bytes execute unverified.** Every ML model is fetched against a pinned size and SHA-256.
 - **Build:** `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build`
 - **Tests:** Angular → `npm test -- --watch=false` (never bare `npx vitest run`; it falsely fails every TestBed spec). Edge → `cd supabase/functions && deno test --allow-all _shared api job-worker cleanup-worker stripe-webhook appstore-webhook`.
-- **Baseline after P6:** vitest 244 plus whatever P6 added; record the exact number before starting.
+- **Execution baseline:** run the current focused suite after this plan's prerequisites and record actual counts; predicted totals are not acceptance criteria.
 - **Preserve the established visual composition.** These are behavior and resource fixes, not a redesign.
 - **T14 is required before release.** Model download integrity and disk-cache eviction do not replace image/history limits, live-session disposal, preview scheduling or real-weight quality measurements.
 
@@ -343,7 +343,7 @@ describe('AuthService session teardown', () => {
     await Promise.resolve();
     emit('SIGNED_IN', 'user-2');
     await Promise.resolve();
-    expect(store.reset).toHaveBeenCalledTimes(1);
+    expect(store.reset).toHaveBeenCalledTimes(2); // null→A and A→B
   });
 
   it('a token refresh for the same user tears down nothing', async () => {
@@ -353,7 +353,7 @@ describe('AuthService session teardown', () => {
     await Promise.resolve();
     emit('TOKEN_REFRESHED', 'user-1');
     await Promise.resolve();
-    expect(store.reset).not.toHaveBeenCalled();
+    expect(store.reset).toHaveBeenCalledTimes(1); // null→A only; refresh adds none
   });
 });
 ```
@@ -409,7 +409,7 @@ In each store's constructor:
   }
 ```
 
-`MediaCache` registers with `reset: () => this.clear()`; `EditSession` with `reset: () => this.close()`. Add the localStorage wipe as its own registration in `SessionLifecycle`'s consumer — a small root service or directly in `AuthService`:
+`JobPoller` registers `{reset: () => this.stop()}` (it has `stop()`, not `reset()`). Add `PersonaStore.reset()` that clears its training interval, aborts pending reads, invalidates its epoch and clears persona state. `MediaCache` registers `{reset: () => this.clear()}`; `EditSession` registers `{reset: () => this.reset()}` so the loss notification below is retained. Test a live job AND persona timer under A; after logout/expiry/account switch, advance fake timers and resolve delayed responses: no A callback mutates B or repopulates a store. Add the localStorage wipe as its own registration in `SessionLifecycle`'s consumer — a small root service or directly in `AuthService`:
 
 ```ts
     this.lifecycle.register('local-cache', { reset: () => clearAllCaches() });
@@ -491,6 +491,16 @@ Expected: all green with the new specs added. User commits.
   // Guard:
   export const unsavedChangesGuard: CanDeactivateFn<unknown>;
   ```
+
+Define `StaleSessionError` in `edit-session.ts` and export/import it wherever used:
+
+```ts
+export class StaleSessionError extends Error {
+  constructor() { super('The editing session changed.'); this.name = 'StaleSessionError'; }
+}
+```
+
+Treat this as cancellation in the save/apply UI, never an unhandled rejection. Tests must invoke the Angular guard with all four CanDeactivateFn arguments.
 
 - [ ] **Step 1: Write the failing lifetime spec**
 
@@ -859,7 +869,7 @@ describe('unsavedChangesGuard', () => {
   });
 
   function run() {
-    return TestBed.runInInjectionContext(() => unsavedChangesGuard());
+    return TestBed.runInInjectionContext(() => unsavedChangesGuard({} as never, {} as never, {} as never, {} as never));
   }
 
   it('lets a clean session leave without asking', async () => {
@@ -1118,9 +1128,9 @@ app.get('/generations', async (c) => {
     .order('id', { ascending: false })
     .limit(limit + 1);           // one extra row answers "is there more?"
 
-  if (rawCursor) {
-    const cursor = decodeCursor(rawCursor);
-    if (!cursor) return fail(c, 400, 'invalid_cursor', 'That page marker is not valid.');
+  const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+  if (rawCursor && !cursor) return fail(c, 400, 'invalid_cursor', 'That page marker is not valid.');
+  if (cursor) {
     query = query.or(
       `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
     );
@@ -1148,7 +1158,9 @@ Make `toGenerationDtos` honour `thumbsOnly` — signing the thumbnail and leavin
   return await Promise.all(rows.map((row) => toGenerationDto(row, opts)));
 ```
 
-Add `GET /generations/:id` returning one fully-signed item for the detail overlay, if it does not already exist.
+Implement and test `GET /generations/:id` returning one owned fully-signed item, plus `GET /generations/:id/versions?cursor=&limit=` returning the owned version chain with the same keyset cursor. These endpoints are required even for items outside the loaded first page; unknown/foreign IDs return 404.
+
+Apply the SAME `(created_at,id)` cursor contract to `GET /ledger`, replacing `.limit(100)`, and update `src/app/core/ledger/ledger-service.ts` and DTOs with nextCursor/loadMore and ID deduplication. Add `api/ledger_pagination_test.ts` and the client ledger spec. Seed 500 records with timestamp ties, insert a newer record between pages, delete a later record, and assert all remaining older IDs are reachable exactly once. Add the equivalent generation tests and an old-ID deep-link/version-chain test. Validate cursor ID as UUID and reject unexpected separators/invalid timestamps before constructing a PostgREST filter.
 
 - [ ] **Step 3: Generate thumbnails for images**
 
@@ -1177,17 +1189,24 @@ create index generations_thumb_backfill_idx
   on public.generations (thumb_state) where thumb_state = 'pending';
 ```
 
-Create `supabase/functions/_shared/thumbnail.ts` producing a 512 px longest-edge JPEG at quality 0.7, and call it from the settle path (P4's `finishJob`) so every new image gets one:
+Create `supabase/functions/_shared/thumbnail.ts` using a pinned `jsr:@matmen/imagescript@1.3.1` dependency (recorded in deno.json/lock) to decode PNG/JPEG, resize and encode JPEG with `encodeJPEG(70)`. The [official ImageScript API](https://jsr.io/@matmen/imagescript/doc/all_symbols) documents those methods. Qualify it on Supabase Edge with real fixture bytes and measured peak memory before accepting this runtime choice. WebP or another unsupported decoder input gets a typed thumbnail-unavailable state and a retry/transcode path; never mislabel unchanged PNG/WebP bytes as JPEG. Produce a 512 px longest-edge JPEG at quality 0.7, and call it from the settle path (P4's `finishJob`) so every new image gets one:
 
 ```ts
 // A grid tile is 200 px. Serving a 4 MP PNG into it wastes the customer's
 // bandwidth and ours, and it is the single biggest egress line we have.
+import { Image } from 'jsr:@matmen/imagescript@1.3.1';
 export const THUMB_MAX_EDGE = 512;
 export const THUMB_QUALITY = 0.7;
-export async function makeThumbnail(bytes: Uint8Array, contentType: string): Promise<Uint8Array>;
+export async function makeThumbnail(bytes: Uint8Array, contentType: string): Promise<Uint8Array> {
+  if (!['image/png', 'image/jpeg'].includes(contentType)) throw new Error('thumbnail_format_unsupported');
+  const image = await Image.decode(bytes);
+  const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(image.width, image.height));
+  image.resize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
+  return image.encodeJPEG(70);
+}
 ```
 
-Write `_shared/thumbnail_test.ts` asserting: the output's longest edge is ≤ 512, aspect ratio is preserved within one pixel, the output is smaller than the input for a large image, an already-small image is passed through unchanged, and a corrupt input throws rather than returning zero bytes.
+Write `_shared/thumbnail_test.ts` asserting: the output's longest edge is ≤ 512, aspect ratio is preserved within one pixel, the output is smaller than the input for a large image, an already-small image keeps its dimensions but is encoded to the promised MIME, and a corrupt input throws rather than returning zero bytes.
 
 Add `scripts/backfill-thumbnails.mjs` that walks `thumb_state = 'pending'` in batches, generates and uploads, and sets `ready` or `failed`. It must be resumable and rate-limited, and it must never touch a row it did not read.
 
@@ -1248,6 +1267,8 @@ Expected: all green. User commits.
 
 **The exposure.** Seven models are fetched straight from `huggingface.co` at runtime: MI-GAN 28 MB, ISNet fp16 88 MB, NAFNet 87.5 MB, Depth Anything V2 small 27 MB, Swin2SR 8 MB, SlimSAM encoder + decoder 14 MB. Nothing checks what came back. A compromised or swapped upstream file is executed as a model in the customer's browser, the `vansen-models` cache grows without limit on a device that may have 500 MB of quota, and a customer on a metered connection can be handed 88 MB with no warning.
 
+**Pin before hashing:** Resolve the upstream repository's immutable 40-character commit revision from its verified model page/API and record it with license/tensor metadata BEFORE downloading in this task. Set `VANSEN_MODEL_REVISION` for the measurement command; define `MIGAN_REVISION` in the manifest from that recorded value. Repeat for every model. No `resolve/main` URLs or unknown hashes may pass the manifest test. Task 6 verifies these same revisions; it does not defer pinning.
+
 - [ ] **Step 1: Write the failing manifest spec**
 
 Create `src/app/core/editing/engines/model-manifest.spec.ts`:
@@ -1302,7 +1323,10 @@ describe('MODEL_MANIFEST', () => {
 Each hash must be measured, not invented. For each URL:
 
 ```bash
-cd /private/tmp/claude-502/-Users-user-IdeaProjects-vansen/ae60d9aa-cb0e-417e-8ae9-e8ce2870119f/scratchpad && curl -sL -o migan.onnx "https://huggingface.co/andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx" && shasum -a 256 migan.onnx && stat -f%z migan.onnx
+test -n "$VANSEN_MODEL_REVISION" && test "${#VANSEN_MODEL_REVISION}" -eq 40
+curl --fail --location -o /private/tmp/vansen-migan.onnx "https://huggingface.co/andraniksargsyan/migan/resolve/$VANSEN_MODEL_REVISION/migan_pipeline_v2.onnx"
+shasum -a 256 /private/tmp/vansen-migan.onnx
+stat -f%z /private/tmp/vansen-migan.onnx
 ```
 
 Repeat for all seven URLs listed by:
@@ -1344,7 +1368,7 @@ export type ModelId =
 
 export const MODEL_MANIFEST: Record<ModelId, ModelEntry> = {
   'heal-migan': {
-    url: 'https://huggingface.co/andraniksargsyan/migan/resolve/main/migan_pipeline_v2.onnx',
+    url: `https://huggingface.co/andraniksargsyan/migan/resolve/${MIGAN_REVISION}/migan_pipeline_v2.onnx`,
     bytes: 0,        // ← from Step 2
     sha256: '',      // ← from Step 2
     license: 'MIT',
@@ -1471,15 +1495,11 @@ export async function loadModelBytes(
   entry: ModelEntry,
   progress: WritableSignal<number | null>,
 ): Promise<Uint8Array> {
-  const cache = typeof caches === 'undefined' ? null : await caches.open(MODEL_CACHE);
-  const hit = await cache?.match(entry.url);
-  if (hit) {
-    const cached = new Uint8Array(await hit.arrayBuffer());
-    const ok = await verify(cached, entry);
-    if (ok) return cached;
-    await cache?.delete(entry.url);
-    throw new Error(`model integrity check failed (cached): ${entry.url}`);
-  }
+  const cache = typeof caches === 'undefined' ? null : await caches.open(MODEL_CACHE).catch(() => null);
+  const hit = await cache?.match(entry.url).catch(() => undefined);
+  const cached = hit ? new Uint8Array(await hit.arrayBuffer()) : null;
+  if (cached && await verify(cached, entry)) return cached;
+  if (cached) await cache?.delete(entry.url).catch(() => false);
 
   const res = await fetch(entry.url);
   if (!res.ok || !res.body) throw new Error(`model fetch failed: ${res.status}`);
@@ -1680,7 +1700,7 @@ Write RED tests with a fake ONNX session factory: two concurrent owners create o
 
 - [ ] **Step 1: Record fixtures and executable invariants**
 
-Use synthetic or licensed color-chart, checkerboard, non-square landscape, fine-hair portrait, transparent-edge, blurred, flat-color, large and noisy low-light images. Each fixture entry records path, SHA-256, dimensions, alpha, provenance/license and expected mask/output dimensions. Include actual pinned model revision, SHA-256, tensor layout/range, size and license in the model manifest; replace mutable `resolve/main` URLs with immutable revisions. Keep Task 4's measured hash verification.
+Use synthetic or licensed color-chart, checkerboard, non-square landscape, fine-hair portrait, transparent-edge, blurred, flat-color, large and noisy low-light images. Each fixture entry records path, SHA-256, dimensions, alpha, provenance/license and expected mask/output dimensions. Include actual pinned model revision, SHA-256, tensor layout/range, size and license in the model manifest; verify Task 4 already replaced mutable URLs before measuring hashes. Keep the same measured revision/hash pair.
 
 Retain automated regressions for zero-strength identity, crop/rotate/flip coordinates, unaffected pixels outside heal/clone/retouch masks, selection coordinates after zoom/crop, exact undo/redo, PNG/WebP alpha and explicit JPEG flattening, 2× upscale dimensions, and preview/commit parameter parity. Add a focused RED test before correcting each discovered behavioral defect; preserve the existing visual composition.
 

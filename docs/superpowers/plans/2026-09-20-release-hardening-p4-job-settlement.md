@@ -8,7 +8,7 @@
 
 **Tech Stack:** Postgres (plpgsql, advisory locks), Deno, Hono, `jsr:@supabase/supabase-js@2`, Cloudflare R2 via the S3 API.
 
-**Source spec:** `docs/superpowers/plans/2026-09-17-release-readiness-review-and-implementation-plan.md` — this plan implements **T06**, closing **R05** and **R08**. It depends on P1 (the `createApp` seam and the fakes) and is a prerequisite for P5 (durable dispatch) and P6 (deletion of pending work).
+**Source spec:** `docs/superpowers/plans/2026-09-17-release-readiness-review-and-implementation-plan.md` — this plan implements **T06**, closing **R05** and **R08**. It depends on P1 and P3 (the `createApp` seam and the fakes) and is a prerequisite for P5 (durable dispatch) and P6 (deletion of pending work).
 
 ## Global Constraints
 
@@ -20,7 +20,7 @@
 - **Never delete media a `done` row still points at.** Every cleanup path re-reads the row first.
 - **Buffered uploads stay buffered.** `supabase/functions/_shared/storage/types.ts:6-7` records why: a streaming body makes `fetch` send chunked transfer encoding, which R2's S3 `PutObject` rejects. This plan caps the size **before** the buffer, it does not switch to streaming.
 - **Tests:** Edge → `cd supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook`. SQL → local stack only (`$VANSEN_LOCAL_DB`, set up in P2 Task 1). Angular → `npm test -- --watch=false`.
-- **Baseline after P3:** roughly 160 deno tests (exact count recorded in the P3 commit), 242 vitest tests. Each task states the delta it adds.
+- **Execution baseline:** run the current focused suite after this plan's prerequisites and record actual counts; predicted totals are not acceptance criteria.
 - **No deploys.**
 
 ---
@@ -36,7 +36,7 @@
 **New:**
 - `supabase/migrations/0019_job_settlement.sql` — `notification_outbox`, `fn_settle_job`, hardened `fn_fail_job`.
 - `supabase/tests/job_settlement.sql` — SQL proof of single terminal transition under a real race.
-- `supabase/functions/api/services/job-settlement.ts` + `_test.ts` — `settleJob`, `SettleOutcome`.
+- `supabase/functions/_shared/jobs/settlement.ts` + `_test.ts` — `settleJob`, `SettleOutcome`.
 - `supabase/functions/_shared/providers/provider-errors.ts` + `_test.ts` — `classifyProviderError`, `RETRYABLE_STATUSES`.
 - `supabase/functions/api/settlement_routes_test.ts` — route-level proof via `createApp`.
 
@@ -245,7 +245,7 @@ Deno.test('fal: cancelling a QUEUED request succeeds', async () => {
     if (call.url.endsWith('/status')) return new Response(JSON.stringify({ status: 'IN_QUEUE' }), { status: 200 });
     return new Response('', { status: 200 });
   });
-  assertEquals(await falAdapter.cancel!('req_1'), 'cancelled');
+  assertEquals(await falAdapter.cancel!(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'})), 'cancelled');
   cap.restore();
 });
 
@@ -255,7 +255,7 @@ Deno.test('fal: a request already IN_PROGRESS reports too_late, never cancelled'
     if (call.url.endsWith('/status')) return new Response(JSON.stringify({ status: 'IN_PROGRESS' }), { status: 200 });
     return new Response('', { status: 200 });
   });
-  assertEquals(await falAdapter.cancel!('req_1'), 'too_late');
+  assertEquals(await falAdapter.cancel!(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'})), 'too_late');
   cap.restore();
 });
 
@@ -264,21 +264,21 @@ Deno.test('fal: an unreachable provider reports unreachable, so no refund follow
   const cap = captureFetch(() => {
     throw new TypeError('error sending request for url');
   });
-  assertEquals(await falAdapter.cancel!('req_1'), 'unreachable');
+  assertEquals(await falAdapter.cancel!(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'})), 'unreachable');
   cap.restore();
 });
 
 Deno.test('fal: a 429 while cancelling is unreachable, not cancelled', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch(() => new Response('slow down', { status: 429 }));
-  assertEquals(await falAdapter.cancel!('req_1'), 'unreachable');
+  assertEquals(await falAdapter.cancel!(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'})), 'unreachable');
   cap.restore();
 });
 
 Deno.test('fal: a 429 on check is retryable, not failed', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch(() => new Response('slow down', { status: 429 }));
-  const result = await falAdapter.check('req_1');
+  const result = await falAdapter.check(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'}));
   assertEquals(result.state, 'retryable_failure');
   cap.restore();
 });
@@ -286,12 +286,12 @@ Deno.test('fal: a 429 on check is retryable, not failed', async () => {
 Deno.test('fal: a 400 on check is a real failure', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch(() => new Response('bad request', { status: 400 }));
-  const result = await falAdapter.check('req_1');
+  const result = await falAdapter.check(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'}));
   assertEquals(result.state, 'failed');
   cap.restore();
 });
 
-Deno.test('fal: a CDN failure downloading the finished result is retryable', async () => {
+Deno.test('fal: a finished image is handed to the bounded shared store', async () => {
   Deno.env.set('FAL_API_KEY', 'test-key');
   const cap = captureFetch((call) => {
     if (call.url.endsWith('/status')) return new Response(JSON.stringify({ status: 'COMPLETED' }), { status: 200 });
@@ -300,8 +300,9 @@ Deno.test('fal: a CDN failure downloading the finished result is retryable', asy
     }
     return new Response('gateway timeout', { status: 504 });
   });
-  const result = await falAdapter.check('req_1');
-  assertEquals(result.state, 'retryable_failure');
+  const result = await falAdapter.check(JSON.stringify({statusUrl:'https://queue.fal.run/fal-ai/model/requests/req_1/status',responseUrl:'https://queue.fal.run/fal-ai/model/requests/req_1'}));
+  assertEquals(result.state, 'done');
+  assertEquals('url' in result ? result.url : null, 'https://cdn.fal/out.png');
   cap.restore();
 });
 
@@ -341,27 +342,40 @@ import type { CancelOutcome } from './types.ts';
 Replace `check`'s error handling so a non-OK status is classified rather than thrown, and the result download is wrapped:
 
 ```ts
-  async check(ref: string): Promise<CheckResult> {
-    const statusRes = await fetch(`${FAL_BASE}/requests/${ref}/status`, { headers: await auth() })
-      .catch(() => null);
-    if (!statusRes) return { state: 'retryable_failure', error: 'fal status unreachable' };
-    if (!statusRes.ok) {
-      const klass = classifyStatus(statusRes.status);
-      const message = `fal status ${statusRes.status}`;
-      if (klass === 'retryable') return { state: 'retryable_failure', error: message };
-      return { state: 'failed', error: message };
-    }
-    // ... existing status parsing, unchanged ...
-    // When the request is COMPLETED, pulling the result and the bytes is a
-    // separate network hop: a CDN hiccup there is not a model failure.
+  async check(providerRef: string): Promise<CheckResult> {
     try {
-      // ... existing result fetch + fetchBytes ...
-    } catch (e) {
-      const klass = classifyProviderError(e);
-      if (klass === 'retryable') return { state: 'retryable_failure', error: String(e).slice(0, 200) };
-      return { state: 'failed', error: String(e).slice(0, 200) };
+      const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
+      if (!ref.statusUrl?.startsWith(FAL_BASE + '/') || !ref.responseUrl?.startsWith(FAL_BASE + '/'))
+        return { state: 'failed', error: 'fal ref missing queue urls' };
+      const statusRes = await fetch(ref.statusUrl, { headers: await auth() });
+      if (!statusRes.ok) return falHttpFailure(statusRes);
+      const status = await statusRes.json();
+      if (status.status === 'IN_QUEUE') return { state: 'running', phase: 'queued', queuePosition: status.queue_position };
+      if (status.status === 'IN_PROGRESS') return { state: 'running', phase: 'rendering' };
+      if (status.status !== 'COMPLETED') return { state: 'failed', error: 'fal_terminal_failure' };
+      const resultRes = await fetch(ref.responseUrl, { headers: await auth() });
+      if (!resultRes.ok) return falHttpFailure(resultRes);
+      const result = await resultRes.json();
+      if (result.video?.url) return { state: 'done', url: result.video.url, contentType: 'video/mp4' };
+      const url = result.images?.[0]?.url ?? result.image?.url;
+      if (!url) return { state: 'failed', error: 'fal result had no image' };
+      // P4 shared store downloads/validates all URL results with bounded memory.
+      return { state: 'done', url, contentType: 'image/png' };
+    } catch (error) {
+      if (error instanceof SyntaxError) return { state: 'failed', error: 'invalid_provider_reference' };
+      return { state: 'retryable_failure', error: 'fal_unreachable', retryAfterSeconds: 10 };
     }
   },
+
+// Define this helper outside the adapter object:
+function falHttpFailure(response: Response): CheckResult {
+  const error = 'fal_http_' + response.status;
+  if (classifyStatus(response.status) !== 'retryable') return { state: 'failed', error };
+  const retryAfter = response.headers.get('retry-after');
+  const numeric = Number(retryAfter);
+  const seconds = Number.isFinite(numeric) && numeric > 0 ? numeric : 10;
+  return { state: 'retryable_failure', error, retryAfterSeconds: Math.min(300, seconds) };
+}
 ```
 
 Replace `cancel`:
@@ -374,11 +388,13 @@ Replace `cancel`:
    */
   async cancel(ref: string): Promise<CancelOutcome> {
     try {
-      const statusRes = await fetch(`${FAL_BASE}/requests/${ref}/status`, { headers: await auth() });
+      const urls = JSON.parse(ref) as { statusUrl: string; responseUrl: string };
+      if (!urls.statusUrl?.startsWith(FAL_BASE + '/') || !urls.responseUrl?.startsWith(FAL_BASE + '/')) return 'unsupported';
+      const statusRes = await fetch(urls.statusUrl, { headers: await auth() });
       if (!statusRes.ok) return 'unreachable';
       const status = (await statusRes.json())?.status;
       if (status !== 'IN_QUEUE') return 'too_late';
-      const res = await fetch(`${FAL_BASE}/requests/${ref}/cancel`, {
+      const res = await fetch(`${urls.responseUrl}/cancel`, {
         method: 'PUT',
         headers: await auth(),
       });
@@ -431,7 +447,8 @@ Expected: every provider test file passes, including the existing video adapter 
   ```sql
   public.notification_outbox (id, user_id, generation_id, event, created_at, sent_at, attempts)
   public.fn_settle_job(p_job uuid, p_outcome text, p_media_path text, p_backend text,
-                       p_meta jsonb, p_error text) returns jsonb
+                       p_meta jsonb, p_error text, p_expected_state text default 'pending',
+                       p_failure_code text default null, p_lease_token uuid default null) returns jsonb
   ```
   `p_outcome` is `'done'` or `'failed'`. Returns `{settled: bool, previous: text, refunded: int}`.
   `fn_fail_job` is rewritten as a thin wrapper over `fn_settle_job` so the existing cron keeps working unchanged.
@@ -457,6 +474,11 @@ Create `supabase/migrations/0019_job_settlement.sql`:
 
 -- Notifications become durable work rather than a fire-and-forget call made
 -- while an HTTP response is still open.
+alter table public.generations add column failure_code text;
+alter table public.generations add column failure_message text;
+alter table public.jobs add column lease_token uuid;
+alter table public.jobs add column lease_until timestamptz;
+
 create table public.notification_outbox (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles on delete cascade,
@@ -466,7 +488,11 @@ create table public.notification_outbox (
   created_at timestamptz not null default now(),
   sent_at timestamptz,
   attempts int not null default 0,
-  last_error text
+  last_error text,
+  lease_token uuid,
+  lease_until timestamptz,
+  next_run_at timestamptz not null default now(),
+  dead_letter_at timestamptz
 );
 
 create index notification_outbox_pending_idx
@@ -492,7 +518,10 @@ create or replace function public.fn_settle_job(
   p_media_path text default null,
   p_backend text default null,
   p_meta jsonb default '{}'::jsonb,
-  p_error text default null
+  p_error text default null,
+  p_expected_state text default 'pending',
+  p_failure_code text default null,
+  p_lease_token uuid default null
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -505,6 +534,8 @@ begin
 
   perform pg_advisory_xact_lock(hashtext(v_user::text));
 
+  perform 1 from public.jobs where id = p_job for update;
+
   -- Read the generation FOR UPDATE so a concurrent settlement waits here
   -- rather than passing the same 'pending' check.
   select g.status, g.charged_plan, g.charged_pack
@@ -513,13 +544,21 @@ begin
     where g.id = v_gen
     for update;
 
-  if v_status is distinct from 'pending' then
+  if p_expected_state <> 'pending' then raise exception 'invalid_expected_state'; end if;
+  if exists (select 1 from public.jobs where id = p_job and
+    (lease_token is not null or p_lease_token is not null) and
+    (lease_token is distinct from p_lease_token or lease_until <= now()))
+  then return jsonb_build_object('settled', false, 'previous', v_status, 'refunded', 0); end if;
+  if v_status is distinct from p_expected_state then
     return jsonb_build_object('settled', false, 'previous', v_status, 'refunded', 0);
   end if;
 
+  if p_outcome not in ('done', 'failed') then raise exception 'invalid_outcome'; end if;
+  if p_outcome = 'done' and (p_media_path is null or p_backend not in ('supabase','r2'))
+  then raise exception 'verified_media_required'; end if;
   if p_outcome = 'done' then
     update public.generations set
-      status = 'done',
+      status = 'done', failure_code = null, failure_message = null,
       media_path = coalesce(p_media_path, media_path),
       storage_backend = coalesce(p_backend, storage_backend),
       duration_s = coalesce((p_meta->>'durationS')::numeric, duration_s),
@@ -532,7 +571,14 @@ begin
     return jsonb_build_object('settled', true, 'previous', 'pending', 'refunded', 0);
   end if;
 
-  update public.generations set status = 'failed' where id = v_gen;
+  update public.generations set status = 'failed',
+    failure_code = case
+      when coalesce(p_failure_code,p_error) = 'cancelled' then 'cancelled'
+      when p_failure_code in ('moderation','provider_error','timeout','store_failed') then p_failure_code
+      else 'generation_failed' end,
+    failure_message = case when coalesce(p_failure_code, p_error) = 'cancelled'
+      then 'Cancelled · Refunded' else 'Generation failed. Your credits were refunded.' end
+    where id = v_gen;
   update public.jobs set error = coalesce(p_error, 'failed'), updated_at = now() where id = p_job;
 
   if v_cp > 0 then
@@ -549,22 +595,23 @@ begin
   end if;
 
   insert into public.notification_outbox (user_id, generation_id, event, payload)
-    values (v_user, v_gen, 'generation_failed', jsonb_build_object('error', p_error));
+    select v_user, v_gen, 'generation_failed', jsonb_build_object('code', coalesce(p_failure_code, 'generation_failed'))
+    where coalesce(p_failure_code, p_error, '') <> 'cancelled';
 
   return jsonb_build_object('settled', true, 'previous', 'pending', 'refunded', v_refunded);
 end $$;
 
--- Keep the old name working: the stale-job cron in 0004/0016 calls it, and a
--- migration must not require a cron edit to stay correct.
+-- Keep the old name during P4. P5 replaces timeout refunds with reconciliation
+-- before durable provider dispatch is enabled.
 create or replace function public.fn_fail_job(p_job uuid, p_error text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public.fn_settle_job(p_job, 'failed', null, null, '{}'::jsonb, p_error);
 end $$;
 
-revoke execute on function public.fn_settle_job(uuid, text, text, text, jsonb, text)
+revoke execute on function public.fn_settle_job(uuid, text, text, text, jsonb, text, text, text, uuid)
   from public, anon, authenticated;
-grant execute on function public.fn_settle_job(uuid, text, text, text, jsonb, text)
+grant execute on function public.fn_settle_job(uuid, text, text, text, jsonb, text, text, text, uuid)
   to service_role;
 ```
 
@@ -713,7 +760,7 @@ Expected: `OK: single terminal transition (...)`. Run it three times — a race 
 ## Task 4: The settlement service
 
 **Files:**
-- Create: `supabase/functions/api/services/job-settlement.ts`, `supabase/functions/api/services/job-settlement_test.ts`
+- Create: `supabase/functions/_shared/jobs/settlement.ts`, `supabase/functions/_shared/jobs/settlement_test.ts`
 
 **Interfaces:**
 - Consumes: `fn_settle_job` (Task 3); `FakeDb`.
@@ -727,12 +774,12 @@ Expected: `OK: single terminal transition (...)`. Run it three times — a race 
 
 - [ ] **Step 1: Write the failing test**
 
-Create `supabase/functions/api/services/job-settlement_test.ts`:
+Create `supabase/functions/_shared/jobs/settlement_test.ts`:
 
 ```ts
 import { assertEquals, assertRejects } from 'jsr:@std/assert';
 import { FakeDb } from '../testing/fakes.ts';
-import { settleDone, settleFailed } from './job-settlement.ts';
+import { settleDone, settleFailed } from './settlement.ts';
 
 function db(result: Record<string, unknown>): FakeDb {
   const d = new FakeDb();
@@ -759,6 +806,8 @@ Deno.test('settleDone passes the media path and backend', async () => {
     p_backend: 'r2',
     p_meta: { durationS: 8, width: 1920, height: 1080 },
     p_error: null,
+    p_expected_state: 'pending',
+    p_lease_token: null,
   });
 });
 
@@ -796,12 +845,12 @@ Deno.test('a null rpc result throws rather than reporting a phantom settlement',
 - [ ] **Step 2: Run to verify it fails**
 
 ```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/job-settlement_test.ts
+cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/jobs/settlement_test.ts
 ```
 
-Expected: FAIL — `Module not found "file:///.../api/services/job-settlement.ts"`.
+Expected: FAIL — `Module not found "file:///.../_shared/jobs/settlement.ts"`.
 
-- [ ] **Step 3: Write `api/services/job-settlement.ts`**
+- [ ] **Step 3: Write `_shared/jobs/settlement.ts`**
 
 ```ts
 // The only way a generation becomes terminal.
@@ -809,9 +858,11 @@ Expected: FAIL — `Module not found "file:///.../api/services/job-settlement.ts
 // Four call sites used to do their own read-then-write: the inline finish, the
 // poller, the cancel route and the stale sweep. Routing them all through one
 // RPC means "exactly one terminal state, exactly one refund, exactly one
-// notification" is a property of the database rather than a property of
+// notification outbox entry (delivery is at least once)" is a property of the database rather than a property of
 // whichever code path happened to run first.
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+
+export interface SettlementGuard { expectedState?: 'pending'; leaseToken?: string; failureCode?: string }
 
 export interface SettleOutcome {
   settled: boolean;
@@ -834,6 +885,7 @@ export function settleDone(
   admin: SupabaseClient,
   jobId: string,
   media: { path: string; backend: 'supabase' | 'r2'; meta?: Record<string, unknown> },
+  guard: SettlementGuard = {},
 ): Promise<SettleOutcome> {
   return settle(admin, {
     p_job: jobId,
@@ -842,6 +894,8 @@ export function settleDone(
     p_backend: media.backend,
     p_meta: media.meta ?? {},
     p_error: null,
+    p_expected_state: guard.expectedState ?? 'pending',
+    p_lease_token: guard.leaseToken ?? null,
   });
 }
 
@@ -849,6 +903,7 @@ export function settleFailed(
   admin: SupabaseClient,
   jobId: string,
   error: string,
+  guard: SettlementGuard = {},
 ): Promise<SettleOutcome> {
   return settle(admin, {
     p_job: jobId,
@@ -857,6 +912,9 @@ export function settleFailed(
     p_backend: null,
     p_meta: {},
     p_error: error.slice(0, 500),
+    p_failure_code: guard.failureCode ?? (error === 'cancelled' ? 'cancelled' : 'generation_failed'),
+    p_expected_state: guard.expectedState ?? 'pending',
+    p_lease_token: guard.leaseToken ?? null,
   });
 }
 ```
@@ -864,7 +922,7 @@ export function settleFailed(
 - [ ] **Step 4: Run the test**
 
 ```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/job-settlement_test.ts
+cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/jobs/settlement_test.ts
 ```
 
 Expected: `5 passed | 0 failed`. User commits.
@@ -1236,7 +1294,7 @@ Update `dropLostObject` to take the backend and use the right adapter:
 Add the imports:
 
 ```ts
-import { settleDone, settleFailed } from './services/job-settlement.ts';
+import { settleDone, settleFailed } from './_shared/jobs/settlement.ts';
 import { classifyProviderError } from './_shared/providers/provider-errors.ts';
 ```
 
@@ -1284,7 +1342,25 @@ In `storeVideoResult`, replace the download block:
     if (declaredLength > MAX_VIDEO_BYTES) {
       throw new Error(`video too large: ${declaredLength} bytes`);
     }
-    const bytes = new Uint8Array(await new Response(res.body).arrayBuffer());
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let observed = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        observed += value.byteLength;
+        if (observed > MAX_VIDEO_BYTES) throw new Error('video exceeds byte budget');
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
+    if (declaredLength > 0 && observed !== declaredLength) throw new Error('truncated video');
+    const bytes = new Uint8Array(observed);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     if (bytes.byteLength > MAX_VIDEO_BYTES) {
       throw new Error(`video too large: ${bytes.byteLength} bytes`);
     }
@@ -1358,7 +1434,7 @@ Replace the adapter-cancel block and the settlement that follows it:
       'We could not reach the model to stop it. Nothing was charged back yet — try again in a moment.',
     );
   }
-  if (outcome === 'too_late') {
+  if (outcome === 'too_late' || outcome === 'unsupported') {
     return fail(c, 409, 'not_cancellable', 'This render already started and cannot be stopped.');
   }
 
@@ -1369,23 +1445,43 @@ Replace the adapter-cancel block and the settlement that follows it:
   return c.json({ refundedCredits: settled.refunded, credits: await creditsOf(userId) });
 ```
 
-`outcome === 'unsupported'` falls through to the settlement, which is correct: a provider with no cancel API (Veo, Omni) is already excluded by `NOT_CANCELLABLE`, and an inline job has nothing running.
+Before settlement, return readable 409 for `unsupported` when dispatch may have started; refund only a provably unsubmitted job or a confirmed provider cancellation. An inline provider request can still be in flight. P5 replaces route-side cancellation with a lease-owned cancellation request.
 
-- [ ] **Step 7: Check the upload result in `/edits/save` and `/library/import`**
+- [ ] **Step 7: Check final persistence in save/import and own shared finalization**
 
-Both routes upload to `media` and then build a generation row. In each, replace the ignored-error upload with:
+The upload errors in `/edits/save` and `/library/import` are already checked in this checkout. The unchecked final `generations.update({media_path})` is the defect. Retain checked upload handling and replace that final write in both routes with:
 
 ```ts
-  const { error: mediaErr } = await admin.storage
-    .from('media')
-    .upload(mediaPath, bytes, { contentType, upsert: false });
-  if (mediaErr) {
-    logError(c, 'media_upload_failed', new Error(mediaErr.message));
-    return fail(c, 503, 'store_failed', 'We could not save that image. Nothing was charged — try again.');
-  }
+const { data: saved, error: saveError } = await admin.from('generations')
+  .update({ media_path: mediaPath, status: 'done' })
+  .eq('id', generationId).eq('user_id', userId)
+  .select('id').maybeSingle();
+if (saveError || !saved) {
+  await admin.storage.from('media').remove([mediaPath]);
+  return fail(c, 503, 'save_failed', 'Your image could not be saved. Please retry.');
+}
 ```
 
-These rows are `$0`, so there is no refund to make; the correct behaviour is to refuse rather than to create a library entry pointing at nothing.
+Keep the new generation pending until this succeeds; on failure remove the staged pending row and check both compensation results. Record failed cleanup for P6's durable object registry. No success event/notification or library DTO may be emitted before persistence succeeds. Inject final UPDATE failure and a zero-row update in route tests for BOTH endpoints, after a successful upload; assert 503, no done row, no push, and attempted object/row cleanup.
+
+Create `supabase/functions/_shared/jobs/store.ts` in THIS task. Move the bounded URL download, image-byte checks, storage write, settlement and losing-object handling out of `api/app.ts` into that module. Export one entry point:
+
+```ts
+export interface FinishJob {
+  id: string; user_id: string; generation_id: string;
+  attempts: number; lease_token?: string;
+}
+export interface FinishDeps {
+  admin: SupabaseClient;
+  storageFor: (backend: StorageBackend) => StorageAdapter;
+  fetch: typeof fetch;
+}
+export function finishJob(deps: FinishDeps, job: FinishJob, result: CheckResult): Promise<void>;
+```
+
+Import `SupabaseClient`, storage/provider types from the existing shared modules and settlement from `./settlement.ts`. In the shared finalizer, branch on the generation's verified media kind to choose image versus video MIME/byte cap/backend; a URL result is not necessarily a video. P5 imports `finishJob`; do not introduce a second `storeUrlResult` implementation. Persist using a unique per-attempt object key, never overwrite the winner's key. Pass `{leaseToken: job.lease_token}` to settlement. If settlement transport fails, keep the object for reconciliation; unknown outcome is not a lost race. If a known loser is cleaned up, require a successful read proving the winner uses a different key, check deletion errors, then let P6 enqueue cleanup durably.
+
+Add shared-store tests: HTTP error, wrong MIME, zero bytes, observed/declaration mismatch, stream over cap without length, failed storage, failed settlement RPC, stale lease, and a losing attempt cannot delete/overwrite the winner. Apply the same bounded-reader policy to remote images. Byte caps must include peak allocation (chunks plus destination) and be qualified on the actual edge runtime; 512 MiB is a draft ceiling, not proof it fits.
 
 - [ ] **Step 8: Run the tests**
 
@@ -1401,203 +1497,73 @@ Expected: `10 passed | 0 failed`.
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook && cd .. && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f tests/job_settlement.sql && ./tests/settlement_concurrency.sh
 ```
 
-Expected: all green. Record the deno count in the commit message. User commits.
+Expected: all green. Record the Deno count in the verification log. User commits.
 
 ---
 
-## Task 6: Drain the notification outbox
+## Task 6: Lease and drain the notification outbox (D6)
 
-**Files:**
-- Modify: `supabase/functions/api/app.ts` (`notifySettled` → outbox drain), `supabase/migrations/0019_job_settlement.sql` (already has the table)
-- Create: `supabase/functions/api/services/outbox_test.ts`
+**Files:** Create `supabase/functions/_shared/jobs/notifications.ts`, `notifications_test.ts`, `supabase/tests/notification_outbox.sql`; modify `0019_job_settlement.sql`, `_shared/push.ts` and its tests; remove direct `notifySettled` calls from `api/app.ts`.
 
-**Interfaces:**
-- Consumes: `notification_outbox` (Task 3), `sendGenerationPush`.
-- Produces: `drainOutbox(limit)` inside `createApp`, called at the end of `GET /jobs` and after settlement in `POST /generations`. A push failure marks `attempts` and leaves the row for the next drain; it never fails the request.
+**Interfaces:** `drainNotifications(deps, limit): Promise<void>`; deps contain `admin`, `account`, and `sendPush: typeof sendGenerationPush`. Keep the actual three-argument push API: `sendPush(account, tokens, event)`. Extend `PushEvent` with stable `notificationId: string`; retain `type` and `generationId`. Include notificationId in `fcmMessage(...).message.data`, and test its serialization so receiving clients can actually deduplicate. P5 schedules the drainer; GET routes do no delivery work.
 
-`fn_settle_job` already writes the outbox row, so every terminal transition — including the ones made by the cron — now has a notification queued. Before this, the cron sweep settled jobs with no push at all.
+- [ ] **Step 1: Add real concurrent-claim tests before the migration**
 
-- [ ] **Step 1: Write the failing test**
+Two SQL sessions claim the same unsent row: exactly one lease is returned. After expiry a new lease can claim; the old token cannot mark sent. Failed delivery remains unsent with next-run/backoff; exhausted retries become dead letter, never fake success. User cancellation creates no failure notification. Test an injected push implementation with signature `(_account, _tokens, event)`, asserting `event.notificationId`.
 
-Create `supabase/functions/api/services/outbox_test.ts`:
+- [ ] **Step 2: Add atomic claim/ack RPCs**
+
+```sql
+create function public.fn_claim_notifications(p_limit int)
+returns setof public.notification_outbox
+language sql security definer set search_path = public as $$
+  with picked as (
+    select id from notification_outbox
+    where sent_at is null and dead_letter_at is null and next_run_at <= now()
+      and (lease_until is null or lease_until < now())
+    order by created_at, id for update skip locked limit least(p_limit, 100)
+  )
+  update notification_outbox o set lease_token = gen_random_uuid(),
+    lease_until = now() + interval '2 minutes', attempts = attempts + 1
+  from picked where o.id = picked.id returning o.*;
+$$;
+create function public.fn_ack_notification(p_id uuid, p_token uuid, p_error text default null)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  update notification_outbox set
+    sent_at = case when p_error is null then now() else null end,
+    last_error = p_error,
+    dead_letter_at = case when p_error is not null and attempts >= 5 then now() else null end,
+    next_run_at = now() + interval '1 minute' * least(60, power(2, attempts)),
+    lease_token = null, lease_until = null
+  where id = p_id and lease_token = p_token and lease_until > now() and sent_at is null;
+  return found;
+end $$;
+revoke all on function public.fn_claim_notifications(int) from public, anon, authenticated;
+revoke all on function public.fn_ack_notification(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.fn_claim_notifications(int) to service_role;
+grant execute on function public.fn_ack_notification(uuid, uuid, text) to service_role;
+```
+
+- [ ] **Step 3: Implement delivery using the leased rows**
+
+For each claimed row, query that owner's devices and check the query error. Invoke the three-argument API:
 
 ```ts
-import { assertEquals } from 'jsr:@std/assert';
-import { createApp } from '../app.ts';
-import { FakeDb, TEST_USER, fakeAdapter, testDeps } from '../testing/fakes.ts';
-
-const AUTH = { authorization: 'Bearer test-token' };
-
-function withOutbox(rows: Record<string, unknown>[]) {
-  const sent: { userId: string; event: string }[] = [];
-  const provider = fakeAdapter();
-  const deps = testDeps({
-    adapterFor: () => provider.adapter,
-    fcmAccount: { client_email: 'x@y', private_key: 'k', project_id: 'p' } as never,
-    sendPush: ((userId: string, _tokens: string[], event: string) => {
-      sent.push({ userId, event });
-      return Promise.resolve([]);
-    }) as never,
-  });
-  const db = deps.admin as unknown as FakeDb;
-  db.tables.notification_outbox = rows;
-  db.tables.devices = [{ user_id: TEST_USER, token: 'tok-1' }];
-  db.tables.generations = [];
-  db.tables.jobs = [];
-  return { deps, db, sent, app: createApp(deps) };
-}
-
-Deno.test('a queued notification is sent and marked', async () => {
-  const { db, sent, app } = withOutbox([
-    { id: 'n1', user_id: TEST_USER, generation_id: 'g0', event: 'generation_done', sent_at: null, attempts: 0 },
-  ]);
-  await app.request('/api/jobs?ids=g0', { headers: AUTH });
-  assertEquals(sent.length, 1);
-  assertEquals(sent[0].event, 'generation_done');
-  assertEquals(db.tables.notification_outbox[0].sent_at !== null, true);
-});
-
-Deno.test('an already-sent notification is not sent again', async () => {
-  const { sent, app } = withOutbox([
-    { id: 'n1', user_id: TEST_USER, generation_id: 'g0', event: 'generation_done', sent_at: '2026-09-20T00:00:00Z', attempts: 1 },
-  ]);
-  await app.request('/api/jobs?ids=g0', { headers: AUTH });
-  assertEquals(sent.length, 0);
-});
-
-Deno.test('a push failure leaves the row for the next drain', async () => {
-  const provider = fakeAdapter();
-  const deps = testDeps({
-    adapterFor: () => provider.adapter,
-    fcmAccount: { client_email: 'x@y', private_key: 'k', project_id: 'p' } as never,
-    sendPush: (() => Promise.reject(new Error('fcm down'))) as never,
-  });
-  const db = deps.admin as unknown as FakeDb;
-  db.tables.notification_outbox = [
-    { id: 'n1', user_id: TEST_USER, generation_id: 'g0', event: 'generation_done', sent_at: null, attempts: 0 },
-  ];
-  db.tables.devices = [{ user_id: TEST_USER, token: 'tok-1' }];
-  db.tables.generations = [];
-  db.tables.jobs = [];
-
-  const res = await createApp(deps).request('/api/jobs?ids=g0', { headers: AUTH });
-
-  assertEquals(res.status, 200, 'a push failure never fails the request');
-  assertEquals(db.tables.notification_outbox[0].sent_at, null);
-  assertEquals(db.tables.notification_outbox[0].attempts, 1);
-});
-
-Deno.test('a user with no devices marks the row sent rather than retrying forever', async () => {
-  const { db, app } = withOutbox([
-    { id: 'n1', user_id: TEST_USER, generation_id: 'g0', event: 'generation_done', sent_at: null, attempts: 0 },
-  ]);
-  db.tables.devices = [];
-  await app.request('/api/jobs?ids=g0', { headers: AUTH });
-  assertEquals(db.tables.notification_outbox[0].sent_at !== null, true);
+const stale = await deps.sendPush(deps.account, tokens, {
+  type: row.event,
+  generationId: row.generation_id,
+  notificationId: row.id,
 });
 ```
 
-Add `sendPush` to `ApiDeps` in `app.ts` and to `testDeps` — P1 Task 2 left push as a direct import:
+On success delete only returned stale tokens and acknowledge with the current token. No devices is a recorded no-recipient completion. On failure acknowledge with a safe error code, leaving sent_at null. Missing push configuration is an actionable configuration failure, not delivered. In `push.ts`, stop swallowing retryable HTTP/network failures; return invalid/stale tokens as today, but throw for other failed deliveries. Limit each send attempt below lease lifetime; renew or stop before expiry.
 
-```ts
-  sendPush: typeof sendGenerationPush;
-```
+External push is **at least once**: a crash after send but before ack can repeat it. Require receiving clients to deduplicate by notification ID; P9/D6 cannot advertise duplicate-free notifications without that client evidence. Database settlement/outbox creation remains exactly once.
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 4: Run focused checks and retain D6 evidence**
 
-```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/outbox_test.ts
-```
-
-Expected: FAIL — nothing reads `notification_outbox`.
-
-- [ ] **Step 3: Replace `notifySettled` with an outbox drain**
-
-Delete `notifySettled` and its call sites (the settlement RPC now queues every notification) and add inside `createApp`:
-
-```ts
-  const OUTBOX_BATCH = 20;
-  const OUTBOX_MAX_ATTEMPTS = 5;
-
-  /**
-   * Deliver queued notifications. Best-effort by design: a push that cannot be
-   * sent must never fail the request that happened to drain the queue, and a
-   * settlement made by the cron (where no request exists) still gets delivered
-   * by the next poll rather than being lost.
-   */
-  async function drainOutbox(userId: string): Promise<void> {
-    if (!fcmAccount) return;
-    const { data: rows } = await admin
-      .from('notification_outbox')
-      .select('id,user_id,generation_id,event,attempts')
-      .eq('user_id', userId)
-      .is('sent_at', null)
-      .order('created_at', { ascending: true })
-      .limit(OUTBOX_BATCH);
-    if (!rows || rows.length === 0) return;
-
-    const { data: devices } = await admin
-      .from('devices')
-      .select('token')
-      .eq('user_id', userId);
-    const tokens = (devices ?? []).map((d) => d.token as string);
-
-    for (const row of rows) {
-      // Nothing to deliver to: mark it done rather than retrying forever.
-      if (tokens.length === 0) {
-        await admin
-          .from('notification_outbox')
-          .update({ sent_at: new Date().toISOString() })
-          .eq('id', row.id);
-        continue;
-      }
-      try {
-        const stale = await deps.sendPush(
-          fcmAccount,
-          tokens,
-          row.event as PushEvent,
-          String(row.generation_id ?? ''),
-        );
-        await admin
-          .from('notification_outbox')
-          .update({ sent_at: new Date().toISOString(), attempts: Number(row.attempts) + 1 })
-          .eq('id', row.id);
-        if (stale.length > 0) {
-          await admin.from('devices').delete().eq('user_id', userId).in('token', stale);
-        }
-      } catch (e) {
-        const attempts = Number(row.attempts) + 1;
-        const message = e instanceof Error ? e.message : String(e);
-        console.error('outbox_send_failed', row.id, attempts, message);
-        // After enough tries the notification is not the thing worth retrying;
-        // the generation itself is already correct in the library.
-        const giveUp = attempts >= OUTBOX_MAX_ATTEMPTS;
-        await admin
-          .from('notification_outbox')
-          .update({
-            attempts,
-            last_error: message.slice(0, 500),
-            ...(giveUp ? { sent_at: new Date().toISOString() } : {}),
-          })
-          .eq('id', row.id);
-      }
-    }
-  }
-```
-
-Call it at the end of `GET /jobs` (after the fresh read, before the response) and at the end of `POST /generations`:
-
-```ts
-  await drainOutbox(userId);
-```
-
-- [ ] **Step 4: Run the test and the whole suite**
-
-```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/app.ts && deno test --allow-all _shared api stripe-webhook appstore-webhook
-```
-
-Expected: all green, including the four new outbox tests. User commits.
+Run `deno test --allow-all _shared/jobs/notifications_test.ts _shared/push_test.ts` from `supabase/functions` and `psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/notification_outbox.sql`. Exercise two drainers and crash-after-send in staging during P9. D6 additionally requires mobile MT-04 receipt and deep-link proof. User commits.
 
 ---
 

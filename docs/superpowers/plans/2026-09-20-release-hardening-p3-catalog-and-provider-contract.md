@@ -20,7 +20,7 @@
 - **The client never supplies the charge.** `quote()` runs server-side; the price the composer shows is advisory and must be recomputed on the server.
 - **Redeploying `api` must bundle every `_shared/` file including `providers/`.** No deploys happen in this plan, but the note carries into P9.
 - **Tests:** Angular → `npm test -- --watch=false`. Edge → `cd supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook`. Build → `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build`.
-- **Baseline after P2:** 134 deno tests, 242 vitest tests. Each task states the new expected count.
+- **Execution baseline:** run the current focused suite after this plan's prerequisites and record actual counts; predicted totals are not acceptance criteria.
 
 ---
 
@@ -45,14 +45,14 @@
 - `supabase/functions/_shared/providers/types.ts` — `SubmitCtx.normalized`.
 - `supabase/functions/_shared/providers/openai.ts`, `google.ts`, `fal.ts` — consume the normalized request.
 - `supabase/functions/api/app.ts` — normalize once, quote from the normalized request, pass it to `submit`.
-- `scripts/sync-shared.mjs` — also emit the Dart fixture.
+- `scripts/sync-shared.mjs` — non-mutating Deno drift check; `scripts/export-catalog.mjs` owns JSON/Dart fixtures.
 
 ---
 
 ## Task 1: The provider capability record
 
 **Files:**
-- Create: `docs/superpowers/specs/2026-09-20-provider-capability-record.md`
+- Create: `docs/superpowers/specs/2026-09-20-provider-capability-record.md`, `supabase/functions/_shared/provider-capabilities.json` (verified mapping tables consumed in Task 2)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -281,19 +281,15 @@ Deno.test('THE BUG: flux resolutions must not send the same request', () => {
   );
 });
 
-Deno.test('THE BUG: seedream resolutions must not send the same request', () => {
-  const one = norm('seedream', { aspectRatio: '1:1', resolution: '1K' });
-  const four = norm('seedream', { aspectRatio: '1:1', resolution: '4K' });
+Deno.test('seedream exposes only verified differentiating resolutions', () => {
   const family = familyById('seedream')!;
-  const samePrice = quote(one, family).credits === quote(four, family).credits;
-  const sameRequest = JSON.stringify(one.providerSettings) === JSON.stringify(four.providerSettings);
-  // Either the resolutions differ in the request, or they differ in nothing at
-  // all — selling three identical options at one price is what this forbids.
-  assertEquals(
-    samePrice && sameRequest,
-    true,
-    'seedream must be flat-priced AND flat-requested, or be wired per resolution',
-  );
+  const selections = family.capabilities.resolutions?.map((r) => r.value) ?? [];
+  const normalized = selections.map((resolution) => norm('seedream', { aspectRatio: '1:1', resolution }));
+  const requests = normalized.map((n) => JSON.stringify(n.providerSettings));
+  assertEquals(new Set(requests).size, selections.length);
+  for (const n of normalized) {
+    assertEquals(quote(n, family).providerCostUsd, family.providerCost(n.settings));
+  }
 });
 
 Deno.test('CONTROL: nano-banana already maps version and resolution', () => {
@@ -406,34 +402,23 @@ const NANO_MODELS: Record<string, string> = {
   pro: 'gemini-3-pro-image',
 };
 
-/** GPT Image version → OpenAI model id (record §GPT Image). Fill from Task 1. */
-const GPT_MODELS: Record<string, string> = {
-  '1': 'gpt-image-1',
-  '1.5': '<from record>',
-  '2': '<from record>',
-};
-
-/** GPT Image (aspectRatio, resolution) → `size` (record §GPT Image). */
+/** Task 1 produces this checked JSON file from documented AND observed
+ * capabilities. No unverified model IDs or size choices are emitted. */
+import verified from './provider-capabilities.json' with { type: 'json' };
+const GPT_MODELS: Record<string, string> = verified.gptModels;
+const FLUX_SIZES: Record<string, string> = verified.fluxSizes;
 function gptSize(aspectRatio: string, resolution: string): string {
-  const portrait = aspectRatio === '9:16' || aspectRatio === '3:4';
-  const landscape = aspectRatio === '16:9' || aspectRatio === '4:3';
-  const table: Record<string, { square: string; portrait: string; landscape: string }> = {
-    '1K': { square: '1024x1024', portrait: '1024x1536', landscape: '1536x1024' },
-    '2K': { square: '<from record>', portrait: '<from record>', landscape: '<from record>' },
-    '4K': { square: '<from record>', portrait: '<from record>', landscape: '<from record>' },
-  };
-  const row = table[resolution] ?? table['1K'];
-  if (portrait) return row.portrait;
-  if (landscape) return row.landscape;
-  return row.square;
+  const key = aspectRatio + ':' + resolution;
+  const size = (verified.gptSizes as Record<string,string>)[key];
+  if (!size) throw new Error('unsupported_size:' + key);
+  return size;
 }
 
-/** FLUX resolution → fal `image_size` (record §FLUX). */
-const FLUX_SIZES: Record<string, string> = {
-  '1MP': '<from record>',
-  '2MP': '<from record>',
-  '4MP': '<from record>',
-};
+function requiredMapping(table: Record<string, string>, value: string, field: string): string {
+  const mapped = table[value];
+  if (!mapped || mapped.startsWith('<')) throw new Error(`unsupported_${field}:${value}`);
+  return mapped;
+}
 
 function nanoSettings(s: GenerationSettings): Record<string, string> {
   const out: Record<string, string> = {};
@@ -452,16 +437,18 @@ function gptSettings(s: GenerationSettings): Record<string, string> {
 function fluxSettings(s: GenerationSettings): Record<string, string> {
   const out: Record<string, string> = { aspect_ratio: String(s.aspectRatio ?? '1:1') };
   const size = FLUX_SIZES[String(s.resolution ?? '1MP')];
-  if (size) out.image_size = size;
+  if (!size) throw new Error(`unsupported_resolution:${s.resolution}`);
+  out.image_size = size;
   return out;
 }
 
 function seedreamSettings(s: GenerationSettings): Record<string, string> {
-  // Seedream is flat-priced. If Task 1 verified a real resolution parameter,
-  // add it here AND give the family a per-resolution providerCost; if not, the
-  // resolution option is removed from the catalog in Task 6 and this stays as
-  // aspect ratio alone.
-  return { aspect_ratio: String(s.aspectRatio ?? '1:1') };
+  const out: Record<string,string> = { aspect_ratio: String(s.aspectRatio ?? '1:1') };
+  const parameter = verified.seedreamResolutionParameter;
+  if (!parameter) return out;
+  const size = requiredMapping(verified.seedreamSizes, String(s.resolution), 'resolution');
+  out[parameter] = size;
+  return out;
 }
 
 export function normalizeGenerationRequest(
@@ -482,14 +469,14 @@ export function normalizeGenerationRequest(
   if (family.id === 'nano-banana') {
     return {
       ...base,
-      providerModel: NANO_MODELS[String(settings.version ?? 'standard')] ?? NANO_MODELS.standard,
+      providerModel: requiredMapping(NANO_MODELS, String(settings.version ?? 'standard'), 'version'),
       providerSettings: nanoSettings(settings),
     };
   }
   if (family.id === 'gpt-image') {
     return {
       ...base,
-      providerModel: GPT_MODELS[String(settings.version ?? '2')] ?? GPT_MODELS['1'],
+      providerModel: requiredMapping(GPT_MODELS, String(settings.version ?? '2'), 'version'),
       providerSettings: gptSettings(settings),
     };
   }
@@ -502,9 +489,7 @@ export function normalizeGenerationRequest(
       : 'fal-ai/bytedance/seedream/v4/text-to-image';
     return { ...base, providerModel: slug, providerSettings: seedreamSettings(settings) };
   }
-  // Video families and edit tools keep their existing adapter-side mapping for
-  // now; they are normalized in P5 alongside durable dispatch.
-  return { ...base, providerModel: family.id, providerSettings: {} };
+  throw new Error(`unsupported_family:${family.id}`);
 }
 
 export function quote(
@@ -518,15 +503,18 @@ export function quote(
 }
 ```
 
-The `<from record>` placeholders are deliberate: they are the values Task 1 produces. **A tree containing them must not be committed.** Replace every one before running Step 4.
+**Task boundary:** This image-family normalizer rejects unknown families; P5 Task 4 adds explicit video/edit/persona normalization before those routes use the worker. Never return a fake provider model or empty settings as a fallback. P1 validates explicit selections first; defaults apply only to omitted values. Add unknown version, resolution, quality and quote/catalog version mismatch tests that assert 400/409 before any charge or provider call.
+
+Task 1 creates `_shared/provider-capabilities.json` with `gptModels,gptSizes,fluxSizes,seedreamResolutionParameter,seedreamSizes`, populated only from verified choices and linked smoke evidence. Missing capability evidence blocks this task; it is not replaced by a default selection. The catalog exposes exactly these choices and its price functions use the same recorded size policy.
 
 - [ ] **Step 4: Run the tests**
 
 ```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && grep -rn "from record" _shared/generation-request.ts && echo "PLACEHOLDERS REMAIN — fill them from the Task 1 record before continuing" || deno test --allow-all _shared/generation-request_test.ts
+cd /Users/user/IdeaProjects/vansen/supabase/functions
+deno test --allow-all _shared/generation-request_test.ts
 ```
 
-Expected: no `from record` matches, then `8 passed | 0 failed`. User commits.
+Expected: all supported combinations and explicit unsupported-selection rejections pass. User commits.
 
 ---
 
@@ -578,13 +566,9 @@ export function captureFetch(respond: (call: Captured) => Response): CaptureHand
     let jsonBody: Record<string, unknown> | null = null;
     let formBody: Captured['formBody'] = null;
     if (typeof init?.body === 'string') jsonBody = JSON.parse(init.body);
-    if (init?.body instanceof FormData) {
-      formBody = new Map();
-      for (const [k, v] of init.body.entries()) {
-        if (typeof v === 'string') formBody.set(k, v);
-        if (v instanceof File) formBody.set(k, { name: v.name, type: v.type, size: v.size });
-      }
-    }
+    formBody = init?.body instanceof FormData
+      ? new Map([...init.body.entries()].map(([k,v]) => [k, typeof v === 'string' ? v : {name:v.name,type:v.type,size:v.size}]))
+      : null;
     const call: Captured = { url, method: init?.method ?? 'GET', headers, jsonBody, formBody };
     calls.push(call);
     return respond(call);
@@ -772,6 +756,29 @@ async function urlToBlob(url: string): Promise<Blob> {
   return await res.blob();
 }
 
+async function submitReference(ctx: SubmitCtx, model: string, size: string, quality: string) {
+  const form = new FormData();
+  form.append('model', model);
+  form.append('prompt', ctx.prompt);
+  form.append('size', size);
+  form.append('quality', quality);
+  form.append('user', ctx.safetyId);
+  form.append('image', await urlToBlob(ctx.referenceUrl!), 'source.png');
+  if (ctx.maskPngBase64) {
+    const maskBytes = base64ToBytes(ctx.maskPngBase64.replace(/^data:image\/\w+;base64,/, ''));
+    form.append('mask', new Blob([maskBytes as BlobPart], { type: 'image/png' }), 'mask.png');
+  }
+  const res = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key()}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`openai edit ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const bytes = base64ToBytes(data.data[0].b64_json);
+  return { providerRef: 'inline', inline: { state: 'done' as const, bytes, contentType: 'image/png' } };
+}
+
 export const openaiAdapter: ProviderAdapter = {
   provider: 'openai',
 
@@ -785,28 +792,7 @@ export const openaiAdapter: ProviderAdapter = {
     // Any reference means the edits endpoint. Gating this on op === 'edit'
     // made an uploaded reference on a plain generate vanish between the
     // gateway and OpenAI, after the customer had already been charged.
-    if (ctx.referenceUrl) {
-      const form = new FormData();
-      form.append('model', model);
-      form.append('prompt', ctx.prompt);
-      form.append('size', size);
-      form.append('quality', quality);
-      form.append('user', ctx.safetyId);
-      form.append('image', await urlToBlob(ctx.referenceUrl), 'source.png');
-      if (ctx.maskPngBase64) {
-        const maskBytes = base64ToBytes(ctx.maskPngBase64.replace(/^data:image\/\w+;base64,/, ''));
-        form.append('mask', new Blob([maskBytes as BlobPart], { type: 'image/png' }), 'mask.png');
-      }
-      const res = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key()}` },
-        body: form,
-      });
-      if (!res.ok) throw new Error(`openai edit ${res.status}: ${await res.text()}`);
-      const data = await res.json();
-      const bytes = base64ToBytes(data.data[0].b64_json);
-      return { providerRef: 'inline', inline: { state: 'done', bytes, contentType: 'image/png' } };
-    }
+    if (ctx.referenceUrl) return submitReference(ctx, model, size, quality);
 
     const res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
@@ -975,11 +961,9 @@ function slugFor(ctx: SubmitCtx): string {
   if (ctx.familyId === 'persona') return 'fal-ai/flux-lora';
   // flux and seedream carry their slug on the normalized request, so the model
   // the customer was quoted is the model that gets called.
-  if (ctx.familyId === 'flux' || ctx.familyId === 'seedream') {
-    if (!ctx.normalized) throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
-    return ctx.normalized.providerModel;
-  }
-  throw new Error(`fal: no slug for ${ctx.familyId}`);
+  if (!['flux','seedream'].includes(ctx.familyId)) throw new Error(`fal: no slug for ${ctx.familyId}`);
+  if (!ctx.normalized) throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
+  return ctx.normalized.providerModel;
 }
 ```
 
@@ -989,11 +973,9 @@ Replace the final block of `payloadFor` (currently lines 109–117) with:
   if (!ctx.normalized) throw new Error(`fal: normalized request is required for ${ctx.familyId}`);
   // Every axis the customer paid for, spelled the way the record verified.
   const body: Record<string, unknown> = { prompt: ctx.prompt, ...ctx.normalized.providerSettings };
-  if (ctx.referenceUrl) {
-    // Seedream's edit endpoint takes a list of reference images; others take one.
-    if (ctx.familyId === 'seedream') body.image_urls = [ctx.referenceUrl];
-    else body.image_url = ctx.referenceUrl;
-  }
+  if (!ctx.referenceUrl) return body;
+  const field = ctx.familyId === 'seedream' ? 'image_urls' : 'image_url';
+  body[field] = ctx.familyId === 'seedream' ? [ctx.referenceUrl] : ctx.referenceUrl;
   return body;
 ```
 
@@ -1159,6 +1141,8 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 Expected: every provider test file passes, including the existing video adapter tests. User commits.
 
 ---
+
+**Adapter exit gate (Tasks 3–5):** Add returned-output metadata validation to the adapter tests and P4's finalization contract: verified bytes determine MIME/dimensions; compare against the normalized requested model/size where the provider reports them. Do not invent a model field when the provider does not expose one. A claimed 4K selection returning 1K is a contract failure, cannot become a successfully delivered 4K purchase, and follows P4's terminal refund path. Retain fixtures for matching, undersized, contradictory model metadata and absent optional metadata. Record requested model, provider request ID and observed dimensions in the capability smoke evidence. Add a gateway stale `quoteVersion/catalogVersion` test: 409 and fresh quote, no charge, no submission.
 
 ## Task 6: The gateway quotes what it will send, and the catalog stops overselling
 
@@ -1328,7 +1312,7 @@ And pass it to the adapter at the `submit` call site:
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts && deno test --allow-all _shared api stripe-webhook appstore-webhook
 ```
 
-Expected: `~160 passed | 0 failed` — the exact number depends on how many combinations survive the Task 1 removals. Record the number in the commit message.
+Expected: `~160 passed | 0 failed` — the exact number depends on how many combinations survive the Task 1 removals. Record the number in the verification log.
 
 - [ ] **Step 6: Angular suite and build**
 
@@ -1347,7 +1331,7 @@ Expected: vitest green, build succeeds. User commits.
 - Modify: `scripts/sync-shared.mjs`, `package.json`
 
 **Interfaces:**
-- Produces: `npm run export-catalog` writes `dist/catalog/catalog.json` and `dist/catalog/model_catalog_fixture.dart`. The mobile repo copies the Dart file in; its **MT-03** test asserts the Flutter catalog matches it.
+- Produces: `npm run export-catalog` writes `contracts/catalog/catalog.json` and `contracts/catalog/model_catalog_fixture.dart`. The mobile repo copies the Dart file in; its **MT-03** test asserts the Flutter catalog matches it.
 
 - [ ] **Step 1: Write the failing version-guard spec**
 
@@ -1356,6 +1340,7 @@ Create `src/app/core/catalog/catalog-version.spec.ts`:
 ```ts
 import { describe, expect, it } from 'vitest';
 import { CATALOG_VERSION, MODEL_FAMILIES, EDIT_TOOLS, CREDIT_PACKS, PLAN_CREDITS } from './model-families';
+import { recordedCatalogFingerprint } from './catalog-fingerprint';
 
 /**
  * The catalog version is a promise to two other codebases: the Deno `_shared`
@@ -1377,7 +1362,7 @@ function fingerprint(): string {
       imageInput: f.capabilities.imageInput,
       maskInput: f.capabilities.maskInput,
     })),
-    editTools: EDIT_TOOLS.map((t) => ({ id: t.id, credits: t.credits })),
+    editTools: EDIT_TOOLS.map((t) => ({ id: t.id, credits: t.creditCost })),
     packs: CREDIT_PACKS,
     planCredits: PLAN_CREDITS,
   };
@@ -1396,7 +1381,7 @@ describe('catalog version', () => {
     // fixture to the mobile repo, then paste the new fingerprint here.
     expect({ version: CATALOG_VERSION, fingerprint: fingerprint() }).toEqual({
       version: '2026-09-20.2',
-      fingerprint: '<paste the value this test prints on first run>',
+      fingerprint: recordedCatalogFingerprint,
     });
   });
 });
@@ -1408,7 +1393,7 @@ describe('catalog version', () => {
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false 2>&1 | grep -A6 "catalog version"
 ```
 
-The failure prints the received object. Paste its `fingerprint` into the expectation and re-run.
+Create `src/app/core/catalog/catalog-fingerprint.ts` exporting the measured string as `recordedCatalogFingerprint`; record the selected version and verified catalog inputs beside it. The first run without the file fails; then persist the calculated fingerprint and rerun. Future catalog changes require a version bump plus an intentional fingerprint/fixture update.
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -1430,12 +1415,12 @@ Create `scripts/export-catalog.mjs`:
 // The Dart file is a FIXTURE, not an implementation: the mobile app keeps its
 // own catalog, and its test asserts the two agree. A mismatch there means the
 // phone would price or offer something the server does not.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const out = join(root, 'dist', 'catalog');
+const out = join(root, 'contracts', 'catalog');
 
 const { CATALOG_VERSION, MODEL_FAMILIES, EDIT_TOOLS, CREDIT_PACKS, PLAN_CREDITS, STUDIO_MARGIN } =
   await import(join(root, 'src/app/core/catalog/model-families.ts'));
@@ -1445,7 +1430,7 @@ const catalog = {
   studioMargin: STUDIO_MARGIN,
   planCredits: PLAN_CREDITS,
   packs: CREDIT_PACKS,
-  editTools: EDIT_TOOLS.map((t) => ({ id: t.id, name: t.name, credits: t.credits })),
+  editTools: EDIT_TOOLS.map((t) => ({ id: t.id, name: t.name, credits: t.creditCost })),
   families: MODEL_FAMILIES.map((f) => ({
     id: f.id,
     name: f.name,
@@ -1465,8 +1450,7 @@ const catalog = {
   })),
 };
 
-mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'catalog.json'), `${JSON.stringify(catalog, null, 2)}\n`);
+const json = `${JSON.stringify(catalog, null, 2)}\n`;
 
 const dart = `// GENERATED by scripts/export-catalog.mjs in the vansen web repo.
 // Do not edit. Regenerate and copy in whenever CATALOG_VERSION changes.
@@ -1476,40 +1460,64 @@ const String kCatalogVersion = ${JSON.stringify(CATALOG_VERSION)};
 
 const Map<String, dynamic> kCatalogFixture = ${JSON.stringify(catalog, null, 2)};
 `;
-writeFileSync(join(out, 'model_catalog_fixture.dart'), dart);
-
-console.log(`catalog ${CATALOG_VERSION} written to dist/catalog/`);
+function assertFileMatches(path, content) {
+  if (!existsSync(path) || readFileSync(path, 'utf8') !== content) throw new Error(`catalog drift: ${path}`);
+}
+const outputs = { 'catalog.json': json, 'model_catalog_fixture.dart': dart };
+const checking = process.argv.includes('--check');
+for (const [name, content] of Object.entries(outputs)) {
+  const path = join(out, name);
+  if (checking) {
+    assertFileMatches(path, content);
+    continue;
+  }
+  mkdirSync(out, { recursive: true });
+  writeFileSync(path, content);
+}
+console.log(`catalog ${CATALOG_VERSION} ${checking ? 'verified' : 'written'}`);
 ```
 
-Running a `.ts` file through `await import` needs a loader. Add the script to `package.json` with the project's existing TypeScript runner:
+Running a `.ts` file through `await import` needs a loader. During implementation install `tsx` once with `npm install --save-dev --save-exact tsx`; retain the resolved exact version in package.json/package-lock.json. Use the local binary, with no fallback or network fetch during verification:
 
 ```json
-    "export-catalog": "npx tsx scripts/export-catalog.mjs",
-```
-
-If `tsx` is not already a dependency, use `npx vite-node scripts/export-catalog.mjs` instead — `vite` is already present for the Angular build. Verify which one resolves before committing:
-
-```bash
-cd /Users/user/IdeaProjects/vansen && npx tsx --version || npx vite-node --version
+    "export-catalog": "tsx scripts/export-catalog.mjs",
+    "check:catalog": "tsx scripts/export-catalog.mjs --check",
 ```
 
 - [ ] **Step 4: Run the export**
 
 ```bash
-cd /Users/user/IdeaProjects/vansen && npm run export-catalog && cat dist/catalog/catalog.json | head -20 && ls -la dist/catalog/
+cd /Users/user/IdeaProjects/vansen && npm run export-catalog && cat contracts/catalog/catalog.json | head -20 && ls -la contracts/catalog/
 ```
 
 Expected: both files exist and `catalogVersion` matches `CATALOG_VERSION`.
 
-- [ ] **Step 5: Ignore the build output**
+- [ ] **Step 5: Implement a non-mutating shared-sync check and retain both fixtures**
 
-Add to `.gitignore` if `dist/` is not already ignored:
+Keep `contracts/catalog/catalog.json` and `model_catalog_fixture.dart` under version control in this repo; the mobile companion copies the same Dart fixture and records its hash. No ignored-only fixture can satisfy a drift check. In `scripts/sync-shared.mjs`, import `existsSync` and replace its direct-invocation block with:
 
+```js
+function runSync() {
+  const checking = process.argv.includes('--check');
+  const outDir = join(scriptRoot, 'supabase', 'functions', '_shared');
+  for (const file of FILES) {
+    const output = join(outDir, file.out);
+    const expected = transformed(file);
+    if (checking) {
+      assertSharedMatches(output, expected);
+      continue;
+    }
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(output, expected);
+  }
+}
+function assertSharedMatches(output, expected) {
+  if (!existsSync(output) || readFileSync(output, 'utf8') !== expected) throw new Error(`shared drift: ${output}`);
+}
+if (invokedDirectly) runSync();
 ```
-dist/catalog/
-```
 
-The Dart fixture is committed in the **mobile** repo, not this one.
+Create `scripts/catalog-check.test.mjs`: use a temporary fixture tree and child-process invocations to prove missing output, changed Deno copy, changed JSON and changed Dart each fail; matching files pass. Compare bytes/mtime before/after each check to prove no writes. Generation followed by both checks passes. Run `node --test scripts/catalog-check.test.mjs`, `node scripts/sync-shared.mjs --check` and `npm run check:catalog`. P9 invokes both checks.
 
 - [ ] **Step 6: Final run of everything**
 

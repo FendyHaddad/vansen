@@ -1085,6 +1085,33 @@ Expected: `240 passed`, 42 files. User commits.
   ```
   Callers switch on `state`. `{ state: 'allowed' }` for genuinely empty input (no text and no image) is intentional — there is nothing to moderate — but Task 5 makes it impossible for a required image check to reach that branch with an undefined URL.
 
+- [ ] **Step 0: Upgrade the shared moderation fake in this task**
+
+Task 2 characterizes the old `flagged` API. Replace its `FakeModeration` and implementation in `api/testing/fakes.ts` when introducing the three-state contract. Task 5 imports this replacement:
+
+```ts
+import type { ModerationDecision } from '../_shared/moderation.ts';
+export interface FakeModeration {
+  moderate: ApiDeps['moderate'];
+  calls: { text?: string; imageUrl?: string }[];
+  next(result: ModerationDecision): void;
+}
+export function fakeModeration(): FakeModeration {
+  const calls: { text?: string; imageUrl?: string }[] = [];
+  let queued: ModerationDecision | null = null;
+  return {
+    calls,
+    next(result) { queued = result; },
+    moderate(input) {
+      calls.push(input);
+      const result = queued ?? { state: 'allowed' as const };
+      queued = null;
+      return Promise.resolve(result);
+    },
+  };
+}
+```
+
 - [ ] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/moderation_test.ts`:
@@ -1393,9 +1420,9 @@ Deno.test('upload: quarantine copy failure still refuses and does not record pha
 
   const res = await app.request('/api/uploads', { method: 'POST', headers: AUTH, body: uploadForm() });
 
-  assertEquals(res.status, 422);
-  assertEquals(db.tables.moderation_events.length, 1);
-  assertEquals(db.tables.moderation_events[0].quarantine_path, null);
+  assertEquals(res.status, 503);
+  assertEquals(db.tables.moderation_events.length, 0);
+  assertEquals(db.rpcCalls.filter((r) => r.name === 'fn_increment_strike').length, 0);
 });
 
 Deno.test('generate: prompt moderation unavailable → 503 with no charge and no provider call', async () => {
@@ -1449,7 +1476,7 @@ Expected: FAIL to type-check (`Property 'flagged' does not exist`) — the same 
 
 - [ ] **Step 3: Add the shared helpers inside `createApp` in `app.ts`**
 
-Insert directly after `recordStrike` (which stays as-is):
+Insert beside `recordStrike`; replace that function with the checked version below:
 
 ```ts
   /** One response for a moderation outage: readable, retryable, never charged. */
@@ -1473,7 +1500,6 @@ Insert directly after `recordStrike` (which stays as-is):
   async function quarantine(userId: string, bucketPath: string, ext: string): Promise<string | null> {
     const target = `quarantine/${userId}/${crypto.randomUUID()}.${ext}`;
     const { error } = await admin.storage.from('uploads').copy(bucketPath, target);
-    await admin.storage.from('uploads').remove([bucketPath]);
     if (error) {
       console.error('quarantine_copy_failed', error.message);
       return null;
@@ -1515,16 +1541,30 @@ Insert directly after `recordStrike` (which stays as-is):
       return { ok: false, response: moderationFailure(c, decision) };
     }
     if (decision.state === 'blocked') {
+      return refuseBlockedImage(c, userId, path, ext, decision.categories);
+    }
+    return { ok: true };
+  }
+
+  async function refuseBlockedImage(
+    c: Context, userId: string, path: string, ext: string,
+    categories: Record<string, number>,
+  ): Promise<ImageCheck> {
       const kept = await quarantine(userId, path, ext);
-      await recordStrike(userId, 'upload', null, decision.categories, kept ?? undefined);
+      if (!kept) return { ok: false, response: moderationFailure(c, {
+        state: 'unavailable', reason: 'quarantine_copy_failed', retryAfterSeconds: 10,
+      }) };
+      await recordStrike(userId, 'upload', null, categories, kept);
+      const { error: removeError } = await admin.storage.from('uploads').remove([path]);
+      if (removeError) console.error('quarantined_original_cleanup_failed', { path });
       return {
         ok: false,
         response: fail(c, 422, 'content_policy', 'This image violates our content policy.'),
       };
-    }
-    return { ok: true };
   }
 ```
+
+Remove an original upload only after quarantine and evidence succeed; scratch routes always attempt cleanup in `finally`. A failed copy returns 503 with no evidence, strike, charge or submission.
 
 Add `import type { ModerationDecision } from './_shared/moderation.ts';` to the module-scope imports, and change `recordStrike`'s signature so a missing quarantine path is explicit:
 
@@ -1543,8 +1583,9 @@ Add `import type { ModerationDecision } from './_shared/moderation.ts';` to the 
       categories,
       quarantine_path: quarantinePath ?? null,
     });
-    if (error) console.error('moderation_event_insert_failed', error.message);
-    await admin.rpc('fn_increment_strike', { p_user: userId });
+    if (error) throw new Error('moderation_event_insert_failed');
+    const { error: strikeError } = await admin.rpc('fn_increment_strike', { p_user: userId });
+    if (strikeError) throw new Error('moderation_strike_failed');
   }
 ```
 
@@ -1641,9 +1682,14 @@ In `POST /edits/save`, replace evidence L1926–1937:
   if (scratchErr) {
     return moderationFailure(c, { state: 'unavailable', reason: 'scratch_write_failed', retryAfterSeconds: 10 });
   }
-  const saveCheck = await moderateStoredImage(c, userId, scratch, 'png');
+  let saveCheck: ImageCheck;
+  try {
+    saveCheck = await moderateStoredImage(c, userId, scratch, 'png');
+  } finally {
+    const { error: cleanupError } = await admin.storage.from('uploads').remove([scratch]);
+    if (cleanupError) console.error('scratch_cleanup_failed', { path: scratch });
+  }
   if (!saveCheck.ok) return saveCheck.response;
-  await admin.storage.from('uploads').remove([scratch]);
 ```
 
 In `POST /library/import`, replace evidence L1991–2002 with the same shape, using the sniffed `ext` and `contentType`:
@@ -1655,9 +1701,14 @@ In `POST /library/import`, replace evidence L1991–2002 with the same shape, us
   if (scratchErr) {
     return moderationFailure(c, { state: 'unavailable', reason: 'scratch_write_failed', retryAfterSeconds: 10 });
   }
-  const importCheck = await moderateStoredImage(c, userId, scratch, ext);
+  let importCheck: ImageCheck;
+  try {
+    importCheck = await moderateStoredImage(c, userId, scratch, ext);
+  } finally {
+    const { error: cleanupError } = await admin.storage.from('uploads').remove([scratch]);
+    if (cleanupError) console.error('scratch_cleanup_failed', { path: scratch });
+  }
   if (!importCheck.ok) return importCheck.response;
-  await admin.storage.from('uploads').remove([scratch]);
 ```
 
 - [ ] **Step 8: Moderate the video poster in `POST /generations/:id/thumb`**
@@ -1674,9 +1725,14 @@ After the JPEG sniff (evidence L1706) and before `storageFor(backend).put(...)`,
   if (posterErr) {
     return moderationFailure(c, { state: 'unavailable', reason: 'scratch_write_failed', retryAfterSeconds: 10 });
   }
-  const posterCheck = await moderateStoredImage(c, userId, posterScratch, 'jpg');
+  let posterCheck: ImageCheck;
+  try {
+    posterCheck = await moderateStoredImage(c, userId, posterScratch, 'jpg');
+  } finally {
+    const { error: cleanupError } = await admin.storage.from('uploads').remove([posterScratch]);
+    if (cleanupError) console.error('scratch_cleanup_failed', { path: posterScratch });
+  }
   if (!posterCheck.ok) return posterCheck.response;
-  await admin.storage.from('uploads').remove([posterScratch]);
 ```
 
 - [ ] **Step 9: Run the moderation route tests**
@@ -2235,7 +2291,7 @@ Deno.test('a pending parent cannot be used as an image reference', async () => {
     }),
   });
 
-  assertEquals(res.status, 409);
+  assertEquals(res.status, 400);
   assertEquals((await res.json()).error.code, 'parent_not_ready');
   assertEquals(provider.submits.length, 0);
 });
@@ -2246,23 +2302,36 @@ Deno.test('a pending parent cannot be used as an image reference', async () => {
 Replace the image-parent lookup in `POST /generations` (evidence L1151–1159):
 
 ```ts
-  if (parentId && !video) {
-    const { data: parent } = await admin
-      .from('generations')
+  async function imageParentUrl(parentId: string, userId: string): Promise<string | Response> {
+    const { data: parent, error } = await admin.from('generations')
       .select('id,kind,status,media_path,storage_backend')
-      .eq('id', parentId)
-      .eq('user_id', userId)
-      .maybeSingle();
+      .eq('id', parentId).eq('user_id', userId).maybeSingle();
+    if (error) return fail(c, 503, 'reference_unavailable', 'Could not read your image. Try again.');
     if (!parent) return fail(c, 404, 'not_found', 'Parent generation not found');
-    if (parent.kind !== MediaKind.Image) {
-      return fail(c, 400, 'invalid_parent', 'Pick an image to edit.');
-    }
-    if (parent.status !== 'done' || !parent.media_path) {
-      return fail(c, 409, 'parent_not_ready', 'That image is still being generated.');
-    }
-    referenceUrl = await signMedia(parent.media_path);
+    if (parent.kind !== MediaKind.Image) return fail(c, 400, 'invalid_parent', 'Pick an image to edit.');
+    if (parent.status !== 'done' || !parent.media_path) return fail(c, 400, 'parent_not_ready', 'That image is not ready.');
+    return signStored(parent.storage_backend, parent.media_path);
   }
+  const parentReference = parentId && !video ? await imageParentUrl(parentId, userId) : undefined;
+  if (parentReference instanceof Response) return parentReference;
+  referenceUrl = parentReference;
 ```
+
+- [ ] **Step 14a: Add the real database ownership/RLS gate**
+
+Create `supabase/tests/upload_ownership.sql`. Seed synthetic users A/B in a disposable local Supabase stack and pending/allowed/blocked uploads with all required columns: `purpose, path, mime, bytes, width, height`. Under A's authenticated JWT claims, B's rows/objects must be unreadable; A cannot mark an upload allowed, rewrite ownership, or bypass purpose checks; anon cannot read/mutate the registry. Exercise service-role writes separately. Roll back fixtures.
+
+```sql
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-00000000000a","role":"authenticated"}', true);
+do $$
+begin
+  if exists (select 1 from public.uploads where user_id = '00000000-0000-0000-0000-00000000000b')
+  then raise exception 'RLS exposed foreign upload'; end if;
+end $$;
+```
+
+Run `psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/upload_ownership.sql`. Add real gateway integration cases for owned allowed, foreign, deleted, unmoderated and wrong-purpose IDs; rejection must precede charge and dispatch. Missing DB is blocked, never a fake-only PASS. Inject moderator/signing throws in scratch-route tests and assert cleanup is attempted on every exit. P6 makes failed cleanup durable; retain error evidence until then.
 
 - [ ] **Step 15: Run everything**
 
@@ -2412,40 +2481,23 @@ Expected: FAIL — the four family tests report `referenceUrl` as `undefined` (t
 Replace the reference block in `POST /generations` (evidence L1148–1163, as amended by Task 6 Step 14) with:
 
 ```ts
-  // Resolve the reference: a library parent (op=edit/upscale) or an uploaded
-  // image (op=generate). Both end as one signed URL for the adapter.
-  let referenceUrl: string | undefined;
   const referenceUploadId = typeof body.referenceUploadId === 'string' ? body.referenceUploadId : null;
-  if (parentId && !video) {
-    const { data: parent } = await admin
-      .from('generations')
-      .select('id,kind,status,media_path,storage_backend')
-      .eq('id', parentId)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (!parent) return fail(c, 404, 'not_found', 'Parent generation not found');
-    if (parent.kind !== MediaKind.Image) return fail(c, 400, 'invalid_parent', 'Pick an image to edit.');
-    if (parent.status !== 'done' || !parent.media_path) {
-      return fail(c, 409, 'parent_not_ready', 'That image is still being generated.');
-    }
-    referenceUrl = await signMedia(parent.media_path);
-  }
-  if (!parentId && referenceUploadId && !video) {
-    const family = familyById(familyId);
-    if (!family?.capabilities.imageInput) {
-      return fail(c, 400, 'reference_unsupported', 'This model does not take a reference image.');
-    }
-    const owned = await resolveOwnedUpload(admin, userId, referenceUploadId, 'reference');
+  if (video && referenceUploadId) return fail(c, 400, 'reference_unsupported', 'Use the video reference slots for this model.');
+  if (parentId && referenceUploadId) return fail(c, 400, 'invalid_reference', 'Choose one reference source.');
+  const family = familyById(familyId);
+  if (referenceUploadId && !family?.capabilities.imageInput) return fail(c, 400, 'reference_unsupported', 'This model does not take a reference image.');
+  async function uploadReferenceUrl(uploadId: string): Promise<string | Response> {
+    const owned = await resolveOwnedUpload(admin, userId, uploadId, 'reference');
     if (typeof owned === 'string') return referenceFailure(c, owned);
-    const { data: signed, error: signError } = await admin.storage
-      .from('uploads')
-      .createSignedUrl(owned.path, REF_SIGN_TTL_S);
-    if (signError || !signed?.signedUrl) {
-      logError(c, 'reference_sign_failed', new Error(signError?.message ?? 'no signed url'));
-      return fail(c, 503, 'reference_unavailable', 'Could not read your reference image — try again.');
-    }
-    referenceUrl = signed.signedUrl;
+    const { data: signed, error } = await admin.storage.from('uploads').createSignedUrl(owned.path, REF_SIGN_TTL_S);
+    if (error || !signed?.signedUrl) return fail(c, 503, 'reference_unavailable', 'Could not read your reference image — try again.');
+    return signed.signedUrl;
   }
+  const parentReference = parentId && !video ? await imageParentUrl(parentId, userId) : undefined;
+  if (parentReference instanceof Response) return parentReference;
+  const uploadReference = referenceUploadId ? await uploadReferenceUrl(referenceUploadId) : undefined;
+  if (uploadReference instanceof Response) return uploadReference;
+  const referenceUrl = parentReference ?? uploadReference;
 ```
 
 The `invalid_parent` guard at evidence L1047–1048 stays exactly as it is: `edit` and `upscale` still require a parent. What changes is that the client stops sending `edit` for an uploaded reference.
@@ -2764,18 +2816,16 @@ Add the import to `app.ts`:
 import { validateSettings } from './services/request-validation.ts';
 ```
 
-In the `else` branch that resolves a catalog family (evidence L1111–1124), insert the check immediately after `if (!family) return fail(...)`:
+Extract catalog-family resolution from the outer `else` into a helper with guard-clause returns. After its unknown-family guard, validate with:
 
 ```ts
       const invalid = validateSettings(family, settings);
-      if (invalid) {
-        return fail(
+      if (invalid) return fail(
           c,
           400,
           'invalid_settings',
           `${family.name} does not offer ${invalid.field} ${invalid.value}.`,
         );
-      }
 ```
 
 Validation runs before `creditCost(family, settings)` on the next lines, so a rejected axis can never be priced.

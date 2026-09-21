@@ -21,7 +21,7 @@
 - **New RPCs are service_role-only:** `revoke execute … from public, anon, authenticated; grant execute … to service_role;`
 - **Never repair historical balances automatically.** The reconciliation report in Task 7 is read-only. Any correction is a separate, owner-approved action.
 - **Tests:** Edge → `cd supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook`. SQL → against a **local** Supabase stack only (Task 1). Angular → `npm test -- --watch=false`.
-- **Baseline after P1:** 105 deno tests, 242 vitest tests. Each task below states the new expected count.
+- **Execution baseline:** run the current focused suite after this plan's prerequisites and record actual counts; predicted totals are not acceptance criteria.
 - **No deploys.** No `supabase functions deploy`, no `apply_migration` against `bnorhcxhvxydkgvcxjad`.
 
 ## Decision implemented here (D1)
@@ -230,6 +230,15 @@ create table public.billing_transactions (
   unique (source, business_txn_id)
 );
 
+create table public.billing_deliveries (
+  source text not null, event_id text not null, business_txn_id text not null,
+  user_id uuid not null, verified_at timestamptz not null default now(),
+  attempts int not null default 0, last_error text,
+  next_attempt_at timestamptz not null default now(), resolved_at timestamptz,
+  primary key (source,event_id)
+);
+alter table public.billing_deliveries enable row level security;
+
 create index billing_transactions_user_idx
   on public.billing_transactions (user_id, applied_at desc);
 
@@ -259,6 +268,7 @@ declare
   v_newer timestamptz;
   v_result jsonb;
   v_ref text := p_source || ':' || p_txn_id;
+  v_subscription public.subscriptions%rowtype;
 begin
   -- Serialize everything this user's money does. fn_charge_and_generate takes
   -- the same lock, so a grant can never interleave with a spend.
@@ -273,11 +283,10 @@ begin
 
   -- Ordering guard: a late delivery of an older period must not pull a live
   -- entitlement backwards or re-grant an expired cycle.
-  if p_kind = 'subscription_grant' and p_period_end is not null then
-    select s.current_period_end into v_newer
-      from public.subscriptions s
-      where s.user_id = p_user and s.current_period_end > p_period_end;
-    if v_newer is not null then
+  select s.current_period_end into v_newer from public.subscriptions s
+    where p_kind = 'subscription_grant' and p_period_end is not null
+      and s.user_id = p_user and s.current_period_end > p_period_end;
+  if v_newer is not null then
       v_result := jsonb_build_object(
         'applied', false, 'replay', false, 'reason', 'stale_period',
         'credits', public.fn_credits_json(p_user), 'entitlement', null
@@ -286,7 +295,6 @@ begin
         (source, business_txn_id, user_id, kind, plan, credits, period_end, event_at, result)
       values (p_source, p_txn_id, p_user, p_kind, p_plan, 0, p_period_end, p_event_at, v_result);
       return v_result;
-    end if;
   end if;
 
   if p_kind = 'subscription_grant' then
@@ -294,14 +302,12 @@ begin
     v_delta := p_credits - v_plan_balance;
     -- A mid-cycle upgrade tops the bucket up to the new plan; it never takes
     -- credits away from someone who just paid more money.
-    if p_never_lower and v_delta < 0 then
-      v_delta := 0;
-    end if;
-    if v_delta <> 0 then
+    v_delta := case when p_never_lower then greatest(v_delta, 0) else v_delta end;
+  end if;
+  if p_kind = 'subscription_grant' and v_delta <> 0 then
       insert into public.ledger_entries
         (user_id, type, bucket, amount_credits, note, stripe_ref)
       values (p_user, 'cycle_reset', 'plan', v_delta, 'Cycle renewal grant', v_ref);
-    end if;
   end if;
 
   if p_kind = 'pack_grant' then
@@ -316,20 +322,25 @@ begin
     values (p_user, 'pack_expiry', 'pack', -p_credits, 'Refund clawback', v_ref);
   end if;
 
+  select * into v_subscription from public.subscriptions where user_id = p_user;
   if p_entitlement is not null then
-    insert into public.subscriptions
-      select * from jsonb_populate_record(
-        null::public.subscriptions,
-        p_entitlement || jsonb_build_object('user_id', p_user, 'updated_at', now())
-      )
+    insert into public.subscriptions (
+      user_id, plan, status, current_period_end, stripe_subscription_id,
+      iap_original_transaction_id, cancel_reason, updated_at
+    ) values (
+      p_user,
+      coalesce(p_entitlement->>'plan', v_subscription.plan, p_plan),
+      coalesce(p_entitlement->>'status', v_subscription.status),
+      coalesce((p_entitlement->>'current_period_end')::timestamptz, v_subscription.current_period_end),
+      coalesce(p_entitlement->>'stripe_subscription_id', v_subscription.stripe_subscription_id),
+      coalesce(p_entitlement->>'iap_original_transaction_id', v_subscription.iap_original_transaction_id),
+      p_entitlement->>'cancel_reason', now()
+    )
     on conflict (user_id) do update set
-      plan = excluded.plan,
-      status = excluded.status,
+      plan = excluded.plan, status = excluded.status,
       current_period_end = excluded.current_period_end,
-      stripe_subscription_id =
-        coalesce(excluded.stripe_subscription_id, public.subscriptions.stripe_subscription_id),
-      iap_original_transaction_id =
-        coalesce(excluded.iap_original_transaction_id, public.subscriptions.iap_original_transaction_id),
+      stripe_subscription_id = excluded.stripe_subscription_id,
+      iap_original_transaction_id = excluded.iap_original_transaction_id,
       cancel_reason = excluded.cancel_reason,
       pending_plan = case when p_clear_pending then null else public.subscriptions.pending_plan end,
       pending_at = case when p_clear_pending then null else public.subscriptions.pending_at end,
@@ -339,7 +350,8 @@ begin
   v_result := jsonb_build_object(
     'applied', true, 'replay', false, 'reason', null,
     'credits', public.fn_credits_json(p_user),
-    'entitlement', p_plan
+    'entitlement', p_plan,
+    'ledgerDelta', case when p_kind = 'subscription_grant' then coalesce(v_delta, 0) else p_credits end
   );
 
   insert into public.billing_transactions
@@ -366,11 +378,17 @@ language sql stable security definer set search_path = public as $$
   where t.applied_at >= p_since
     and (t.result->>'applied')::boolean
     and t.kind in ('subscription_grant', 'pack_grant')
-    and t.credits > 0
+    and abs(coalesce((t.result->>'ledgerDelta')::int, 0)) > 0
     and not exists (
       select 1 from public.ledger_entries l
       where l.stripe_ref = t.source || ':' || t.business_txn_id
-    );
+    )
+  union all
+  select distinct d.source,d.business_txn_id,d.user_id,'pending'::text,0,d.verified_at
+  from public.billing_deliveries d
+  where d.verified_at >= p_since and d.resolved_at is null and d.next_attempt_at <= now()
+    and not exists (select 1 from public.billing_transactions t
+      where t.source=d.source and t.business_txn_id=d.business_txn_id);
 $$;
 
 revoke execute on function public.fn_apply_fulfillment(
@@ -388,6 +406,20 @@ grant execute on function public.fn_paid_unfulfilled(timestamptz) to service_rol
 ```
 
 Note the `fn_credits_json` helper is referenced above its own definition. That is fine — plpgsql resolves function calls at execution time, and both objects exist by the end of the migration.
+
+- [ ] **Step 1a: Persist delivery attempts separately from atomic money effects**
+
+Add `billing_deliveries(source,event_id,business_txn_id,user_id,verified_at,attempts,last_error,next_attempt_at,resolved_at)`, unique `(source,event_id)`, service-only RLS. Insert/update this verified receipt inbox BEFORE invoking fulfillment; its existence never suppresses a retry. Catch failures outside the money transaction, increment attempts and record a safe code; acknowledge only after the effect or a verified rejection is durable. A transaction rollback must leave a retryable inbox row, never a committed applied marker.
+
+`fn_paid_unfulfilled(p_since timestamptz)` must UNION unresolved verified deliveries overdue for processing with applied transactions whose nonzero `result.ledgerDelta` lacks a ledger entry. Use the same six return columns shown above, reporting `verified_at` in the final timestamp position for inbox rows. Zero-delta renewals and stale/rejected events are not missing grants. Retain economic transaction IDs for the financial retention period in D2; retain diagnostic `webhook_events` for 30 days, then prune by a named service-only schedule without deleting business idempotency anchors.
+
+Add SQL/route regressions before implementing:
+- First Apple purchase supplies generated `subscriptions.id/created_at`; revoke a subscription without NULL plan failure.
+- Fail ledger insert, entitlement write, and marker insert independently using a local test trigger that raises an exception; each rolls back all three effects. Remove the trigger and replay twice: one grant.
+- Seed the old `iaptx:<transactionId>` marker WITHOUT a grant: the new path still grants once.
+- Spend credits after a grant, replay the invoice: balance stays spent.
+- Valid zero-dollar discounted create/renewal receives the full D1 grant; unrelated zero-dollar invoice does not.
+- A valid zero-delta reset does not trigger `fn_paid_unfulfilled(now() - interval '1 day')`; a failed verified delivery does.
 
 - [ ] **Step 2: Apply it locally and run the first two assertions**
 
@@ -786,6 +818,10 @@ Expected: `5 passed | 0 failed`. User commits.
     Record<string, unknown>;
   ```
 
+**Pack input contract:** Add `retrievePackPurchase(sessionId): Promise<{usd:number; plan:'studio'|'pro'}>` to `StripeWebhookDeps` and its fake. Production implementation reads the Stripe line item and the server-created checkout purchase record (plan/rate at purchase time), checks an allowlisted pack price/quantity/currency and session owner, then returns that record. Import `packCredits` from the shared catalog; never consume a numeric grant from session metadata. Signed Stripe metadata is not inherently client-controlled, but a grant field is not the authoritative catalog calculation. Unknown price, owner or stored purchase returns a retriable reconciliation error, not a guessed rate. Test tampered `pack_credits` cannot change the calculated grant.
+
+For subscription mirror-only writes, check the returned database error and use a server-side ordering condition on verified provider event/current period; a late webhook cannot reactivate a revoked/newer entitlement. Include this in the same per-user lock as fulfillment.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `supabase/functions/stripe-webhook/handler_test.ts`:
@@ -868,8 +904,8 @@ Deno.test('D1: a prorated upgrade tops up and never lowers', () => {
   assertEquals(cycleGrant('pro', 'subscription_update', 900), { credits: 3750, neverLower: true });
 });
 
-Deno.test('D1: a zero-amount invoice grants nothing', () => {
-  assertEquals(cycleGrant('studio', 'subscription_cycle', 0), null);
+Deno.test('D1: a verified zero-amount discounted cycle receives its plan grant', () => {
+  assertEquals(cycleGrant('studio', 'subscription_cycle', 0), { credits: 1500, neverLower: false });
 });
 
 Deno.test('invoice.paid uses the INVOICE id as the business transaction', async () => {
@@ -1003,7 +1039,7 @@ export interface StripeWebhookDeps {
 /**
  * D1 (vansen.md §5): the launch promotion is "first 2 cycles $10 / $25 with
  * FULL credit grant". Grants therefore follow the plan, not the money paid.
- * A $0 invoice grants nothing — there is no paid cycle to grant for.
+ * A verified paid subscription cycle grants the full amount even with a 100% discount.
  * A prorated upgrade tops the bucket up to the new plan without ever taking
  * credits away from someone who just paid more.
  */
@@ -1012,7 +1048,8 @@ export function cycleGrant(
   billingReason: string | null,
   amountPaid: number,
 ): { credits: number; neverLower: boolean } | null {
-  if (amountPaid <= 0) return null;
+  if (!['subscription_create', 'subscription_cycle', 'subscription_update'].includes(billingReason ?? '')) return null;
+  if (amountPaid < 0) throw new Error('invalid_invoice_amount');
   const neverLower = billingReason === 'subscription_update';
   return { credits: PLAN_CREDITS[plan], neverLower };
 }
@@ -1041,10 +1078,7 @@ export function createStripeWebhook(deps: StripeWebhookDeps): (req: Request) => 
     const priceId = sub.items.data[0]?.price?.id;
     if (priceId === priceIds.pro) return 'pro';
     if (priceId === priceIds.studio) return 'studio';
-    const meta = sub.metadata?.plan;
-    if (meta === 'pro' || meta === 'studio') return meta;
-    console.error('unknown price id on subscription', sub.id, priceId);
-    return 'studio';
+    throw new Error('unrecognized_subscription_price');
   }
 
   /** A scheduled change is done the moment the subscription reports the new price. */
@@ -1070,7 +1104,7 @@ export function createStripeWebhook(deps: StripeWebhookDeps): (req: Request) => 
     const periodEnd = periodEndIso(sub);
     const grant = cycleGrant(plan, invoice.billing_reason ?? null, invoice.amount_paid ?? 0);
     if (!grant) {
-      console.error('zero-amount invoice granted nothing', invoice.id);
+      console.info('non_cycle_invoice_not_granted', invoice.id);
       return;
     }
     await applyFulfillment(admin, {
@@ -1108,9 +1142,10 @@ export function createStripeWebhook(deps: StripeWebhookDeps): (req: Request) => 
     }
 
     if (session.mode !== 'payment') return;
-    const credits = Number(session.metadata?.pack_credits ?? 0);
-    const usd = Number(session.metadata?.pack_usd ?? 0);
-    if (credits <= 0) return;
+    const purchase = await deps.retrievePackPurchase(String(session.id));
+    const { usd, plan } = purchase;
+    const credits = packCredits(usd, plan);
+    if (!Number.isSafeInteger(credits) || credits <= 0) throw new Error('invalid_pack_purchase');
     // Integrity: our own metadata must agree with Stripe's subtotal. A mismatch
     // is a bug or an attack, never a routine case — it throws so the delivery
     // is retried and the discrepancy stays visible instead of being consumed.
@@ -1237,11 +1272,11 @@ Expected: `12 passed | 0 failed`. User commits.
 - Consumes: `applyFulfillment` (Task 3).
 - Produces:
   ```ts
-  export type IapOutcome = 'applied' | 'already_applied' | 'ignored' | 'retry_later';
+  export type IapOutcome = 'applied' | 'already_applied' | 'rejected';
   export async function applyIapTransaction(admin, userId, tx): Promise<{ outcome: IapOutcome; credits: {plan:number;pack:number} | null }>;
   export function createAppstoreWebhook(deps: AppstoreWebhookDeps): (req: Request) => Promise<Response>;
   ```
-  `POST /iap/verify` answers `{ outcome, credits }` with `outcome` one of `applied | already_applied | retry_later`, and HTTP 503 for `retry_later`.
+  `POST /iap/verify` answers `{ outcome, credits }` with `outcome` one of `applied | already_applied | rejected | retry_later`, and HTTP 503 for `retry_later`.
 
 **The defect being removed:** `iap-grants.ts:28–31` inserts an `iaptx:<transactionId>` marker and returns `false` on **any** insert error, then does the grant with no marker cleanup. A grant that throws after the marker lands is never retried, because the next delivery sees the marker and returns early. `appstore-webhook/index.ts:44` compounds it by deleting only the `notificationUUID` row on failure, leaving the `iaptx:` marker in place. The marker is deleted outright; `billing_transactions` replaces it with a marker that is written in the same transaction as the money.
 
@@ -1404,10 +1439,17 @@ export interface IapTransaction {
   transactionId: string;
   originalTransactionId: string;
   expiresDate?: number;
+  revocationDate?: number;
   appAccountToken?: string;
 }
 
-export type IapOutcome = 'applied' | 'already_applied' | 'ignored';
+export type IapOutcome = 'applied' | 'already_applied' | 'rejected';
+
+function iapOutcome(result: { replay: boolean; applied: boolean }): IapOutcome {
+  if (result.replay) return 'already_applied';
+  if (!result.applied) return 'rejected';
+  return 'applied';
+}
 
 export interface IapResult {
   outcome: IapOutcome;
@@ -1420,17 +1462,20 @@ export async function applyIapTransaction(
   userId: string,
   tx: IapTransaction,
   eventAt = new Date().toISOString(),
+  nowMs = Date.now(),
 ): Promise<IapResult> {
   const product = IAP_PRODUCTS[tx.productId];
   if (!product) {
     console.error('unknown iap product', tx.productId, tx.transactionId);
-    return { outcome: 'ignored', credits: null };
+    return { outcome: 'rejected', credits: null };
   }
 
+  if (tx.revocationDate) return { outcome: 'rejected', credits: null };
+  const subscriptionExpired = product.kind === 'subscription'
+    && (!tx.expiresDate || tx.expiresDate <= nowMs);
+  if (subscriptionExpired) return { outcome: 'rejected', credits: null };
   if (product.kind === 'subscription') {
-    const periodEnd = tx.expiresDate
-      ? new Date(tx.expiresDate).toISOString()
-      : new Date(Date.now() + 30 * 86400 * 1000).toISOString();
+    const periodEnd = new Date(tx.expiresDate!).toISOString();
     const result = await applyFulfillment(admin, {
       source: 'apple',
       businessTxnId: tx.transactionId,
@@ -1447,7 +1492,7 @@ export async function applyIapTransaction(
         iap_original_transaction_id: tx.originalTransactionId,
       },
     });
-    return { outcome: result.replay ? 'already_applied' : 'applied', credits: result.credits };
+    return { outcome: iapOutcome(result), credits: result.credits };
   }
 
   const plan = await currentPlan(admin, userId);
@@ -1459,7 +1504,7 @@ export async function applyIapTransaction(
     credits: iapGrant(tx.productId, plan),
     eventAt,
   });
-  return { outcome: result.replay ? 'already_applied' : 'applied', credits: result.credits };
+  return { outcome: iapOutcome(result), credits: result.credits };
 }
 
 export async function clawBackIap(
@@ -1474,10 +1519,10 @@ export async function clawBackIap(
       businessTxnId: `refund:${tx.transactionId}`,
       userId,
       kind: 'subscription_grant',
-      plan: null,
+      plan: iapPlanFor(tx.productId),
       credits: 0,
       eventAt,
-      entitlement: { status: 'expired', current_period_end: eventAt },
+      entitlement: { plan: iapPlanFor(tx.productId), status: 'expired', current_period_end: eventAt },
     });
     return;
   }
@@ -1502,9 +1547,11 @@ export async function clawBackIap(
 }
 ```
 
-Keep `setIapSubscriptionStatus`, `findUserByOriginalTransaction` and `currentPlan` exactly as they are; delete `upsertIapSubscription`, which the fulfillment entitlement patch replaces.
+Retain `findUserByOriginalTransaction`; make `currentPlan` and `setIapSubscriptionStatus` check database errors, enforce the same event/period ordering and never reactivate a closed account; delete `upsertIapSubscription`, which the fulfillment entitlement patch replaces.
 
-The `clawBackIap` subscription branch writes `plan: null` with a `status: 'expired'` entitlement, so the plan column is not overwritten with a nonsense value — `fn_apply_fulfillment`'s upsert only sets the keys present in the patch.
+The subscription refund carries the known product plan and expires the entitlement. The explicit-column upsert preserves database defaults and existing provider IDs; an incomplete first entitlement is rejected, never filled with a guessed plan or period.
+
+**Receipt and response contract:** Verify signature, app/bundle/environment, product, account token, expiry and revocation before granting. Pass the decoded `revocationDate` into `IapTransaction`. Compare expiry to the injected current clock, not the webhook event's historical timestamp. Keep a separate verified event time for ordering. No fabricated 30-day expiry. Replace nested outcome ternaries above with `if (result.replay)`, `if (!result.applied)`, then return applied. Routes map applied/replay to 200, rejected to a readable 422, operational exceptions to 503 `retry_later`; `retry_later` is an HTTP outcome, never a successful `IapResult`. App Store notification rejection may be acknowledged only after its reason is durable. Test expired, revoked, missing expiry, wrong account, unknown product and database failure for both webhook and `/iap/verify`, including no entitlement activation.
 
 - [ ] **Step 4: Write `appstore-webhook/handler.ts`**
 
@@ -1549,6 +1596,7 @@ export function createAppstoreWebhook(deps: AppstoreWebhookDeps): (req: Request)
       transactionId: raw.transactionId ?? '',
       originalTransactionId: raw.originalTransactionId ?? '',
       expiresDate: raw.expiresDate,
+      revocationDate: raw.revocationDate,
       appAccountToken: raw.appAccountToken,
     };
     const eventAt = payload.signedDate
@@ -1631,10 +1679,12 @@ In `supabase/functions/api/app.ts`, replace the body of `POST /iap/verify` after
       transactionId: tx.transactionId ?? '',
       originalTransactionId: tx.originalTransactionId ?? '',
       expiresDate: tx.expiresDate,
+      revocationDate: tx.revocationDate,
     });
     // The client must be able to tell "your credits are here" from "try again
     // in a moment" — a retryable failure that reads as success strands paid
     // money, and one that reads as a hard error sends the user to support.
+    if (result.outcome === 'rejected') return fail(c, 422, 'purchase_rejected', 'This purchase cannot be applied to this account.');
     return c.json({
       outcome: result.outcome,
       credits: result.credits ?? await creditsOf(userId),
@@ -1650,6 +1700,7 @@ In `supabase/functions/api/app.ts`, replace the body of `POST /iap/verify` after
 Note the response shape changes from `{granted: boolean, credits}` to `{outcome, credits}`. The Flutter client is the only consumer; the companion mobile plan's **MT-01** updates it. Keep `granted` alongside `outcome` for one release so an un-updated build is not broken:
 
 ```ts
+    if (result.outcome === 'rejected') return fail(c, 422, 'purchase_rejected', 'This purchase cannot be applied to this account.');
     return c.json({
       granted: result.outcome === 'applied' || result.outcome === 'already_applied',
       outcome: result.outcome,

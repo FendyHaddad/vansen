@@ -23,7 +23,7 @@
 - **A control that cannot do what it says must not be shown.** Disable retry where the operation cannot be reconstructed and explain why, rather than letting it fail.
 - **Anti-enumeration:** every password-recovery response is identical whether or not the address exists. Never log a recovery token.
 - **Tests:** Angular → `npm test -- --watch=false`. Edge → `cd supabase/functions && deno test --allow-all _shared api job-worker cleanup-worker stripe-webhook appstore-webhook`. SQL → local stack only (`$VANSEN_LOCAL_DB`).
-- **Baseline after P7:** record the exact vitest and deno counts before starting.
+- **Execution baseline:** run the current focused suite after this plan's prerequisites and record actual counts; predicted totals are not acceptance criteria.
 
 ---
 
@@ -74,16 +74,17 @@
     settings: GenerationSettings;
     /** Owned identities, never signed URLs — those expire in 7 days. */
     referenceUploadIds: string[];
-    referencePaths: string[];
-    maskPath: string | null;
+    referenceSlots: { first: string | null; last: string | null; references: string[] };
+    maskUploadId: string | null;
     personaId: string | null;
     styleId: string | null;
     trendId: string | null;
     mode: VideoMode | null;
     parentId: string | null;
     catalogVersion: string;
+    quoteVersion: number;
   }
-  export function captureSnapshot(input: NormalizedRequest): GenerationRequestSnapshotV1;
+  export function captureSnapshot(input: Omit<GenerationRequestSnapshotV1, 'version'>): GenerationRequestSnapshotV1;
   export function rehydrate(snapshot: GenerationRequestSnapshotV1): RehydrateResult;
   ```
 
@@ -116,10 +117,8 @@ create index request_snapshots_user_idx on public.request_snapshots (user_id, cr
 alter table public.request_snapshots enable row level security;
 
 alter table public.generations
-  add column if not exists snapshot_id uuid references public.request_snapshots on delete set null,
-  -- A safe, stable code the client can render. jobs.error keeps the raw
-  -- provider text, which must never reach a customer.
-  add column if not exists failure_code text;
+  add column if not exists snapshot_id uuid references public.request_snapshots on delete set null;
+-- failure_code/failure_message are owned and written by P4/0019, not added here.
 
 -- Existing rows have no snapshot; retry must refuse them with an explanation
 -- rather than fail at the provider. `snapshot_id is null` is that signal.
@@ -139,14 +138,14 @@ const base = {
   prompt: 'a cat',
   settings: { aspectRatio: '1:1', resolution: '1MP' },
   referenceUploadIds: [],
-  referencePaths: [],
-  maskPath: null,
+  referenceSlots: { first: null, last: null, references: [] },
+  maskUploadId: null,
   personaId: null,
   styleId: null,
   trendId: null,
   mode: null,
   parentId: null,
-  catalogVersion: 'cat-v1',
+  catalogVersion: 'cat-v1', quoteVersion: 1,
 };
 
 Deno.test('a snapshot carries its version', () => {
@@ -154,8 +153,8 @@ Deno.test('a snapshot carries its version', () => {
 });
 
 Deno.test('R15: a mask is recorded by object path, not by data URI', () => {
-  const snap = captureSnapshot({ ...base, op: 'edit', familyId: 'edit-fill', maskPath: 'u/masks/1.png' });
-  assertEquals(snap.maskPath, 'u/masks/1.png');
+  const snap = captureSnapshot({ ...base, op: 'edit', familyId: 'edit-fill', maskUploadId: 'u/masks/1.png' });
+  assertEquals(snap.maskUploadId, 'u/masks/1.png');
   assert(!JSON.stringify(snap).includes('data:'), 'a megabyte data URI must not live in the snapshot');
 });
 
@@ -169,7 +168,7 @@ Deno.test('R15: NO signed url survives into a snapshot', () => {
   // works this week and fails next week for no visible reason.
   const snap = captureSnapshot({
     ...base,
-    referencePaths: ['u/ref.png'],
+    referenceSlots: { first: 'up-1', last: null, references: [] },
     // deno-lint-ignore no-explicit-any
     referenceUrls: ['https://x.supabase.co/object/sign/media/u/ref.png?token=abc'] as any,
   });
@@ -237,7 +236,17 @@ export type RehydrateResult =
 
 - [ ] **Step 4: Write the snapshot on every submission**
 
-In `POST /generations`, insert the snapshot in the same reservation the generation is created by (P5's `fn_reserve_generation` takes `p_items`; add `snapshotId` to each item). A snapshot written in a separate statement whose error is ignored is the defect P5 just removed; do not reintroduce it.
+In `0023`, replace `fn_reserve_generation` with its P5 body plus a required server-validated snapshot in `p_payload.snapshot`. Keep the same RPC signature and replay-first behavior. After replay/cap validation and BEFORE creating generation rows, insert the snapshot and capture its generated ID; then attach that ID to every returned generation in this same transaction:
+
+```sql
+insert into public.request_snapshots(user_id,version,body)
+values (p_user,1,p_payload->'snapshot') returning id into v_snapshot_id;
+-- After collecting the generation IDs from fn_charge_and_generate:
+update public.generations set snapshot_id = v_snapshot_id
+where user_id = p_user and id = any(v_generation_ids);
+```
+
+Declare `v_snapshot_id uuid` and `v_generation_ids uuid[]`. Reject missing/invalid version, quoteVersion and owned references before charging. The snapshot, charge, generation, jobs, expenses and submission result either all commit or all roll back. Never accept a client-provided snapshotId. Add `supabase/tests/request_snapshots.sql`: injected snapshot failure yields no charge/job; same-key replay adds no snapshot; batch shares one immutable snapshot. Mask objects use P1's registry with an explicit `mask` purpose added by `0023`, checked moderation/ownership and P6 cleanup registration; never persist a raw mask path or signed URL.
 
 - [ ] **Step 5: Run the suites**
 
@@ -288,7 +297,7 @@ function seed(db: FakeDb, over: Record<string, unknown> = {}, snapshot: Record<s
     body: {
       version: 1, op: 'generate', familyId: 'flux', prompt: 'a cat',
       settings: { aspectRatio: '1:1' }, referenceUploadIds: [], referencePaths: [],
-      maskPath: null, personaId: null, styleId: null, trendId: null, mode: null,
+      maskUploadId: null, personaId: null, styleId: null, trendId: null, mode: null,
       parentId: null, catalogVersion: 'cat-v1',
       ...snapshot,
     },
@@ -329,7 +338,7 @@ Deno.test('R15: retrying an edit carries the MASK', async () => {
   const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
   const db = deps.admin as unknown as FakeDb;
   seed(db, { family_id: 'edit-fill', op: 'edit' }, {
-    op: 'edit', familyId: 'edit-fill', maskPath: 'u/masks/1.png',
+    op: 'edit', familyId: 'edit-fill', maskUploadId: 'u/masks/1.png',
     referenceUploadIds: ['up-1'],
   });
   const app = createApp(deps);
@@ -340,14 +349,14 @@ Deno.test('R15: retrying an edit carries the MASK', async () => {
   const item = (db.rpcCalls.find((r) => r.name === 'fn_reserve_generation')!
     .args.p_items as Record<string, unknown>[])[0];
   const payload = item.payload as Record<string, unknown>;
-  assert(payload.maskPngBase64 || payload.maskPath, 'the mask must be restored');
+  assert(payload.maskPngBase64 || payload.maskUploadId, 'the mask must be restored');
 });
 
 Deno.test('R15: retrying a video i2v carries its REFERENCES', async () => {
   const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
   const db = deps.admin as unknown as FakeDb;
   db.tables.uploads = [
-    { id: 'up-1', user_id: TEST_USER, object_path: 'u/ref1.png', content_type: 'image/png' },
+    { id: 'up-1', user_id: TEST_USER, path: 'u/ref1.png', mime: 'image/png', purpose: 'reference', bytes: 100, width: 1, height: 1, moderation: 'allowed' },
   ];
   seed(db, { family_id: 'kling', kind: 'video' }, {
     familyId: 'kling', mode: 'i2v', referenceUploadIds: ['up-1'],
@@ -452,7 +461,7 @@ Deno.test('R15: variation of an edit item refuses rather than producing invalid_
 Deno.test('R15: the retryable probe tells the client what to enable', async () => {
   const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
   const db = deps.admin as unknown as FakeDb;
-  seed(db, { family_id: 'edit-fill', op: 'edit', status: 'failed' }, { op: 'edit', familyId: 'edit-fill', maskPath: 'u/m.png' });
+  seed(db, { family_id: 'edit-fill', op: 'edit', status: 'failed' }, { op: 'edit', familyId: 'edit-fill', maskUploadId: 'u/m.png' });
   const app = createApp(deps);
   const body = await (await app.request('/api/generations/g1/retryable', { headers: AUTH })).json();
   assertEquals(body.retry, true);
@@ -467,6 +476,26 @@ Deno.test('R15: a stranger cannot retry someone else\'s generation', async () =>
   const res = await app.request('/api/generations/g1/retry', { method: 'POST', headers: AUTH });
   assertEquals(res.status, 404);
 });
+```
+
+- [ ] **Step 1a: Complete operation-specific retry/variation coverage**
+
+Extend the existing `seed` fixture with complete P1 upload rows, and test successful retries for upscale, persona, image-reference, mask-edit, i2v, keyframes and parent-video extend/edit. Assert reserved payload preserves each input and uses current quote; no direct provider call is expected after P5. Test persona and i2v variation refusals:
+
+```ts
+for (const snapshot of [{ personaId: 'p1' }, { familyId: 'kling', mode: 'i2v' }]) {
+  Deno.test('variation refuses unsupported context ' + JSON.stringify(snapshot), async () => {
+    const deps = testDeps();
+    const db = deps.admin as unknown as FakeDb;
+    seed(db, { status: 'done' }, snapshot);
+    const res = await createApp(deps).request('/api/generations/g1/variation', {
+      method: 'POST', headers: AUTH,
+    });
+    assertEquals(res.status, 409);
+    assertEquals((await res.json()).error.code, 'not_variable');
+    assertEquals(db.rpcCalls.filter((r) => r.name === 'fn_reserve_generation').length, 0);
+  });
+}
 ```
 
 - [ ] **Step 2: Run to verify it fails, then write `services/retry.ts`**
@@ -502,7 +531,7 @@ export const REFUSAL_MESSAGE: Record<RetryRefusal, string> = {
 };
 ```
 
-`planRetry` rehydrates, resolves every upload id to a live object path, re-quotes through P3's `quote()`, and returns either a submission or a refusal. `planVariation` does the same but forces `op='generate'`, sets `parentId`, and refuses for `op='edit'` and `op='upscale'`.
+`planRetry` rehydrates, resolves every upload id to a live object path, re-quotes through P3's `quote()`, and returns either a submission or a refusal. `planVariation` does the same but forces `op='generate'`, sets `parentId`, and refuses edit/upscale, persona and all video/i2v/keyframe/parent-video sources with `not_variable`. Retry retains those operations, including their masks/personas/ordered slots/parent-video context, and requires a newly accepted quote when pricing changed.
 
 - [ ] **Step 3: Add the safe failure code to the DTO**
 
@@ -513,12 +542,15 @@ export interface GenerationDto {
   // ...
   /** A safe, stable reason the client can render. The raw provider text stays
    * in jobs.error and never reaches a customer. */
-  failureCode?: 'cancelled' | 'moderation' | 'provider_error' | 'timeout' | 'store_failed';
-  failureMessage?: string;
+  failure?: {
+    code: 'cancelled' | 'moderation' | 'provider_error' | 'timeout' | 'store_failed' | 'generation_failed';
+    message: string;
+    cancelled: boolean;
+  };
 }
 ```
 
-`toGenerationDto` reads `generations.failure_code`. P4's `fn_settle_job` writes it. A cancelled video then renders as "Cancelled · Refunded" after a reload, because the state lives on the server rather than in a client-side patch that a reload discards.
+`toGenerationDto` maps P4's persisted failure_code/failure_message to the nested `failure` object and sets cancelled only when code is cancelled. Modify `src/app/core/generations/generation-store.ts` so job polling and list reload preserve it, and `src/app/features/workspace/library-grid/library-grid.html` so cancelled and failed render separately. Add a reload test after real cancellation: status failed + failure.cancelled=true remains “Cancelled · Refunded”, while provider failure stays “Generation failed”. Raw provider text never reaches this DTO. P4's `fn_settle_job` writes both columns. A cancelled video then renders as "Cancelled · Refunded" after a reload, because the state lives on the server rather than in a client-side patch that a reload discards.
 
 - [ ] **Step 4: Point the client at the new routes**
 
@@ -576,6 +608,29 @@ Expected: all green. User commits.
 Append to `src/app/features/workspace/left-panel/reference-drop/reference-drop.spec.ts`:
 
 ```ts
+function slot(path: string): RefSlot { return { path, url: 'blob:test' }; }
+function makeHost({ mode }: { mode: VideoMode }) {
+  TestBed.configureTestingModule({ providers: [{ provide: ApiService, useValue: { postForm: vi.fn() } }] });
+  const fixture = TestBed.createComponent(ReferenceDrop);
+  let latest: (RefSlot | null)[] = mode === 'keyframes' ? [null, null] : [];
+  fixture.componentRef.setInput('mode', mode);
+  fixture.componentRef.setInput('slots', latest);
+  fixture.componentInstance.slotsChanged.subscribe((slots) => {
+    latest = slots;
+    fixture.componentRef.setInput('slots', slots);
+    fixture.detectChanges();
+  });
+  fixture.detectChanges();
+  const component = fixture.componentInstance;
+  return {
+    place: (index: number, value: RefSlot) => component.place(index, value),
+    clear: (index: number) => component.clear(index),
+    complete: () => component.complete(),
+    serialize: () => component.serialize(),
+    emitted: () => latest,
+  };
+}
+
 describe('R25: slots keep their meaning', () => {
   it('filling the END frame first leaves the first frame empty', () => {
     const host = makeHost({ mode: 'keyframes' });
@@ -647,31 +702,34 @@ Expected: FAIL — `place` and `clear` compact the array.
    * adapter, so compacting the array silently promoted the end frame to the
    * start — the video then began where it was meant to end. */
   place(index: number, slot: RefSlot): void {
-    const next = [...this.slotsSig()];
+    const next = [...this.slots()];
     next[index] = slot;
-    this.slotsSig.set(next);
-    this.changed.emit(next);          // nulls preserved
+    this.slotsChanged.emit(next);          // nulls preserved
   }
 
   clear(index: number): void {
-    const next = [...this.slotsSig()];
+    const next = [...this.slots()];
     next[index] = null;
-    this.slotsSig.set(next);
-    this.changed.emit(next);
+    this.slotsChanged.emit(next);
   }
 
   /** Every required position for this mode is filled. */
   complete(): boolean {
-    return requiredSlots(this.mode()).every((i) => this.slotsSig()[i] != null);
+    const rule = referenceRule(this.mode());
+    const slots = this.slots();
+    if (slots.length < rule.min || slots.length > rule.max) return false;
+    return Array.from({ length: slots.length }, (_, i) => slots[i] != null).every(Boolean);
   }
 
   /** The provider array, in provider order. A sparse array is a bug, not a
    * shorter list. */
   serialize(): string[] {
     if (!this.complete()) throw new Error('reference slots incomplete');
-    return requiredSlots(this.mode()).map((i) => this.slotsSig()[i]!.path);
+    return this.slots().map((slot) => slot!.path);
   }
 ```
+
+Change `ReferenceDrop.slots` and `slotsChanged` to `(RefSlot | null)[]` inputs/outputs, initialize keyframe slots as `[null,null]` in the parent, and import `RefSlot`, `VideoMode`, TestBed, vi and ApiService in the tests. Preserve actual `slotsChanged` output and `slots` input names.
 
 Update `left-panel.ts:455` (`refSlots().map(s => s.path)`) to call `serialize()`, and gate the Generate button on `complete()`.
 
@@ -685,53 +743,54 @@ import { captureFetch } from './testing/capture.ts';
 import { googleVideoAdapter } from './google-video.ts';
 import { googleOmniAdapter } from './google-omni.ts';
 import { runwayAdapter } from './runway.ts';
+import { falAdapter } from './fal.ts';
+import { familyById } from '../model-families.ts';
 
-const FRAME_MODES = ['i2v', 'keyframes'] as const;
 const ADAPTERS = [
   { name: 'veo', adapter: googleVideoAdapter },
   { name: 'omni', adapter: googleOmniAdapter },
   { name: 'runway', adapter: runwayAdapter },
+  { name: 'kling', adapter: falAdapter },
+  { name: 'seedance', adapter: falAdapter },
 ];
-
+for (const key of ['GOOGLE_AI_API_KEY','RUNWAY_API_KEY','FAL_API_KEY']) Deno.env.set(key,'test-key');
 for (const { name, adapter } of ADAPTERS) {
-  for (const mode of FRAME_MODES) {
-    Deno.test(`R25: ${name} sends no aspectRatio in ${mode}`, async () => {
-      const capture = captureFetch();
-      await adapter.submit({
-        familyId: name, op: 'generate', prompt: 'a cat', mode,
-        settings: { aspectRatio: '16:9', durationS: 5 },
-        referenceUrls: ['https://x/first.png', 'https://x/last.png'],
-        safetyId: 'sha',
-      } as never).catch(() => undefined);
-
-      const body = JSON.stringify(capture.lastBody());
-      // The input frame dictates the shape. Sending a stale, hidden aspect
-      // (the composer hides the control in these modes) either distorts the
-      // output or makes the provider reject the request.
-      assert(!body.includes('aspectRatio'), `${name}/${mode} leaked aspectRatio: ${body}`);
-      assert(!body.includes('aspect_ratio'), `${name}/${mode} leaked aspect_ratio: ${body}`);
-      assert(!body.includes('ratio'), `${name}/${mode} leaked ratio: ${body}`);
+  const modes = familyById(name)!.capabilities.modes ?? [];
+  for (const mode of modes.filter((m) => ['t2v','i2v','keyframes'].includes(m))) {
+    Deno.test(`R25: ${name} aspect contract for ${mode}`, async () => {
+      const capture = captureFetch((call) => {
+        if (call.method !== 'POST') return new Response(new Uint8Array([1,2,3]), {headers:{'content-type':'image/png'}});
+        return new Response(JSON.stringify({
+          name:'operations/test', id:'task-test',
+          status_url:'https://queue.fal.run/fal-ai/test/requests/one/status',
+          response_url:'https://queue.fal.run/fal-ai/test/requests/one',
+        }), {status:200,headers:{'content-type':'application/json'}});
+      });
+      try {
+        await adapter.submit({
+          familyId:name, op:'generate', prompt:'a cat', mode,
+          settings:{aspectRatio:'16:9',resolution:'720p',durationS:5},
+          referenceUrls:mode === 'keyframes' ? ['https://x/first.png','https://x/last.png'] : ['https://x/first.png'],
+          safetyId:'sha',
+        });
+        const sent = capture.calls.find((call) => call.method === 'POST' && call.jsonBody);
+        assert(sent?.jsonBody, 'adapter must send a provider request');
+        const body = JSON.stringify(sent.jsonBody);
+        const hasAspect = /"(aspectRatio|aspect_ratio|ratio)"/.test(body);
+        assertEquals(hasAspect, mode === 't2v', name + '/' + mode);
+      } finally { capture.restore(); }
     });
   }
-
-  Deno.test(`${name} DOES send aspectRatio for t2v`, async () => {
-    const capture = captureFetch();
-    await adapter.submit({
-      familyId: name, op: 'generate', prompt: 'a cat', mode: 't2v',
-      settings: { aspectRatio: '16:9', durationS: 5 }, safetyId: 'sha',
-    } as never).catch(() => undefined);
-    assert(JSON.stringify(capture.lastBody()).includes('16:9'));
-  });
 }
 ```
 
-- [ ] **Step 4: Run to verify it fails, then fix the three adapters**
+- [ ] **Step 4: Run to verify it fails, then fix the four adapters covering five families**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/aspect_omission_test.ts
 ```
 
-Expected: FAIL — all six frame-mode tests fail; Kling and Seedance already gate this at `fal.ts:47`.
+Expected: existing correct fal cases stay GREEN; the currently leaking Google/Runway frame-mode cases are RED. Unsupported modes are excluded using the catalog, not submitted and swallowed as a false pass.
 
 In each of `google-video.ts:47`, `google-omni.ts:33` and `runway.ts:49`, replace the unconditional field with a capability-driven one:
 
@@ -767,167 +826,66 @@ Expected: all green. User commits.
 
 ---
 
-## Task 4: Make the sales copy true (T17 → R23, D1, D4)
+## Task 4: Make every sales surface match entitlements (D1, D4)
 
-**Files:**
-- Create: `src/app/core/catalog/entitlements.ts` + `.spec.ts`
-- Modify: `src/app/features/plans/plans-page.ts` + `.html`, `src/app/features/landing/landing-page.{ts,html}`, `src/app/shared/site-footer/site-footer.html`, `src/app/features/auth/login-page.html`, `src/app/features/studio/right-panel/right-panel.ts`
+**Files:** Create `src/app/core/catalog/entitlements.ts` and `.spec.ts`, `public-capabilities.ts` and `.spec.ts`; modify `features/studio/right-panel/right-panel.{ts,html}`, `features/plans/plans-page.{ts,html}`, `features/landing/landing-page.{ts,html}`, `shared/site-footer/site-footer.{ts,html}`, `features/auth/login-page.html`, `supabase/functions/api/app.ts` and public route tests.
 
-**The contradiction being removed.** `PRO_TOOLS` (`right-panel.ts:72-85`) locks twelve on-device tools behind `proLocked`, while `plans-page.ts:118` sells "Full on-device editing suite, free and unlimited" as a **Studio** perk and the FAQ at line 168 names "cut out, bokeh, upscale" as free on every plan. Both cannot be true. One table decides, and both the paywall and the copy read it.
+- [ ] **Step 1: Extract the ACTUAL tool definitions and write exhaustive tests**
 
-- [ ] **Step 1: Write the failing entitlement spec**
-
-Create `src/app/core/catalog/entitlements.spec.ts`:
+Move current `LOCAL_TOOLS` and `PRO_TOOLS` with labels/icons unchanged into the catalog module. Do not import unexported UI constants or invent `STUDIO_TOOLS`. Include `mask` as a contextual tool even though it has no standalone panel button. Use `StudioTool` for exhaustiveness:
 
 ```ts
-import { describe, expect, it } from 'vitest';
-import { ENTITLEMENTS, toolsFor, requiredPlanFor } from './entitlements';
-import { PRO_TOOLS, STUDIO_TOOLS } from '../../features/studio/right-panel/right-panel';
+import type { StudioTool } from '../../features/studio/studio-tool';
+export type ToolPlan = 'studio' | 'pro';
+export const ENTITLEMENTS = {
+  crop: 'studio', adjust: 'studio', filters: 'studio', sharpen: 'studio',
+  smooth: 'studio', heal: 'studio', dehaze: 'studio', portraitsmooth: 'studio',
+  mask: 'studio',
+  select: 'pro', upscale: 'pro', aisharpen: 'pro', bgremove: 'pro',
+  bokeh: 'pro', enhance: 'pro', levels: 'pro', clone: 'pro', retouch: 'pro',
+  perspective: 'pro', liquify: 'pro', erase: 'pro',
+} as const satisfies Record<StudioTool, ToolPlan>;
+export const requiredPlanFor = (id: StudioTool): ToolPlan => ENTITLEMENTS[id];
+export const toolsFor = (plan: ToolPlan): StudioTool[] =>
+  (Object.keys(ENTITLEMENTS) as StudioTool[]).filter((id) => ENTITLEMENTS[id] === plan);
+export const toolLabels = (ids: StudioTool[]): string[] =>
+  ids.map((id) => [...LOCAL_TOOLS, ...PRO_TOOLS].find((t) => t.id === id)?.label ?? 'Mask');
+```
 
-describe('ENTITLEMENTS is the single source of truth', () => {
-  it('every tool the right panel offers has an entitlement', () => {
-    for (const tool of [...STUDIO_TOOLS, ...PRO_TOOLS]) {
-      expect(requiredPlanFor(tool.id), tool.id).toBeDefined();
-    }
-  });
-
-  it('R23: the tools the panel locks are exactly the tools the table calls Pro', () => {
-    // The pricing page sold these as free on every plan while the panel
-    // locked them. Whichever way that is decided, the two must agree.
-    expect(PRO_TOOLS.map((t) => t.id).sort()).toEqual(toolsFor('pro').sort());
-  });
-
-  it('no tool is listed in both tiers', () => {
-    const overlap = toolsFor('studio').filter((id) => toolsFor('pro').includes(id));
-    expect(overlap).toEqual([]);
-  });
-
-  it('every entitlement names a tool that exists', () => {
-    const known = new Set([...STUDIO_TOOLS, ...PRO_TOOLS].map((t) => t.id));
-    for (const id of Object.keys(ENTITLEMENTS)) expect(known.has(id), id).toBe(true);
-  });
+```ts
+it('panel paywalls agree with the same entitlement table as pricing', () => {
+  expect(PRO_TOOLS.map((t) => t.id).sort()).toEqual(toolsFor('pro').sort());
+  expect([...LOCAL_TOOLS.map((t) => t.id), 'mask'].sort()).toEqual(toolsFor('studio').sort());
+  expect(requiredPlanFor('adjust')).toBe('studio');
+  expect(requiredPlanFor('bgremove')).toBe('pro');
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then write the table**
+These tiers preserve current gating; changing the product entitlement is a separate decision. Pro's copy includes Studio plus Pro tools, whereas toolsFor('pro') returns only the additional tier.
 
-```bash
-cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/catalog/entitlements.spec.ts
-```
+- [ ] **Step 2: Supply public capability data without authentication**
 
-Expected: FAIL — module not found.
+Create `PublicCapabilities` with `enabledFamilyIds:string[]`, `backgroundCompletion:boolean`, `completionNotifications:boolean`, `catalogVersion:string`. Add public read-only `GET /capabilities` before the auth middleware, exposing only this whitelist (no secrets/entitlements/user data). It reads server-owned release flags. The Angular service loads anonymously, validates known family IDs and defaults all unverified promises off on error. Public pricing/landing/footer/login can use it without sign-in. P9 enables flags only after evidence passes; P5 pending-video copy consumes the same service.
 
-```ts
-/**
- * Which plan each on-device tool needs.
- *
- * Before this table, the right panel's PRO_TOOLS list and the pricing page's
- * prose were written independently and disagreed: the page sold twelve locked
- * tools as "free and unlimited on every plan". A customer could buy Studio on
- * that sentence and find Cut Out locked.
- *
- * The paywall and the copy both read this. Changing an entitlement changes
- * both, and the spec above fails if they drift apart again.
- */
-export type ToolPlan = 'free' | 'studio' | 'pro';
+- [ ] **Step 3: Render all tool/model/promo lists from shared truth**
 
-export const ENTITLEMENTS: Record<string, ToolPlan> = {
-  // Studio: rotate/flip/straighten, filters, crop, heal.
-  crop: 'studio', rotate: 'studio', flip: 'studio', straighten: 'studio',
-  filters: 'studio', heal: 'studio', dehaze: 'studio', smooth: 'studio',
-  // Pro: the ONNX engines and the heavier pure ops.
-  select: 'pro', upscale: 'pro', aisharpen: 'pro', bgremove: 'pro', bokeh: 'pro',
-  enhance: 'pro', levels: 'pro', clone: 'pro', retouch: 'pro', perspective: 'pro',
-  liquify: 'pro', erase: 'pro',
-};
-```
-
-- [ ] **Step 3: Generate the copy from the table and the catalog**
-
-In `plans-page.ts`, replace every hand-written tool and model list:
+Replace lists in pricing, landing, footer, login AND right-panel `PLAN_PITCH`. Use catalog IDs and labels directly, without undefined familyByName/toolByLabel helpers. Never advertise Sora or disabled families. Render full D1 grants from PLAN_CREDITS and prices from the catalog. Explain “same credits per job; lower dollar cost per credit on Pro”; calculate any percentage from the actual prices/grants rather than hardcoding a conflicting 20% claim. Public-page tests render every surface with logged-out, enabled, disabled and unavailable capability responses.
 
 ```ts
-  /** Named from the entitlement table, so the page cannot claim a tool is
-   * included on a plan that locks it. */
-  readonly studioToolNames = computed(() => toolLabels(toolsFor('studio')));
-  readonly proToolNames = computed(() => toolLabels(toolsFor('pro')));
-
-  /** Named from the ENABLED catalog, so a removed model cannot stay on sale.
-   * Sora was advertised in three places after being deleted from the catalog
-   * and from the models table. */
-  readonly videoFamilyNames = computed(() =>
-    VIDEO_FAMILIES.filter((f) => this.availability.enabled(f.id)).map((f) => f.name),
-  );
+const studioCost = PLAN_PRICE_USD.studio / PLAN_CREDITS.studio;
+const proCost = PLAN_PRICE_USD.pro / PLAN_CREDITS.pro;
+const savingPercent = Math.round((1 - proCost / studioCost) * 100);
 ```
 
-- [ ] **Step 4: Remove Sora everywhere and prove it stays gone**
+For both plans assert rendered launch grants match P2's full-grant discounted invoice behavior. Search `src/app` for old Sora, unlimited-suite and 20%-lower literals and update each affected surface, including landing and in-app pitch.
 
-```bash
-cd /Users/user/IdeaProjects/vansen && grep -rn -i "sora" src/app | grep -v model-families.spec.ts
-```
+- [ ] **Step 4: Record D4 before locale-dependent release work**
 
-Three hits to fix: `plans-page.ts:134`, `login-page.html:14`, `site-footer.html:29`. Each becomes a binding over `videoFamilyNames()`. Then add the guard as a spec, not just a grep:
+Record the user's English-only versus funded en/ms launch decision in `docs/superpowers/specs/2026-09-20-launch-locales.md`. English-only updates vansen.md/listings honestly. Funded localization requires a separate explicit scope for extraction, preference, formatting and truncation tests. This existing product decision remains unresolved until chosen; don't infer it from this audit repair.
 
-```ts
-it('R23: no copy advertises a model that is not in the catalog', () => {
-  const advertised = [...studioToolNames(), ...videoFamilyNames()];
-  for (const name of advertised) {
-    expect(familyByName(name) ?? toolByLabel(name), `"${name}" is advertised but does not exist`).toBeTruthy();
-  }
-});
-```
+- [ ] **Step 5: Verify**
 
-```bash
-cd /Users/user/IdeaProjects/vansen && ! grep -rn -i "sora" src/app --exclude="model-families.spec.ts" && echo "SORA GONE"
-```
-
-Expected: `SORA GONE`.
-
-- [ ] **Step 5: Align the promo copy with the grant (D1)**
-
-P2 already made `cycleGrant` return the **full** `PLAN_CREDITS[plan]` for launch-coupon invoices, matching `vansen.md` §5. Verify the copy now matches the code, rather than assuming it:
-
-```bash
-cd /Users/user/IdeaProjects/vansen && grep -rn "full credit grant\|1,500\|3,750\|1,000\|3,125" src/app/features/plans src/app/features/landing
-```
-
-Every number on the page must appear in `PLAN_CREDITS` or be computed from it. Replace literals with bindings:
-
-```html
-<p class="promo-note">
-  First 60 days at the promotional price, with the full
-  {{ planCredits().toLocaleString() }}-credit monthly grant.
-</p>
-```
-
-Add a spec asserting the rendered grant equals `PLAN_CREDITS[plan]` for both tiers.
-
-- [ ] **Step 6: Say "effective cost per credit", not "20% less"**
-
-The review is specific: a job's credit charge does not vary by plan; Pro buys credits more cheaply. Find and correct every instance:
-
-```bash
-cd /Users/user/IdeaProjects/vansen && grep -rn "20% less\|20% lower\|cost 20%" src/app
-```
-
-Each becomes: *"Pro credits cost about 20% less per dollar, so the same job costs you less."*
-
-- [ ] **Step 7: Record decision D4 (locale)**
-
-`vansen.md` promises English and Malay; the web app has no `@angular/localize` and no i18n config. Present both options to the user and record the answer in `docs/superpowers/specs/2026-09-20-launch-locales.md`:
-
-- **English-only launch** — update `vansen.md` §254 and §285 and the store listings to say English only. No code change. Recommended if Malay is not a launch-blocking market.
-- **Fund the locale work** — add `@angular/localize`, extract every string, add a language selector that persists, localize number, date and currency formatting, and check text expansion in every panel. This is substantial and does not fit inside this plan; it becomes its own.
-
-Do not proceed to Task 5 until the decision is recorded. If English-only is chosen, update `vansen.md` in this task.
-
-- [ ] **Step 8: Run everything**
-
-```bash
-cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
-```
-
-Expected: all green. User commits.
+Run `npm test -- --watch=false`, focused Deno public-capability tests and production build. Compare anonymous public pages and signed-in paywalls at desktop/mobile widths. Preserve established visual composition. User commits.
 
 ---
 
@@ -1114,169 +1072,87 @@ Expected: specs green, the asset check reporting honestly, build succeeds. User 
 
 ---
 
-## Task 6: Password and confirmation recovery (T18 → R24)
+## Task 6: Password recovery and confirmation resend
 
-**Files:**
-- Create: `src/app/features/auth/recover-page.{ts,html,css}` + `.spec.ts`, `reset-page.{ts,html,css}` + `.spec.ts`
-- Modify: `src/app/core/auth/auth-service.ts`, `src/app/app.routes.ts`, `login-page.html`
+**Files:** Create `src/app/features/auth/recover-page.{ts,html,css}`, `reset-page.{ts,html,css}`, `confirm-page.{ts,html,css}` and each page's `.spec.ts`; modify `core/auth/auth-service.ts`, `auth-service.spec.ts`, `app.routes.ts`, `login-page.html`. Document exact Supabase email/redirect/rate-limit configuration in the P9 runbook.
 
 **Interfaces:**
-- Produces:
-  ```ts
-  // AuthService
-  requestPasswordReset(email: string): Promise<void>;   // always resolves
-  resendConfirmation(email: string): Promise<void>;     // always resolves
-  completePasswordReset(newPassword: string): Promise<void>;
-  ```
-- Routes: `/recover` (request a link), `/reset` (the callback, consumes the token).
+- `requestPasswordReset(email):Promise<void>`, `resendConfirmation(email):Promise<void>`: same generic success for known/unknown addresses.
+- `completePasswordReset(password):Promise<void>`: requires a validated PASSWORD_RECOVERY flow for the intended identity, not merely any signed-in session.
+- Public routes `/recover`, `/reset`, `/confirm`; login links both “Forgot password?” and “Resend confirmation”.
+- Recovery page methods `email.set(value)`, `submit():Promise<void>`, `pending()`, `sent()`; reset exposes `password.set(value)`, `submit()`, `error()`; confirmation page follows the recovery form contract.
 
-- [ ] **Step 1: Write the failing auth spec**
+- [ ] **Step 1: Add service tests through the existing P7 auth mock seam**
 
-Append to `src/app/core/auth/auth-service.spec.ts`:
+Use TestBed.inject(AuthService) in each test and add spies to the same mocked Supabase auth object from P7; do not reference undeclared `service/mockAuth`. Test resetPasswordForEmail receives the fixed allowed `/reset` origin, resend receives `{type:'signup',email,options:{emailRedirectTo:...}}`, and known/unknown/rate-limited requests show the same safe response. Network/configuration failures use a generic retry state and never echo vendor token text. No recovery token/code goes to logs, analytics or persistence.
 
-```ts
-describe('R24: password recovery', () => {
-  it('sends a reset email for a known address', async () => {
-    const spy = vi.fn().mockResolvedValue({ error: null });
-    mockAuth.resetPasswordForEmail = spy;
-    await service.requestPasswordReset('a@b.com');
-    expect(spy).toHaveBeenCalledWith('a@b.com', expect.objectContaining({
-      redirectTo: expect.stringContaining('/reset'),
-    }));
-  });
+Test completion with no session, ordinary signed-in session without recovery intent, valid PASSWORD_RECOVERY event, expiry, used code, and A signed in while opening B's recovery link. Only the validated recovery identity can update the password; P7 invalidates A's user state first.
 
-  it('R24: resolves identically for an unknown address', async () => {
-    // Different behaviour for known and unknown addresses turns the reset
-    // form into a way to test whether someone has an account here.
-    mockAuth.resetPasswordForEmail = vi.fn().mockResolvedValue({
-      error: { message: 'User not found' },
-    });
-    await expect(service.requestPasswordReset('nobody@b.com')).resolves.toBeUndefined();
-  });
+- [ ] **Step 2: Implement the auth methods and restricted recovery state**
 
-  it('R24: resolves identically when rate-limited', async () => {
-    mockAuth.resetPasswordForEmail = vi.fn().mockResolvedValue({
-      error: { message: 'For security purposes, you can only request this after 60 seconds' },
-    });
-    await expect(service.requestPasswordReset('a@b.com')).resolves.toBeUndefined();
-  });
-
-  it('R24: never logs the recovery token', async () => {
-    const errorSpy = vi.spyOn(console, 'error');
-    const logSpy = vi.spyOn(console, 'log');
-    mockAuth.resetPasswordForEmail = vi.fn().mockResolvedValue({
-      error: { message: 'failed for token=secret-token-value' },
-    });
-    await service.requestPasswordReset('a@b.com');
-    for (const spy of [errorSpy, logSpy]) {
-      for (const call of spy.mock.calls) {
-        expect(JSON.stringify(call)).not.toContain('secret-token-value');
-      }
-    }
-  });
-
-  it('completing a reset requires a recovery session', async () => {
-    mockAuth.getSession = () => Promise.resolve({ data: { session: null } });
-    await expect(service.completePasswordReset('newpassword123')).rejects.toThrow(/link/i);
-  });
-});
-```
-
-- [ ] **Step 2: Run to verify it fails, then add the methods**
-
-```bash
-cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/auth/auth-service.spec.ts
-```
-
-Expected: FAIL — the methods do not exist.
+Use Supabase's supported recovery callback/PKCE flow for the installed client. Parse/exchange the recovery code through that API, wait for verification, then clear sensitive URL parameters with replaceState. Track a short-lived recovery state scoped to the verified user/session and invalidate it on success, expiry, sign-out, navigation cancellation or another identity. A normal getSession result cannot create recovery permission.
 
 ```ts
-  /** Requests a reset link. Resolves the same way whatever happened, because
-   * a form that answers differently for a known address is an account
-   * enumeration tool. Errors go to the console with the message redacted —
-   * a recovery token must never reach a log. */
-  async requestPasswordReset(email: string): Promise<void> {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/reset`,
-    });
-    if (error) console.error('reset_request_failed', redactToken(error.message));
-  }
-
-  async resendConfirmation(email: string): Promise<void> {
-    const { error } = await supabase.auth.resend({ type: 'signup', email });
-    if (error) console.error('resend_failed', redactToken(error.message));
-  }
-
-  /** Sets the new password. The recovery link created a short-lived session;
-   * without it there is nothing to update. */
-  async completePasswordReset(password: string): Promise<void> {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) throw new Error('That reset link has expired. Request a new one.');
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) throw new Error(error.message);
-  }
-```
-
-```ts
-/** Strips anything that looks like a token before it reaches a log. */
-function redactToken(message: string): string {
-  return message.replace(/(token|code|otp)=[^\s&]+/gi, '$1=[redacted]');
+async completePasswordReset(password: string): Promise<void> {
+  const recovery = this.recoveryState();
+  if (!recovery || recovery.expiresAt <= Date.now()) throw new Error('That reset link has expired. Request a new one.');
+  const { data, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || data.session?.user.id !== recovery.userId) throw new Error('Open a valid reset link to continue.');
+  if (password.length < 8) throw new Error('Use at least 8 characters.');
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw new Error('The password could not be updated. Request a fresh link and try again.');
+  this.recoveryState.set(null);
 }
 ```
 
-- [ ] **Step 3: Write the failing page specs**
+Define `recoveryState` as a signal of `{userId:string;expiresAt:number}|null`, initialized only by the verified callback. Use a configured public origin allowlist for redirects, not arbitrary query parameters or an unvalidated return URL. No backend reset endpoint is needed when calling Supabase Auth directly; its server enforces the email rate limit.
 
-`recover-page.spec.ts` asserts: submitting shows the same confirmation for any address, the button is disabled while in flight, an invalid address is rejected client-side before any request, and a second submit within the cooldown is prevented locally with a countdown.
+- [ ] **Step 3: Write executable page tests before building each page**
 
-`reset-page.spec.ts` asserts: arriving with no recovery session shows "expired link" and a link to request another, a password shorter than the minimum is rejected with the rule stated, a successful reset routes to the app, and a failed update shows the error without exposing the token.
+Create standalone TestBed fixtures with stubbed AuthService methods and Router. This pattern supplies all helpers explicitly:
 
-- [ ] **Step 4: Run to verify they fail, then build both pages**
+```ts
+it('recover shows generic confirmation and prevents duplicate submission', async () => {
+  let finish!: () => void;
+  const auth = { requestPasswordReset: vi.fn(() => new Promise<void>((resolve) => { finish = resolve; })) };
+  TestBed.configureTestingModule({ providers: [
+    { provide: AuthService, useValue: auth }, provideRouter([]),
+  ] });
+  const fixture = TestBed.createComponent(RecoverPage);
+  const page = fixture.componentInstance;
+  page.email.set('person@example.com');
+  const pending = page.submit();
+  expect(page.pending()).toBe(true);
+  await page.submit();
+  expect(auth.requestPasswordReset).toHaveBeenCalledTimes(1);
+  finish();
+  await pending;
+  fixture.detectChanges();
+  expect(page.sent()).toBe(true);
+  expect(fixture.nativeElement.textContent).toContain('If an account exists');
+});
+```
+
+Import TestBed, vi/expect/it, AuthService, RecoverPage and provideRouter in that file. Duplicate this explicit fixture setup for ConfirmPage with resendConfirmation. ResetPage tests stub completePasswordReset: reject short password without calling it, display safe expired-link error, successful update navigates to the app, rejected update remains retryable. Add DOM assertions for input labels, busy disable, generic confirmation and request-another-link controls.
+
+- [ ] **Step 4: Implement and route all three pages**
+
+Each component is standalone/signals/OnPush with separate HTML/CSS, labels and live-region feedback. submit uses guard clauses for pending/cooldown/invalid input, awaits its auth method in try/finally and always clears pending. Local cooldown is convenience; do not present it as a server-side abuse limit. Reset does not route to the app until password update succeeds; back/cancel invalidates recovery state.
+
+Configure exact local/staging/production callback URLs, email templates, sender and Supabase server-side recovery/resend rate limits. Test direct API rapid repeats to prove bypassing the UI still meets the configured limit. Keep secrets/tokenized URLs out of evidence.
+
+- [ ] **Step 5: Verify real recovery links and account transitions**
+
+Record in `docs/superpowers/plans/2026-09-20-recovery-verification-log.md`: valid same-device link, expired/reused link, different browser/device, unknown address, rapid repeats bypassing local cooldown, confirmation resend/resumption, signed-in A opening B's link, and cancel/back navigation. A reused link never changes the password; an already successful reset's old password must no longer work. Local mailbox tests precede real staging delivery in P9.
+
+- [ ] **Step 6: Verify GREEN**
 
 ```bash
-cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/features/auth
+npm test -- --watch=false
+npx ng build
 ```
 
-Expected: FAIL — components do not exist.
-
-Build each as three files — `.ts` + `.html` + `.css` — standalone, signals, `OnPush`, styled with classes only. The confirmation copy must be identical in every case:
-
-```html
-<p class="confirm-note">
-  If an account exists for that address, a reset link is on its way. Check your
-  inbox and your spam folder.
-</p>
-```
-
-- [ ] **Step 5: Wire the routes and the entry point**
-
-In `app.routes.ts`, add `/recover` and `/reset`. Neither takes the auth guard: `/recover` is for someone who cannot sign in, and `/reset` runs under a recovery session that is not a normal one.
-
-In `login-page.html`, add the link that does not exist today:
-
-```html
-<a class="text-link" routerLink="/recover">Forgot your password?</a>
-```
-
-- [ ] **Step 6: Verify the four link states by hand**
-
-The review's acceptance criterion names four cases that a unit test cannot cover. Run each against the local stack and record the result in `docs/superpowers/plans/2026-09-20-recovery-verification-log.md`:
-
-| Case | Expected |
-|---|---|
-| Valid link, same device | Password updates, lands signed in |
-| Expired link | "That reset link has expired" plus a way to request another |
-| Reused link | Same as expired; the old password still works until a successful reset |
-| Wrong device or browser | Works, or fails with a clear instruction; never a blank page |
-| Unknown address | Identical confirmation, no hint that the account is absent |
-| Rapid repeat requests | Local cooldown with a countdown; the server's limit never surfaces as an error |
-
-- [ ] **Step 7: Run everything**
-
-```bash
-cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npx ng build 2>&1 | tail -10
-```
-
-Expected: all green, build succeeds. User commits.
+Run focused auth/page tests first, then the suite. Complete staging delivery, redirect and rate-limit proof in P9 before release. User commits.
 
 ---
 

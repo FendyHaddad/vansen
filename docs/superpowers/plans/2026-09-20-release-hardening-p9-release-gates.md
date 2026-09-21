@@ -64,7 +64,7 @@ There is no `.github/` directory, so nothing runs on a push: the whole suite is 
 ## Task 1: Pin the toolchain and make one command run everything
 
 **Files:**
-- Create: `.nvmrc`, `supabase/config.toml`, `scripts/verify-all.mjs`
+- Create: `.nvmrc`, `supabase/config.toml`, `scripts/verify-all.mjs`, `scripts/run-sql-tests.mjs`, `scripts/run-sql-tests.test.mjs`
 - Modify: `package.json`
 
 - [ ] **Step 1: Pin Node and Deno**
@@ -81,10 +81,10 @@ Add the engines field so a mismatch is loud rather than mysterious:
   "engines": { "node": ">=22.23.1 <23" },
 ```
 
-Generate and commit a Deno lockfile so CI resolves the same dependency versions this machine does:
+Generate a Deno lockfile for the user to commit so CI resolves the same dependency versions this machine does:
 
 ```bash
-cd /Users/user/IdeaProjects/vansen/supabase/functions && deno cache --lock=deno.lock --lock-write api/index.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts && ls -la deno.lock
+cd /Users/user/IdeaProjects/vansen/supabase/functions && deno cache --lock=deno.lock api/index.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts && ls -la deno.lock
 ```
 
 - [ ] **Step 2: Write `supabase/config.toml`**
@@ -140,6 +140,7 @@ const CHECKS = [
   { name: 'deno type check',     cmd: 'deno', args: ['check', 'api/index.ts', 'api/app.ts', 'job-worker/index.ts', 'cleanup-worker/index.ts', 'stripe-webhook/index.ts', 'appstore-webhook/index.ts'], cwd: 'supabase/functions' },
   { name: 'deno tests',          cmd: 'deno', args: ['test', '--allow-all', '_shared', 'api', 'job-worker', 'cleanup-worker', 'stripe-webhook', 'appstore-webhook'], cwd: 'supabase/functions' },
   { name: 'shared catalog drift', cmd: 'node', args: ['scripts/sync-shared.mjs', '--check'] },
+  { name: 'JSON and Dart catalog drift', cmd: 'npm', args: ['run', 'check:catalog'] },
   { name: 'trend assets',        cmd: 'node', args: ['scripts/check-assets.mjs'] },
   { name: 'migration inventory', cmd: 'node', args: ['scripts/migration-inventory.mjs'] },
   { name: 'sql integration',     cmd: 'node', args: ['scripts/run-sql-tests.mjs'], skipWithout: 'VANSEN_LOCAL_DB' },
@@ -171,6 +172,38 @@ process.exit(failed.length || skipped.length ? 1 : 0);
 ```
 
 `scripts/run-sql-tests.mjs` runs every file in `supabase/tests/*.sql` against `$VANSEN_LOCAL_DB` with `ON_ERROR_STOP=1`, then every `*.sh` concurrency harness, and reports each by name.
+
+- [ ] **Step 3a: Implement the SQL runner, not just its command name**
+
+Create `scripts/run-sql-tests.mjs`:
+
+```js
+import { readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const connection = process.env.VANSEN_LOCAL_DB;
+if (!connection) throw new Error('VANSEN_LOCAL_DB is required; SQL cannot be skipped');
+const address = new URL(connection);
+if (!['localhost', '127.0.0.1', '[::1]'].includes(address.hostname)) throw new Error('SQL tests require a disposable local database');
+const directory = 'supabase/tests';
+const files = readdirSync(directory).filter((f) => /\.(sql|sh)$/.test(f)).sort();
+if (!files.some((f) => f.endsWith('.sql'))) throw new Error('No SQL tests discovered');
+const preflight = "select 1 / case when to_regclass('auth.users') is not null and to_regclass('storage.objects') is not null and to_regclass('cron.job') is not null and exists (select 1 from pg_extension where extname = 'pg_net') then 1 else 0 end";
+const execute = (command, args) => {
+  const result = spawnSync(command, args, { stdio: 'inherit', shell: false });
+  if (result.error || result.signal || result.status !== 0) throw new Error('SQL gate failed: ' + command);
+};
+execute('psql', [connection, '-X', '-v', 'ON_ERROR_STOP=1', '-c', preflight]);
+for (const file of files) {
+  console.log('SQL gate:', file);
+  if (file.endsWith('.sql')) {
+    execute('psql', [connection, '-X', '-v', 'ON_ERROR_STOP=1', '-f', directory + '/' + file]);
+    continue;
+  }
+  execute('bash', [directory + '/' + file]);
+}
+```
+
+Preflight should test `pg_net` extension/schema presence rather than assume a particular overloaded function signature if the pinned version differs; lock that signature in the baseline test. Create retained Node tests with injected command runner and temporary fixtures: missing env, remote URL, missing schemas/extensions, empty test list, failed SQL, failed shell harness, spawn error and signal all fail; all real checks succeed only on zero exits. No SQL/harness runs twice in CI. P8's request_snapshots.sql is included automatically. Never print connection strings/credentials.
 
 - [ ] **Step 4: Add the scripts**
 
@@ -352,18 +385,20 @@ app.get('/manifest', async (c) => {
   const capabilities = Object.fromEntries((models ?? []).map((m) => [m.id, m.enabled === true]));
   const { data: schema } = await admin.rpc('fn_schema_version');
   return c.json({
-    gitRevision: Deno.env.get('GIT_REVISION') ?? 'unknown',
+    gitRevision: deps.gitRevision,
     schemaVersion: schema ?? 'unknown',
     catalogVersion: CATALOG_VERSION,
     quoteVersion: QUOTE_VERSION,
-    workerVersion: Deno.env.get('WORKER_VERSION') ?? 'unknown',
+    workerVersion: deps.workerVersion,
     capabilities,
-    deployedAt: Deno.env.get('DEPLOYED_AT') ?? null,
+    deployedAt: deps.deployedAt,
   });
 });
 ```
 
-`fn_schema_version` returns the highest applied migration version, added in Task 4's migration. `GIT_REVISION` and `DEPLOYED_AT` are set as function secrets at deploy time by the runbook.
+Add `gitRevision:string`, `workerVersion:string`, `deployedAt:string|null` to ApiDeps and defaults in testDeps. Only `api/index.ts` reads the environment and supplies those values. Tests set those fields without touching global Deno.env. Match P8's public capabilities flags to this manifest; enabled catalog models alone cannot prove D3/D6.
+
+`fn_schema_version` is created in Task 3 by opening 0024 with that helper; Task 4 appends telemetry. Apply the complete final 0024 once during integration, never apply a partial migration and later change it. `GIT_REVISION` and `DEPLOYED_AT` are set as function secrets at deploy time by the runbook.
 
 - [ ] **Step 3: Run**
 
@@ -431,21 +466,21 @@ begin
   insert into public.alerts (kind, severity, detail) values (p_kind, p_severity, p_detail);
 end $$;
 
-/** Auto-resolve: an alert whose condition has not recurred for an hour closes
- * itself, so the list shows what is wrong NOW. */
-create or replace function public.fn_resolve_stale_alerts()
+/** Resolve only after a successful complete check confirms the condition clear. */
+create or replace function public.fn_resolve_checked_alerts(p_active jsonb)
 returns void language sql security definer set search_path = public as $$
   update public.alerts set resolved_at = now()
-   where resolved_at is null and last_seen_at < now() - interval '1 hour';
+   where resolved_at is null and last_seen_at < now() - interval '1 hour'
+     and kind not in (select jsonb_array_elements_text(p_active));
 $$;
 
 create or replace function public.fn_check_alerts()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_n int; v_found jsonb := '[]'::jsonb;
+declare v_n int; v_usd numeric(14,6); v_found jsonb := '[]'::jsonb;
 begin
   -- 1. Money taken, entitlement not granted. The single worst outcome in the
   --    product: the customer paid and got nothing.
-  select count(*) into v_n from public.fn_paid_unfulfilled();
+  select count(*) into v_n from public.fn_paid_unfulfilled(now() - interval '1 day');
   if v_n > 0 then
     perform public.fn_raise_alert('paid_unfulfilled', 'critical', jsonb_build_object('count', v_n));
     v_found := v_found || to_jsonb('paid_unfulfilled'::text);
@@ -464,8 +499,8 @@ begin
   -- 3. A job nobody is working on. Its lease expired repeatedly, which means
   --    the worker keeps dying on it.
   select count(*) into v_n from public.jobs
-   where attempts >= 5 and error is null
-     and state in ('ready', 'submitted', 'leased');
+   where state in ('submitting','reconciling')
+     and updated_at < now() - interval '10 minutes';
   if v_n > 0 then
     perform public.fn_raise_alert('jobs_stuck', 'warn', jsonb_build_object('count', v_n));
     v_found := v_found || to_jsonb('jobs_stuck'::text);
@@ -474,7 +509,8 @@ begin
   -- 4. Bytes we promised to delete and have not. This is a legal exposure,
   --    not a performance problem.
   select count(*) into v_n from public.deletion_outbox
-   where attempts >= 5 or created_at < now() - interval '24 hours';
+   where completed_at is null and not_before <= now()
+     and (attempts >= 5 or not_before < now() - interval '24 hours');
   if v_n > 0 then
     perform public.fn_raise_alert('deletion_stuck', 'critical', jsonb_build_object('count', v_n));
     v_found := v_found || to_jsonb('deletion_stuck'::text);
@@ -482,10 +518,15 @@ begin
 
   -- 5. Provider spend. Video is expensive enough that a loop costs real money
   --    within an hour.
-  select coalesce(sum(cost_usd), 0) into v_n from public.provider_expenses
-   where charged_at > now() - interval '1 hour';
-  if v_n > 50 then
-    perform public.fn_raise_alert('provider_burn', 'warn', jsonb_build_object('usd_last_hour', v_n));
+  select coalesce(sum(cost), 0) into v_usd from (
+    select coalesce(actual_usd,reserved_usd) as cost from public.provider_expenses
+    where incurred_at > now() - interval '1 hour'
+    union all
+    select coalesce(actual_usd,reserved_usd) from public.training_provider_expenses
+    where incurred_at > now() - interval '1 hour'
+  ) expenses;
+  if v_usd > 50 then
+    perform public.fn_raise_alert('provider_burn', 'warn', jsonb_build_object('usd_last_hour', v_usd));
     v_found := v_found || to_jsonb('provider_burn'::text);
   end if;
 
@@ -563,7 +604,7 @@ describe('R27: request deadlines and empty responses', () => {
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/api/api-service.spec.ts
 ```
 
-Expected: FAIL — the 204 test throws a JSON parse error and no signal is attached.
+Expected: the retained P1 204 regression already PASSES. Observe RED on the newly added deadline/error-ID behavior, then keep all cases GREEN.
 
 ```ts
 /** A read that has not answered in 30 seconds is not going to. */
@@ -584,7 +625,21 @@ export const UPLOAD_TIMEOUT_MS = 120_000;
     if (res.status === 204 || res.headers.get('content-length') === '0') return undefined as T;
 ```
 
-Give the gateway an `errorId` on every 5xx (`crypto.randomUUID().slice(0, 8)`), log it beside the real error, and return it to the client. A customer can then quote eight characters instead of describing a symptom.
+Add a request ID middleware before routes and use it in the common fail/error handler, with typed Hono context:
+
+```ts
+app.use('*', async (c, next) => {
+  c.set('requestId', crypto.randomUUID());
+  await next();
+  c.header('x-request-id', c.get('requestId'));
+});
+```
+
+Extend `fail` for 5xx to return `error:{code,message,errorId:requestId}`; the error logger records that same ID with safe operation/job/purchase references. Do not log auth tokens, provider payloads or user media. Add `api/error_id_test.ts`: inject a database error, assert 503/500 has a nonempty errorId, response header equals it, captured safe log contains it, and raw DB message/token is absent from the response. Ordinary expected 4xx stays readable.
+
+Create `_shared/alerts/delivery.ts`, `delivery_test.ts` and `alert_deliveries` outbox in 0024. Configure a user-approved HTTPS alert destination and secret via environment/Vault. Each new incident/resolution enqueues a stable delivery ID transactionally; use a unique partial index for one open incident per kind and an upsert to avoid concurrent duplicate incidents. Worker claims/acks deliveries with the P4 lease pattern, checks HTTP status, backs off on transient errors, keeps exhausted failures visible. P5 worker invokes this drainer after jobs/notifications once P9 is integrated. Missing destination makes alert delivery unhealthy, not passed. Test two claimers, destination 503, crash-after-send replay with the same ID, and an actual staging receiver acknowledgement. No message is sent while merely editing this plan.
+
+Add alert cases for stalled training, moderation_unavailable, notification dead letters and incomplete inventories. Do not auto-resolve incidents just because monitoring stopped: resolution requires a successful check that proves the condition clear; monitor heartbeat failure raises a separate incident.
 
 - [ ] **Step 4: Run both suites**
 
@@ -626,7 +681,8 @@ jobs:
       - run: npm test -- --watch=false
       - run: npx ng build --configuration production
       - run: node scripts/check-assets.mjs
-      - run: node scripts/sync-shared.mjs --check   # catalog drift, both directions
+      - run: node scripts/sync-shared.mjs --check
+      - run: npm run check:catalog
       - run: node scripts/migration-inventory.mjs
 
   edge:
@@ -645,43 +701,25 @@ jobs:
 
   database:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: supabase/postgres:15.8.1.040
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 10s
-          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - name: Apply every migration in order
+          cache: npm
+      - run: npm ci
+      - name: Start pinned full Supabase baseline
+        run: npm run db:test:start
+      - name: SQL and concurrency gates
         env:
-          VANSEN_LOCAL_DB: postgres://postgres:postgres@localhost:5432/postgres
-        run: |
-          for f in supabase/migrations/*.sql; do
-            echo "── $f"
-            psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f "$f"
-          done
-      - name: SQL integration tests
-        env:
-          VANSEN_LOCAL_DB: postgres://postgres:postgres@localhost:5432/postgres
+          VANSEN_LOCAL_DB: postgresql://postgres:postgres@127.0.0.1:54322/postgres
         run: node scripts/run-sql-tests.mjs
-      - name: Concurrency harnesses
-        env:
-          VANSEN_LOCAL_DB: postgres://postgres:postgres@localhost:5432/postgres
-        run: |
-          # Run each three times: a race that passes once has proven nothing.
-          for i in 1 2 3; do
-            ./supabase/tests/billing_concurrency.sh
-            ./supabase/tests/caps_concurrency.sh
-            ./supabase/tests/settlement_concurrency.sh
-          done
+      - name: Stop disposable stack
+        if: always()
+        run: npm run db:test:stop
 ```
+
+**Define the setup commands in Task 1/2.** Install Supabase CLI as an exact devDependency and record its version + container digests after local baseline proof. Add `db:test:start` / `db:test:stop` scripts invoking a new `scripts/supabase-test-stack.mjs`. It creates a disposable test project directory, copies the checked config, starts the full Supabase stack and applies the hash-verified bootstrap sequence from Task 2 using psql ON_ERROR_STOP. It must not rename tracked migrations or discard either 0008 body. Store a `supabase/tests/bootstrap-manifest.json` with ordered source paths/hashes and a separate test-only version mapping; start fails if a path/hash/mapping is missing. Use fixed local port 54322 and synthetic data only. This is a complete Supabase auth/storage/roles/pg_cron/pg_net baseline; no standalone postgres service. Stop targets only that test project. Retained Node tests cover missing Docker/CLI, migration failure and incomplete baseline.
 
 **Database prerequisites are part of the gate.** Use the local Supabase baseline verified in Task 2, with its auth/storage schemas, roles, `pg_cron` and `pg_net`; a bare Postgres container is not equivalent. Before adopting the database-job example above, prove the chosen image/bootstrap provides that baseline and record its pinned setup. Fail setup if required schemas/extensions are absent. Do not edit historical migrations or skip schedules to make CI green. Any new scheduling prerequisite belongs in an unapplied additive migration; exercise the schedules on staging and verify expected production cron names and recent successful runs after deployment.
 
@@ -728,7 +766,7 @@ Staging mechanics do not authorize a production deployment. Gate A's production-
 
 Builds and fake tensor outputs cannot replace these rows. For a later change, identify affected rows and rerun them against the final release artifact. Record any unavailable login/browser/device as BLOCKED.
 
-- [ ] **Step 4: Track Gate C and preserve decision D6**
+- [ ] **Step 4: Track Gate C and preserve decisions D3/D6**
 
 Link the mobile repository's MT-01…MT-09 and Gate C evidence; do not mark mobile ready from backend tests. A web-only rollout explicitly excludes mobile readiness. D6 means **completion notifications**, not worker leases: P4's outbox, P5's offline lifecycle and mobile MT-04's actual client receipt must pass before notification claims return on either platform. Include background/closed-client delivery, permission denied, duplicate delivery and retry after a send failure. If those prerequisites are unavailable, leave “We'll notify you” hidden; independently verified background completion may say “You can leave this page and return to check the result.”
 
@@ -755,13 +793,13 @@ Before Task 7 enables any family, require all applicable staging/browser/device 
 ## Task 7: Deploy, and stage the rollout
 
 **Files:**
-- Create: `docs/superpowers/plans/2026-09-20-release-runbook.md`
+- Modify: `docs/superpowers/plans/2026-09-20-release-runbook.md` (created in Task 6)
 
 **Every step here changes production and is the user's decision.** Present each, wait for a yes, then run it. Never batch them.
 
 - [ ] **Step 1: Write the runbook**
 
-Create `docs/superpowers/plans/2026-09-20-release-runbook.md` with the ordered procedure below, each step carrying its command, its verification and its rollback.
+Complete the existing `docs/superpowers/plans/2026-09-20-release-runbook.md` with the ordered procedure below, each step carrying its command, its verification and its rollback.
 
 **Order matters, and this is why:** migrations before functions, because a function calling a missing RPC fails every request; functions before crons, because a cron driving a missing function logs errors every minute; crons before flags, because a family enabled with no worker behind it takes money and produces nothing.
 
@@ -791,23 +829,17 @@ Ask the user to set each, one at a time, in the Supabase dashboard or via the CL
 | `RUNWAY_API_KEY` | Runway video | P3 |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | video storage | P4 |
 
-Then the database settings the crons read:
-
-```sql
-alter database postgres set app.job_worker_url = 'https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/job-worker';
-alter database postgres set app.cleanup_worker_url = 'https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/cleanup-worker';
-alter database postgres set app.service_role_key = '<set by the user, never printed>';
-```
+Configure Supabase Vault entries `job_worker_url`, `job_worker_secret`, `cleanup_worker_url`, `cleanup_worker_secret`; set matching Edge secrets `JOB_WORKER_SECRET` and `CLEANUP_WORKER_SECRET`. Use dedicated worker credentials, not a DB GUC containing the service-role key. The reviewed project/ref determines URLs; never assume a historical ref is the target. P5/P6 schedules read these exact Vault names and send `x-worker-secret`; handlers reject missing/mismatched values before claims. Set the approved alert destination/secret and verify one staging test delivery before production activation.
 
 - [ ] **Step 4: Create the R2 bucket and its CORS policy**
 
-The bucket does not exist yet. The user creates it and applies a CORS policy allowing `GET` and `HEAD` from the production origin only — not `*`, which would let any site stream our video egress.
+Use Task 2's current inventory to determine whether the bucket exists. Create it only if confirmed absent; inspect its existing configuration otherwise. The user reviews and applies a CORS policy allowing `GET` and `HEAD` from the production origin only — not `*`, which would let any site stream our video egress.
 
-Verify with a signed URL fetched from the production origin and from an unrelated one; the second must be refused.
+Verify browser CORS from the production origin and an unrelated origin; CORS limits browser access, not direct possession of a signed URL. Also verify signature expiry and private bucket access independently.
 
 - [ ] **Step 5: Deploy the functions**
 
-The MCP deploy tool is broken for `api`; use the CLI.
+Verify the available deployment tool at execution. The approved CLI commands below provide a concrete deployment path; historical MCP failure is not a current tool diagnosis.
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && supabase functions deploy api --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad
@@ -833,7 +865,7 @@ Expected: the `gitRevision` you just deployed and `schemaVersion` `0024`. If the
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_PROD_DB" -c "select jobname, schedule, active from cron.job order by jobname;"
 ```
 
-Expected, all active: `check_alerts`, `drive_cleanup_worker`, `drive_job_worker`, `fail_stale_persona_trainings`, `purge_lapsed_libraries`, `release_expired_leases`, and the stale-job sweeps. A missing name means a migration's guarded `do` block skipped its schedule; add it manually and record that.
+Expected, all active: `check_alerts`, `drive_cleanup_worker`, `drive_job_worker`, `reconcile_stale_persona_trainings`, `purge_lapsed_libraries`, `release_expired_leases`, and `reconcile_stale_jobs`. A missing schedule is a failed migration/configuration check. Diagnose and repair through the approved additive migration; never explain it away as a skipped guard. Inspect recent cron/HTTP successes, not just active flags.
 
 - [ ] **Step 7: Run the backfills**
 
@@ -853,15 +885,18 @@ Expected: zero orphans, zero leaks, zero unfulfilled purchases. **Any non-zero r
 
 Task 6's applicable shared, browser/device and staging checks must pass before enabling a family for its approved production smoke. Keep the release limited to that account/cohort until its production checks and reconciliation pass. A disabled tool or platform is explicitly excluded from readiness and sales claims.
 
-Every paid family starts disabled:
+New/unqualified rollout families start disabled. First export current flags and prepare a reviewed before/after list of EXACT family IDs and affected users/cohorts. Do not disable already-live image/edit families as an incidental migration. The source spec's staged paid-model gate applies to the candidate cohort/new capabilities; if broad maintenance is necessary, request that specific reviewed outage scope.
 
 ```sql
-update public.models set enabled = false where id not in ('flux');
+-- Only execute with the reviewed exact family ID bound to this psql variable.
+update public.models set enabled = false where id = :'reviewed_family_id';
 ```
+
+Preserve the prior flag value for rollback. Confirm actual model-table IDs from the inventory; display family names are not reliable row IDs.
 
 Then, **one family at a time**, in this order — cheapest and most-exercised first, so a mistake is cheap:
 
-1. `flux` (image, fal) — already live
+1. `flux` (image, fal) — confirm current live state from inventory
 2. `google` / Nano Banana (image, inline)
 3. `openai` / GPT Image (image, inline) — P3 rewrote this adapter, so watch it
 4. `upscaler`, then the four `edit-*` tools
@@ -887,7 +922,7 @@ Record each family's result in the evidence document. **Do not enable the next f
 
 - [ ] **Step 9: Rehearse the rollback**
 
-A rollback nobody has tried is a hope. On the local stack, rehearse and record:
+Rehearse first locally, then on the isolated STAGING deployment with synthetic data and the candidate/previous artifacts. Gate D requires the staging evidence:
 
 | Step | Expected |
 |---|---|
@@ -914,11 +949,11 @@ Record the exact output as one part of D7, alongside the deployed revision, migr
 
 **Files:**
 - Modify: `vansen.md`, `CLAUDE.md`, the punchlist, `README.md`
-- Create: `docs/superpowers/plans/2026-09-20-release-evidence.md`
+- Modify: `docs/superpowers/plans/2026-09-20-release-evidence.md` (created in Task 6)
 
 - [ ] **Step 1: Write the evidence record**
 
-Create `docs/superpowers/plans/2026-09-20-release-evidence.md`: the tested revision SHA, the date, the `npm run verify` output, the CI run link, every SQL and concurrency result, Task 6's complete Gate A–D evidence matrix, the reconciliation outputs, each family's rollout record, and the rollback/restore rehearsal table. This document is what "release ready" means from now on.
+Complete `docs/superpowers/plans/2026-09-20-release-evidence.md`: the tested revision SHA, the date, the `npm run verify` output, the CI run link, every SQL and concurrency result, Task 6's complete Gate A–D evidence matrix, the reconciliation outputs, each family's rollout record, and the rollback/restore rehearsal table. This document is what "release ready" means from now on.
 
 - [ ] **Step 2: Replace the aspirational claims**
 
