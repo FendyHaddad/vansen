@@ -91,15 +91,27 @@ describe('GenerationStore.applyJobUpdates notifications', () => {
     expect(notifMock.addMany).not.toHaveBeenCalled();
   });
 
-  it('cancel posts to /jobs/:id/cancel, marks the item cancelled and returns refunded credits', async () => {
-    const store = await makeWith([gen('g1', 'pending', 40)]);
-    apiMock.post.mockResolvedValue({ refundedCredits: 40, credits: { plan: 100, pack: 0 } });
+  it('cancel requests a stop and leaves the item pending until the worker answers', async () => {
+    const pending = {
+      ...gen('g1', 'pending', 40),
+      job: { cancellable: true, expectedS: 96, startedAt: '2026-07-13T00:00:00Z' },
+    };
+    const store = await makeWith([pending]);
+    apiMock.post.mockResolvedValue({
+      cancelling: true,
+      refundedCredits: 0,
+      credits: { plan: 100, pack: 0 },
+    });
+
     const refunded = await store.cancel('g1');
+
     expect(apiMock.post).toHaveBeenCalledWith('/jobs/g1/cancel', {});
-    expect(refunded).toBe(40);
-    expect(store.byId('g1')?.status).toBe('failed');
-    expect(store.byId('g1')?.error).toBe('cancelled');
-    expect(store.byId('g1')?.job).toBeUndefined();
+    // Nothing is refunded here: only a provider that confirms it stopped earns one.
+    expect(refunded).toBe(0);
+    expect(store.byId('g1')?.status).toBe('pending');
+    // The button is gone, but the job is still watched.
+    expect(store.byId('g1')?.job?.cancellable).toBe(false);
+    expect(store.pendingIds()).toContain('g1');
     expect(ledgerMock.setCredits).toHaveBeenCalledWith({ plan: 100, pack: 0 });
   });
 
@@ -125,5 +137,92 @@ describe('GenerationStore.applyJobUpdates notifications', () => {
     ]);
     expect(store.byId('v1')?.job?.progress).toBe(0.4);
     expect(notifMock.addMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('GenerationStore.create idempotency keys', () => {
+  const apiMock = { get: vi.fn(), post: vi.fn(), postForm: vi.fn(), delete: vi.fn() };
+  const ledgerMock = { setCredits: vi.fn() };
+  const mediaMock = { evict: vi.fn() };
+  const profileMock = { load: vi.fn().mockResolvedValue(undefined) };
+  const notifMock = { addMany: vi.fn() };
+
+  const request = {
+    op: 'generate' as const,
+    familyId: 'flux',
+    prompt: 'a cat',
+    batch: 1,
+    settings: { aspectRatio: '1:1' },
+  };
+
+  function make(): GenerationStore {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ApiService, useValue: apiMock },
+        { provide: LedgerService, useValue: ledgerMock },
+        { provide: MediaCache, useValue: mediaMock },
+        { provide: ProfileStore, useValue: profileMock },
+        { provide: NotificationStore, useValue: notifMock },
+      ],
+    });
+    return TestBed.inject(GenerationStore);
+  }
+
+  function keysUsed(): string[] {
+    return apiMock.post.mock.calls.map((call) => call[2]?.idempotencyKey);
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    apiMock.post.mockReset();
+    apiMock.post.mockResolvedValue({ items: [gen('a', 'pending')], credits: 100 });
+  });
+
+  it('a retry of the same submission reuses the key', async () => {
+    const store = make();
+    apiMock.post.mockRejectedValueOnce(new Error('network'));
+
+    await expect(store.create({ ...request })).rejects.toThrow('network');
+    await store.create({ ...request });
+
+    const keys = keysUsed();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it('an edited request gets a new key', async () => {
+    const store = make();
+    await store.create({ ...request });
+    await store.create({ ...request, prompt: 'a dog' });
+
+    const keys = keysUsed();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it('submitting the same prompt again after it succeeded is new work, not a replay', async () => {
+    const store = make();
+    await store.create({ ...request });
+    await store.create({ ...request });
+
+    const keys = keysUsed();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it('a double click shares the in-flight request instead of sending a second', async () => {
+    const store = make();
+    let release: (value: unknown) => void = () => {};
+    apiMock.post.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    const first = store.create({ ...request });
+    const second = store.create({ ...request });
+    release({ items: [gen('a', 'pending')], credits: 100 });
+
+    expect(await first).toEqual(await second);
+    expect(apiMock.post).toHaveBeenCalledTimes(1);
   });
 });

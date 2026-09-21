@@ -10,6 +10,12 @@ export type ServiceAccount = {
 export type PushEvent = {
   type: 'generation_done' | 'generation_failed';
   generationId: string;
+  /**
+   * The outbox row this push came from. Delivery is at least once — a crash
+   * between the send and the ack repeats it — so every client must deduplicate
+   * on this id. It is stable across retries of the same notification.
+   */
+  notificationId: string;
 };
 
 export function parseServiceAccount(raw: string | undefined): ServiceAccount | null {
@@ -32,7 +38,11 @@ export function fcmMessage(token: string, event: PushEvent) {
         title: done ? 'Generation complete' : 'Generation failed',
         body: done ? 'Your image is ready.' : 'Credits refunded.',
       },
-      data: { type: event.type, generationId: event.generationId },
+      data: {
+        type: event.type,
+        generationId: event.generationId,
+        notificationId: event.notificationId,
+      },
       android: { priority: 'HIGH' },
       apns: { payload: { aps: { sound: 'default' } } },
     },
@@ -116,6 +126,7 @@ export async function sendGenerationPush(
   const bearer = await accessToken(account);
   const url = `https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`;
   const stale: string[] = [];
+  const failures: string[] = [];
   for (const token of tokens) {
     const response = await fetch(url, {
       method: 'POST',
@@ -123,8 +134,21 @@ export async function sendGenerationPush(
       body: JSON.stringify(fcmMessage(token, event)),
     });
     const text = await response.text();
-    if (response.status === 404 || response.status === 410) stale.push(token);
-    if (!response.ok) console.error('fcm_send_failed', response.status, text.slice(0, 300));
+    if (response.status === 404 || response.status === 410) {
+      // The device is gone for good. That is a successful outcome for this
+      // send: the caller drops the token.
+      stale.push(token);
+      continue;
+    }
+    if (response.ok) continue;
+    // Anything else — a 429, a 503, a mint failure — is retryable, and
+    // swallowing it is how the outbox would record a delivery that never
+    // happened.
+    console.error('fcm_send_failed', response.status, text.slice(0, 300));
+    failures.push(`${response.status}`);
+  }
+  if (failures.length > 0) {
+    throw new Error(`fcm_send_failed ${failures.join(',')}`);
   }
   return stale;
 }

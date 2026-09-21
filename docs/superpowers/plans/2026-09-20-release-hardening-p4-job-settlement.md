@@ -67,7 +67,7 @@
   `CheckResult` gains `| { state: 'retryable_failure'; error: string; retryAfterSeconds?: number }`.
   `ProviderAdapter.cancel?(ref): Promise<CancelOutcome>` where `CancelOutcome = 'cancelled' | 'too_late' | 'unsupported' | 'unreachable'`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/providers/provider-errors_test.ts`:
 
@@ -116,7 +116,7 @@ Deno.test('a status embedded in a legacy adapter message is still read', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/provider-errors_test.ts
@@ -124,7 +124,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `Module not found "file:///.../_shared/providers/provider-errors.ts"`.
 
-- [ ] **Step 3: Write `_shared/providers/provider-errors.ts`**
+- [x] **Step 3: Write `_shared/providers/provider-errors.ts`**
 
 ```ts
 // Which provider failures are worth another attempt, and which are the answer.
@@ -184,7 +184,7 @@ export function classifyProviderError(e: unknown): FailureClass {
 }
 ```
 
-- [ ] **Step 4: Extend the provider contract**
+- [x] **Step 4: Extend the provider contract**
 
 In `_shared/providers/types.ts`, add to `CheckResult`:
 
@@ -209,7 +209,7 @@ export type CancelOutcome = 'cancelled' | 'too_late' | 'unsupported' | 'unreacha
   cancel?(providerRef: string): Promise<CancelOutcome>;
 ```
 
-- [ ] **Step 5: Run the test and check every adapter still compiles**
+- [x] **Step 5: Run the test and check every adapter still compiles**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/provider-errors_test.ts; deno check api/app.ts
@@ -229,7 +229,7 @@ Expected: `6 passed | 0 failed`, then `deno check` FAILS on the adapters whose `
 - Consumes: `ProviderError`, `classifyStatus`, `CancelOutcome` (Task 1).
 - Produces: `falAdapter.cancel` and `runwayAdapter.cancel` returning a `CancelOutcome`; both `check` implementations returning `retryable_failure` where they previously threw or reported `failed`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/providers/cancel_contract_test.ts`:
 
@@ -322,7 +322,7 @@ Deno.test('runway: cancel reports an outcome for every status', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers/cancel_contract_test.ts
@@ -330,7 +330,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `cancel` returns `undefined`, and `check` throws where `retryable_failure` is expected.
 
-- [ ] **Step 3: Update `fal.ts`**
+- [x] **Step 3: Update `fal.ts`**
 
 Add the import:
 
@@ -406,7 +406,7 @@ Replace `cancel`:
   },
 ```
 
-- [ ] **Step 4: Update `runway.ts` the same way**
+- [x] **Step 4: Update `runway.ts` the same way**
 
 ```ts
   /** Runway can cancel a running task; a 409 means it already finished. */
@@ -427,7 +427,7 @@ Replace `cancel`:
 
 and classify its `check` failures with `classifyStatus` exactly as fal now does.
 
-- [ ] **Step 5: Run the test**
+- [x] **Step 5: Run the test**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/providers
@@ -453,7 +453,7 @@ Expected: every provider test file passes, including the existing video adapter 
   `p_outcome` is `'done'` or `'failed'`. Returns `{settled: bool, previous: text, refunded: int}`.
   `fn_fail_job` is rewritten as a thin wrapper over `fn_settle_job` so the existing cron keeps working unchanged.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0019_job_settlement.sql`:
 
@@ -615,7 +615,7 @@ grant execute on function public.fn_settle_job(uuid, text, text, text, jsonb, te
   to service_role;
 ```
 
-- [ ] **Step 2: Write the SQL race proof**
+- [x] **Step 2: Write the SQL race proof**
 
 Create `supabase/tests/job_settlement.sql`:
 
@@ -690,7 +690,7 @@ end $$;
 rollback;
 ```
 
-- [ ] **Step 3: Apply and run**
+- [x] **Step 3: Apply and run**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/migrations/0019_job_settlement.sql && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/tests/job_settlement.sql
@@ -698,7 +698,7 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1
 
 Expected: `CREATE TABLE`/`CREATE FUNCTION` lines, then two `DO` lines and `ROLLBACK` with no assertion failure.
 
-- [ ] **Step 4: Prove the race with two real sessions**
+- [x] **Step 4: Prove the race with two real sessions**
 
 Create `supabase/tests/settlement_concurrency.sh`, modelled on `billing_concurrency.sh` from P2: insert one pending generation and job, fire `fn_settle_job(..., 'done', ...)` and `fn_settle_job(..., 'failed', ...)` from two backgrounded `psql` processes, then assert the generation has exactly one terminal status and `ledger_entries` has either zero refund rows (done won) or exactly one pair (failed won) — never both a `done` status and a refund.
 
@@ -772,7 +772,7 @@ Expected: `OK: single terminal transition (...)`. Run it three times — a race 
   ```
   Both **throw** on an RPC error. A settlement whose result is unknown must not be treated as done.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/_shared/jobs/settlement_test.ts`:
 
@@ -842,7 +842,7 @@ Deno.test('a null rpc result throws rather than reporting a phantom settlement',
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/jobs/settlement_test.ts
@@ -850,7 +850,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _
 
 Expected: FAIL — `Module not found "file:///.../_shared/jobs/settlement.ts"`.
 
-- [ ] **Step 3: Write `_shared/jobs/settlement.ts`**
+- [x] **Step 3: Write `_shared/jobs/settlement.ts`**
 
 ```ts
 // The only way a generation becomes terminal.
@@ -919,7 +919,7 @@ export function settleFailed(
 }
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared/jobs/settlement_test.ts
@@ -939,7 +939,7 @@ Expected: `5 passed | 0 failed`. User commits.
 - Consumes: `settleDone`, `settleFailed` (Task 4); `createApp`/`testDeps`/`FakeStorage`.
 - Produces: `finishJob` never writes `done` without a verified upload; `MAX_VIDEO_BYTES` and `MAX_IMAGE_BYTES` exported from `_shared/storage/index.ts`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/api/settlement_routes_test.ts`:
 
@@ -1195,7 +1195,7 @@ Deno.test('losing the settlement race drops the object instead of overwriting th
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/settlement_routes_test.ts
@@ -1203,7 +1203,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL on every assertion — the storage error is ignored, retryable failures refund, and the cancel route refunds regardless of outcome.
 
-- [ ] **Step 3: Rewrite `finishJob`**
+- [x] **Step 3: Rewrite `finishJob`**
 
 In `app.ts`:
 
@@ -1298,7 +1298,7 @@ import { settleDone, settleFailed } from './_shared/jobs/settlement.ts';
 import { classifyProviderError } from './_shared/providers/provider-errors.ts';
 ```
 
-- [ ] **Step 4: Cap the video download before it is buffered**
+- [x] **Step 4: Cap the video download before it is buffered**
 
 In `_shared/storage/index.ts`, add:
 
@@ -1392,7 +1392,7 @@ The retry-with-attempts block above it stays, but its terminal branch uses the s
     }
 ```
 
-- [ ] **Step 5: Stop `GET /jobs` refunding on a thrown check**
+- [x] **Step 5: Stop `GET /jobs` refunding on a thrown check**
 
 Replace the catch (evidence lines 834-838):
 
@@ -1413,7 +1413,7 @@ Replace the catch (evidence lines 834-838):
     }
 ```
 
-- [ ] **Step 6: Make the cancel route act on the outcome**
+- [x] **Step 6: Make the cancel route act on the outcome**
 
 Replace the adapter-cancel block and the settlement that follows it:
 
@@ -1447,7 +1447,7 @@ Replace the adapter-cancel block and the settlement that follows it:
 
 Before settlement, return readable 409 for `unsupported` when dispatch may have started; refund only a provably unsubmitted job or a confirmed provider cancellation. An inline provider request can still be in flight. P5 replaces route-side cancellation with a lease-owned cancellation request.
 
-- [ ] **Step 7: Check final persistence in save/import and own shared finalization**
+- [x] **Step 7: Check final persistence in save/import and own shared finalization**
 
 The upload errors in `/edits/save` and `/library/import` are already checked in this checkout. The unchecked final `generations.update({media_path})` is the defect. Retain checked upload handling and replace that final write in both routes with:
 
@@ -1483,7 +1483,7 @@ Import `SupabaseClient`, storage/provider types from the existing shared modules
 
 Add shared-store tests: HTTP error, wrong MIME, zero bytes, observed/declaration mismatch, stream over cap without length, failed storage, failed settlement RPC, stale lease, and a losing attempt cannot delete/overwrite the winner. Apply the same bounded-reader policy to remote images. Byte caps must include peak allocation (chunks plus destination) and be qualified on the actual edge runtime; 512 MiB is a draft ceiling, not proof it fits.
 
-- [ ] **Step 8: Run the tests**
+- [x] **Step 8: Run the tests**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts api/app.ts && deno test --allow-all api/settlement_routes_test.ts
@@ -1491,7 +1491,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno check api/index.ts
 
 Expected: `10 passed | 0 failed`.
 
-- [ ] **Step 9: Run every suite**
+- [x] **Step 9: Run every suite**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all _shared api stripe-webhook appstore-webhook && cd .. && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f tests/job_settlement.sql && ./tests/settlement_concurrency.sh
@@ -1507,11 +1507,11 @@ Expected: all green. Record the Deno count in the verification log. User commits
 
 **Interfaces:** `drainNotifications(deps, limit): Promise<void>`; deps contain `admin`, `account`, and `sendPush: typeof sendGenerationPush`. Keep the actual three-argument push API: `sendPush(account, tokens, event)`. Extend `PushEvent` with stable `notificationId: string`; retain `type` and `generationId`. Include notificationId in `fcmMessage(...).message.data`, and test its serialization so receiving clients can actually deduplicate. P5 schedules the drainer; GET routes do no delivery work.
 
-- [ ] **Step 1: Add real concurrent-claim tests before the migration**
+- [x] **Step 1: Add real concurrent-claim tests before the migration**
 
 Two SQL sessions claim the same unsent row: exactly one lease is returned. After expiry a new lease can claim; the old token cannot mark sent. Failed delivery remains unsent with next-run/backoff; exhausted retries become dead letter, never fake success. User cancellation creates no failure notification. Test an injected push implementation with signature `(_account, _tokens, event)`, asserting `event.notificationId`.
 
-- [ ] **Step 2: Add atomic claim/ack RPCs**
+- [x] **Step 2: Add atomic claim/ack RPCs**
 
 ```sql
 create function public.fn_claim_notifications(p_limit int)
@@ -1545,7 +1545,7 @@ grant execute on function public.fn_claim_notifications(int) to service_role;
 grant execute on function public.fn_ack_notification(uuid, uuid, text) to service_role;
 ```
 
-- [ ] **Step 3: Implement delivery using the leased rows**
+- [x] **Step 3: Implement delivery using the leased rows**
 
 For each claimed row, query that owner's devices and check the query error. Invoke the three-argument API:
 
@@ -1561,7 +1561,7 @@ On success delete only returned stale tokens and acknowledge with the current to
 
 External push is **at least once**: a crash after send but before ack can repeat it. Require receiving clients to deduplicate by notification ID; P9/D6 cannot advertise duplicate-free notifications without that client evidence. Database settlement/outbox creation remains exactly once.
 
-- [ ] **Step 4: Run focused checks and retain D6 evidence**
+- [x] **Step 4: Run focused checks and retain D6 evidence**
 
 Run `deno test --allow-all _shared/jobs/notifications_test.ts _shared/push_test.ts` from `supabase/functions` and `psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/notification_outbox.sql`. Exercise two drainers and crash-after-send in staging during P9. D6 additionally requires mobile MT-04 receipt and deep-link proof. User commits.
 
@@ -1571,7 +1571,7 @@ Run `deno test --allow-all _shared/jobs/notifications_test.ts _shared/push_test.
 
 This task writes no new code. It is the evidence the exit criteria depend on, and its results belong in the P9 release runbook.
 
-- [ ] **Step 1: Write the rehearsal log**
+- [x] **Step 1: Write the rehearsal log**
 
 Create `docs/superpowers/plans/2026-09-20-settlement-verification-log.md` with a row per scenario and columns for date, method, expected, observed:
 
@@ -1589,11 +1589,11 @@ Create `docs/superpowers/plans/2026-09-20-settlement-verification-log.md` with a
 | Wrong content type | Serve `text/html` from the result URL | Refused before buffering; retried, then refunded |
 | Duplicate notification delivery | Drain the outbox twice concurrently | One push per generation |
 
-- [ ] **Step 2: Run every row and fill the log**
+- [x] **Step 2: Run every row and fill the log**
 
 Any row that cannot be run is recorded as **not run** with its reason, never as passing.
 
-- [ ] **Step 3: Confirm no orphaned media remains after the rehearsal**
+- [x] **Step 3: Confirm no orphaned media remains after the rehearsal**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -t -A -c "
@@ -1608,12 +1608,12 @@ Expected: `0`. A non-zero result means a `done` row with no media survived the r
 
 ## Exit criteria for P4
 
-- [ ] A storage write failure produces a `failed` generation and a refund, never a `done` row with no media — proven by route tests and a real read-only-bucket run.
-- [ ] `select count(*) from generations where status='done' and media_path is null` is zero after the failure rehearsal.
-- [ ] A 429, a network error, a timeout and a CDN download failure all leave the job pending with no refund; only a genuine provider rejection refunds.
-- [ ] A cancel the provider did not confirm returns 503 `cancel_unconfirmed` with no refund; a cancel it accepted refunds exactly once; a render already in progress returns 409.
-- [ ] Two settlements racing on one job produce one terminal status, one refund at most, and one notification — proven by `settlement_concurrency.sh` run three times.
-- [ ] Every terminal transition, including the ones made by the stale-job cron, queues exactly one notification, and a push failure never fails a request.
-- [ ] `deno test --allow-all _shared api stripe-webhook appstore-webhook` is green; the SQL settlement tests are green.
+- [ ] A storage write failure produces a `failed` generation and a refund, never a `done` row with no media — proven by route tests and a real read-only-bucket run. *(Route tests done; the real read-only-bucket run is blocked — no staging project.)*
+- [x] `select count(*) from generations where status='done' and media_path is null` is zero after the failure rehearsal. *(0 on the local database, 2026-09-21.)*
+- [x] A 429, a network error, a timeout and a CDN download failure all leave the job pending with no refund; only a genuine provider rejection refunds.
+- [x] A cancel the provider did not confirm returns 503 `cancel_unconfirmed` with no refund; a cancel it accepted refunds exactly once; a render already in progress returns 409.
+- [x] Two settlements racing on one job produce one terminal status, one refund at most, and one notification — proven by `settlement_concurrency.sh` run three times. *(Run four times; both branches reached.)*
+- [x] Every terminal transition, including the ones made by the stale-job cron, queues exactly one notification, and a push failure never fails a request. *(The cron's `fn_fail_job` now delegates to `fn_settle_job`; no request pushes at all. Delivery itself is not scheduled until P5.)*
+- [x] `deno test --allow-all _shared api stripe-webhook appstore-webhook` is green (267 passed); the SQL settlement tests are green.
 
 **Known carry-forward:** submissions are still not idempotent, jobs are still inserted outside the charge transaction (a crash between the two still orphans a generation the sweep must catch), and progress still depends on a client polling `GET /jobs`. P5 adds the reservation transaction, the idempotency key and the worker. Deletion still leaves stored objects behind; P6 covers it.

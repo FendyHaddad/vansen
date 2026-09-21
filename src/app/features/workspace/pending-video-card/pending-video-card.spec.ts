@@ -1,6 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import type { GenerationItem } from '../../../core/generations/generation-store';
-import { PendingVideoCard, easedProgress, phaseLabel } from './pending-video-card';
+import {
+  RELEASE_CAPABILITIES,
+  type ReleaseCapabilityManifest,
+} from '../../../core/release/release-capabilities';
+import { PendingVideoCard, backgroundNote, easedProgress, phaseLabel } from './pending-video-card';
 
 const started = Date.parse('2026-09-06T10:00:00Z');
 
@@ -30,6 +34,46 @@ describe('pending video helpers', () => {
   });
 });
 
+describe('background-completion copy', () => {
+  function noteFor(manifest: ReleaseCapabilityManifest | null): string {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: RELEASE_CAPABILITIES, useValue: manifest }],
+    });
+    const fixture = TestBed.createComponent(PendingVideoCard);
+    fixture.componentRef.setInput('item', pending());
+    fixture.componentRef.setInput('now', started + 1000);
+    fixture.detectChanges();
+    return (fixture.nativeElement as HTMLElement).querySelector('.pv-note')!.textContent!.trim();
+  }
+
+  it('promises nothing when the manifest is missing or unreachable', () => {
+    expect(noteFor(null)).toBe('Keep this page open while it renders.');
+  });
+
+  it('promises nothing when background completion is not verified', () => {
+    expect(noteFor({ backgroundCompletion: false, completionNotifications: true }))
+      .toBe('Keep this page open while it renders.');
+  });
+
+  it('allows leave-and-return once background completion is verified', () => {
+    expect(noteFor({ backgroundCompletion: true }))
+      .toBe('You can leave this page and return to check the result.');
+  });
+
+  it('allows notification wording only when BOTH are verified', () => {
+    expect(noteFor({ backgroundCompletion: true, completionNotifications: true }))
+      .toBe("You can leave this page. We'll notify you when it's ready.");
+  });
+
+  it('never promises notifications on background completion alone', () => {
+    // D6 stays unavailable until delivery is proven on the device, whatever
+    // the worker can do.
+    expect(backgroundNote(true, false)).not.toContain('notify');
+    expect(backgroundNote(false, false)).not.toContain('notify');
+  });
+});
+
 describe('PendingVideoCard', () => {
   function make(item: GenerationItem, nowMs: number) {
     const fixture = TestBed.createComponent(PendingVideoCard);
@@ -39,11 +83,11 @@ describe('PendingVideoCard', () => {
     return fixture;
   }
 
-  it('shows phase, eased bar and leave-note', () => {
+  it('shows phase, eased bar and a note', () => {
     const fixture = make(pending(), started + 48_000);
     const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.pv-phase')!.textContent).toContain('Rendering');
-    expect(el.querySelector('.pv-note')!.textContent).toContain('You can leave this page');
+    expect(el.querySelector('.pv-note')!.textContent).toContain('Keep this page open');
     const bar = el.querySelector('.pv-bar-fill') as HTMLElement;
     expect(bar.style.getPropertyValue('--p')).not.toBe('');
   });

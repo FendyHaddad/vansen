@@ -12,6 +12,21 @@
 
 **Evidence boundary:** Automated checks, authenticated browser/device qualification, staging rehearsals and production verification are separate records. Every applicable item in source-spec section 8 needs evidence; a passing build, mocked provider or manifest cannot close another category.
 
+
+## BLOCKING DECISION carried in from P3: the FLUX price
+
+P3 changed FLUX's provider cost from a flat $0.03/$0.06/$0.12 per resolution
+tier to fal's published $0.012 per megapixel, billed on the pixels actually
+requested. The owner flagged on 2026-09-21 that **the old numbers may have been
+intentional**, not a stale guess.
+
+This must be decided before release: it changes what customers are charged
+(1MP: 5 -> 3 credits; "4MP" 16:9: 20 -> 5) and makes the price vary by aspect
+ratio within one resolution label. Full context and the exact revert recipe are
+in `docs/superpowers/specs/2026-09-20-provider-capability-record.md`, section
+"OPEN: revisit the FLUX price before release".
+
+
 ## Global Constraints
 
 - **Never commit, branch, or push.** Every task ends with "user commits". No `git commit` steps.

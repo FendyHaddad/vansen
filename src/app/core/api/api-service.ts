@@ -15,6 +15,14 @@ export class ApiError extends Error {
 
 export type TokenProvider = () => Promise<string | null>;
 
+export interface RequestOptions {
+  /**
+   * Makes a retry safe: the server answers a repeat with the first result
+   * rather than charging and generating again.
+   */
+  idempotencyKey?: string;
+}
+
 async function supabaseToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
@@ -60,8 +68,8 @@ export class ApiService {
     return this.request<T>('GET', path);
   }
 
-  post<T>(path: string, body: unknown): Promise<T> {
-    return this.request<T>('POST', path, body);
+  post<T>(path: string, body: unknown, opts?: RequestOptions): Promise<T> {
+    return this.request<T>('POST', path, body, opts);
   }
 
   patch<T>(path: string, body: unknown): Promise<T> {
@@ -85,13 +93,19 @@ export class ApiService {
     return this.handle<T>('POST', path, response);
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: RequestOptions,
+  ): Promise<T> {
     const token = await this.tokenProvider();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-vansen-client': 'web',
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
     const response = await this.fetch(method, path, {
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),

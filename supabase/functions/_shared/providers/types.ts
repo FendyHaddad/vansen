@@ -48,7 +48,9 @@ export type CheckResult =
       width?: number;
       height?: number;
     }
-  | { state: 'failed'; error: string };
+  | { state: 'failed'; error: string }
+  /** The provider is briefly unavailable. Poll again; do NOT refund. */
+  | { state: 'retryable_failure'; error: string; retryAfterSeconds?: number };
 
 export interface SubmitResult {
   providerRef: string;
@@ -57,13 +59,20 @@ export interface SubmitResult {
   interactionId?: string;
 }
 
+/**
+ * What actually happened when we asked the provider to stop.
+ * `unreachable` is the important one: it must never produce a refund, because
+ * the job is probably still running and will still bill us.
+ */
+export type CancelOutcome = 'cancelled' | 'too_late' | 'unsupported' | 'unreachable';
+
 export interface ProviderAdapter {
   readonly provider: ProviderName;
   /** Start async work. May return an inline result when the provider answers synchronously. */
   submit(ctx: SubmitCtx): Promise<SubmitResult>;
   check(providerRef: string): Promise<CheckResult>;
   /** Optional. Providers that cannot cancel omit it (Veo, Omni). */
-  cancel?(providerRef: string): Promise<void>;
+  cancel?(providerRef: string): Promise<CancelOutcome>;
 }
 
 export function isUrlResult(r: CheckResult): r is Extract<CheckResult, { url: string }> {

@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert';
-import { FakeDb, OTHER_USER, TEST_USER } from '../testing/fakes.ts';
+import { FakeDb, OTHER_USER, TEST_USER } from './testing/fakes.ts';
 import { isCanonicalUploadPath, resolveOwnedUpload } from './reference-resolver.ts';
 
 const MINE = `${TEST_USER}/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png`;

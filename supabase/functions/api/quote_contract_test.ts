@@ -1,6 +1,7 @@
 import { assertEquals } from 'jsr:@std/assert';
 import { createApp } from './app.ts';
 import { fakeAdapter, FakeDb, TEST_USER, testDeps } from './testing/fakes.ts';
+import { runWorkerTick } from './_shared/testing/worker.ts';
 import { CATALOG_VERSION, familyById } from './_shared/model-families.ts';
 
 const AUTH = { authorization: 'Bearer test-token' };
@@ -15,22 +16,13 @@ function ready(db: FakeDb, familyId: string) {
     },
   ];
   db.tables.models = [{ id: familyId, enabled: true, min_plan: 'studio' }];
-  db.rpcHandlers.fn_charge_and_generate = (args) =>
-    (args.p_items as Record<string, unknown>[]).map((item, i) => ({
-      id: `g${i}`,
-      user_id: TEST_USER,
-      kind: item.kind,
-      family_id: item.familyId,
-      family_name: item.familyName,
-      op: item.op,
-      prompt: item.prompt,
-      settings: item.settings,
-      price_credits: item.priceCredits,
-      status: 'pending',
-      media_path: null,
-    }));
 }
 
+/**
+ * Submit, then run one worker tick. Since P5 the route reserves and returns;
+ * the provider is called by the worker, so the price and the request it paid
+ * for can only be compared after the tick.
+ */
 async function submitOnce(familyId: string, settings: Record<string, unknown>) {
   const provider = fakeAdapter();
   const deps = testDeps({ adapterFor: () => provider.adapter });
@@ -42,11 +34,12 @@ async function submitOnce(familyId: string, settings: Record<string, unknown>) {
     headers: { ...AUTH, 'content-type': 'application/json' },
     body: JSON.stringify({ op: 'generate', familyId, prompt: 'a cat', batch: 1, settings }),
   });
-  // A refused combination never reaches the charge, so this is read lazily.
-  const charge = db.rpcCalls.find((r) => r.name === 'fn_charge_and_generate');
-  const charged = charge
-    ? (charge.args.p_items as Record<string, unknown>[])[0]
+  // A refused combination never reaches the reservation, so this is read lazily.
+  const reserve = db.rpcCalls.find((r) => r.name === 'fn_reserve_generation');
+  const charged = reserve
+    ? (reserve.args.p_items as Record<string, unknown>[])[0]
     : undefined;
+  if (res.status === 202) await runWorkerTick(db, { adapterFor: () => provider.adapter });
   return { res, provider, charged };
 }
 
@@ -65,7 +58,7 @@ Deno.test('every selectable image combination charges what it sends', async () =
           });
           // A combination the catalog offers but the provider cannot render is
           // a catalog defect; it must be refused, never charged.
-          if (res.status !== 200) {
+          if (res.status !== 202) {
             assertEquals(
               res.status,
               400,
@@ -124,5 +117,5 @@ Deno.test('a gpt-image resolution the chosen version cannot render is refused, n
     }),
   });
   assertEquals(res.status, 400);
-  assertEquals(db.rpcCalls.some((r) => r.name === 'fn_charge_and_generate'), false);
+  assertEquals(db.rpcCalls.some((r) => r.name === 'fn_reserve_generation'), false);
 });

@@ -131,7 +131,7 @@ prove reaches the provider and changes the output comes out of the catalog.
 | flux — which endpoint | **APPROVED: move to `fal-ai/flux-2`** | Owner decision 2026-09-21. This is what the blurb and the per-megapixel price story already describe. `slugFor` in `fal.ts` changes with it. |
 | flux resolution 1MP/2MP/4MP | **wire via `image_size: {width,height}`** | 512–2048 ceiling means 4MP = 2048×2048 exactly; 1MP = 1024×1024; 2MP = 1448×1448. Dimensions derive from the chosen aspect ratio at the target megapixel count, clamped to 512–2048. |
 | flux aspectRatio | **wire via `image_size`** | Currently dead on both endpoints. Derive WxH from ratio × target megapixels. |
-| flux provider cost | **re-derive** | Catalog assumes $0.03/$0.06/$0.12. FLUX.2 quotes $0.012/MP → $0.012/$0.024/$0.048. The margin formula is being fed a cost ~2.5× too high. |
+| flux provider cost | **re-derived — OWNER WANTS THIS REVISITED** | Catalog assumes $0.03/$0.06/$0.12. FLUX.2 quotes $0.012/MP → $0.012/$0.024/$0.048. The margin formula is being fed a cost ~2.5× too high. |
 | flux reference image | **APPROVED: remove** | Owner decision 2026-09-21. `fal-ai/flux-2` documents no reference parameter, so `capabilities.imageInput` becomes `false` for FLUX and the composer stops offering a reference on that family. P8 owns the copy change. |
 | seedream resolution 1K/2K/4K | **wire** | `auto_2K` / `auto_4K` are real enum values. |
 | seedream aspectRatio | **wire via `image_size`** | Currently dead. |
@@ -195,3 +195,29 @@ done
 
 Paste the outputs here and the smoke column gets filled, the decisions get
 finalised, and P3 Tasks 2–6 can proceed.
+
+
+---
+
+## OPEN: revisit the FLUX price before release
+
+**Raised by the owner 2026-09-21.** P3 re-derived FLUX's provider cost from
+fal's published $0.012/MP, on the assumption that the old flat
+$0.03/$0.06/$0.12 tiers were a stale guess. **The owner believes those numbers
+may have been deliberate** — a margin buffer, a different endpoint's rate, or a
+negotiated price — not an error.
+
+What the change did, so it can be judged or undone in one place:
+- `providerCost` for `flux` now returns `FLUX_USD_PER_MP x actual megapixels`,
+  using `FLUX_DIMS` in `src/app/core/catalog/model-families.ts`.
+- 1MP square: 5 credits -> 3. "4MP" 16:9: 20 credits -> 5.
+- Price now varies by aspect ratio within one resolution label, because the
+  512-2048 clamp means only 1:1 reaches 4MP.
+
+To restore the old behaviour: set `providerCost` back to the flat
+`{'1MP': 0.03, '2MP': 0.06, '4MP': 0.12}` table, revert the expectation in
+`src/app/core/catalog/model-families.spec.ts`, bump `CATALOG_VERSION`, and
+re-run `npm run sync-shared` + `npm run export-catalog`. The wiring work (the
+request actually carrying the size) is independent and stays either way.
+
+**Decide before the P9 release gate.**

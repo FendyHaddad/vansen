@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideX } from '@ng-icons/lucide';
 import type { JobPhase } from '../../../core/api/dtos';
 import type { GenerationItem } from '../../../core/generations/generation-store';
+import { ReleaseCapabilities } from '../../../core/release/release-capabilities';
 
 const EASE_CAP = 0.9;
 const LATE_FACTOR = 2;
@@ -24,6 +25,17 @@ export function phaseLabel(phase: JobPhase | undefined, elapsedS: number, expect
   return 'Rendering';
 }
 
+/**
+ * What this card may promise, given what the deployment has been verified to
+ * do. The unverified wording is not a weaker promise, it is the absence of
+ * one: a render only survives a closed tab when a worker is actually running.
+ */
+export function backgroundNote(background: boolean, notifications: boolean): string {
+  if (notifications) return "You can leave this page. We'll notify you when it's ready.";
+  if (background) return 'You can leave this page and return to check the result.';
+  return 'Keep this page open while it renders.';
+}
+
 @Component({
   selector: 'app-pending-video-card',
   imports: [NgIcon],
@@ -37,6 +49,7 @@ export class PendingVideoCard {
   readonly now = input.required<number>();
   readonly cancel = output<string>();
 
+  private readonly release = inject(ReleaseCapabilities);
   private readonly job = computed(() => this.item().job);
   readonly elapsedS = computed(() => {
     const start = Date.parse(this.job()?.startedAt ?? this.item().createdAt);
@@ -52,6 +65,12 @@ export class PendingVideoCard {
     return ` · ${q} ahead`;
   });
   readonly cancellable = computed(() => this.job()?.cancellable ?? false);
+  readonly note = computed(() =>
+    backgroundNote(
+      this.release.backgroundCompletion(),
+      this.release.completionNotifications(),
+    )
+  );
   readonly eta = computed(() => {
     const left = Math.max(0, this.expectedS() - this.elapsedS());
     if (this.elapsedS() > this.expectedS()) return '';

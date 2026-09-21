@@ -4,7 +4,9 @@
 // stored for this purpose, and moderation allowed it.
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
-export type UploadPurpose = 'reference' | 'persona-photo';
+// 'mask' joined the list in 0020: an edit mask is a stored, owned object like
+// any other input, not base64 carried in a request body.
+export type UploadPurpose = 'reference' | 'persona-photo' | 'mask';
 export type ReferenceError = 'not_found' | 'not_owned' | 'not_moderated' | 'wrong_purpose';
 
 export interface OwnedUpload {

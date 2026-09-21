@@ -64,7 +64,7 @@
   ```
   Client side: `ApiService.post(path, body, opts?: { idempotencyKey?: string })` sets the header.
 
-- [ ] **Step 1: Write the failing Deno test**
+- [x] **Step 1: Write the failing Deno test**
 
 Create `supabase/functions/api/services/idempotency_test.ts`:
 
@@ -109,7 +109,7 @@ Deno.test('a different batch size hashes differently', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/services/idempotency_test.ts
@@ -117,7 +117,7 @@ cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all a
 
 Expected: FAIL — `Module not found "file:///.../api/services/idempotency.ts"`.
 
-- [ ] **Step 3: Write `api/services/idempotency.ts`**
+- [x] **Step 3: Write `api/services/idempotency.ts`**
 
 ```ts
 // A submission is identified by (user, idempotency key, body hash).
@@ -157,7 +157,7 @@ export async function bodyHash(payload: unknown): Promise<string> {
 }
 ```
 
-- [ ] **Step 4: Write the failing Angular test**
+- [x] **Step 4: Write the failing Angular test**
 
 Append to `src/app/core/api/api-service.spec.ts`:
 
@@ -181,7 +181,7 @@ it('sends no idempotency header when none is given', async () => {
 });
 ```
 
-- [ ] **Step 5: Run to verify it fails**
+- [x] **Step 5: Run to verify it fails**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
@@ -189,7 +189,7 @@ cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false
 
 Expected: FAIL — `post` takes two arguments.
 
-- [ ] **Step 6: Add the option to `ApiService`**
+- [x] **Step 6: Add the option to `ApiService`**
 
 In `src/app/core/api/api-service.ts`:
 
@@ -225,7 +225,7 @@ export interface RequestOptions {
   }
 ```
 
-- [ ] **Step 7: Make `GenerationStore.create` generate a key**
+- [x] **Step 7: Make `GenerationStore.create` generate a key**
 
 In `src/app/core/generations/generation-store.ts`:
 
@@ -244,7 +244,7 @@ In `src/app/core/generations/generation-store.ts`:
   }
 ```
 
-- [ ] **Step 8: Run both suites**
+- [x] **Step 8: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all api/services/idempotency_test.ts
@@ -265,7 +265,7 @@ Expected: vitest `244 passed`; deno `6 passed | 0 failed`. User commits.
 - `fn_reserve_training(p_user uuid,p_persona uuid,p_key uuid,p_hash text,p_payload jsonb) returns jsonb`: atomically charges the existing persona and creates one `training_jobs` row.
 - All RPCs revoke public/anon/authenticated execution and grant service_role only. Enable RLS on all new tables.
 
-- [ ] **Step 1: Retain SQL RED cases for replay, rollback and caps**
+- [x] **Step 1: Retain SQL RED cases for replay, rollback and caps**
 
 Use seeded local accounts with known plan/pack balances. Sequential same key/body calls and two concurrent calls both return the SAME generation/job IDs, one submission and one charge. Same key with changed hash raises `idempotency_conflict`. Inject a job INSERT failure with a test-only trigger: no generation, charge, expense or submission survives. Run four video submissions against one remaining slot, competing daily/global/provider budgets, and two persona creations against one remaining slot. Assert exact accepted/rejected counts and no orphan pending rows.
 
@@ -282,7 +282,7 @@ assert not exists (
 
 The assertions live inside DO blocks with variables/fixtures declared in `dispatch.sql`; concurrency script uses separate psql sessions and checks their statuses before querying invariants. Fail the harness if any unexpected error is masked.
 
-- [ ] **Step 2: Define durable records and keep lifecycle separate from leases**
+- [x] **Step 2: Define durable records and keep lifecycle separate from leases**
 
 ```sql
 create table public.submissions (
@@ -315,7 +315,7 @@ create table public.provider_expenses (
 
 Backfill existing jobs from evidence: a non-null real provider_ref is `submitted`; terminal generation is `done`; a pending inline/unknown dispatch is `reconciling`, NEVER presumed safe to resubmit. Check existing duplicate jobs before adding the unique index; unresolved duplicates block the migration.
 
-- [ ] **Step 3: Implement the reservation transaction in this exact order**
+- [x] **Step 3: Implement the reservation transaction in this exact order**
 
 1. Validate nonempty items, uniform operation/family, integer nonnegative unitCredits, nonnegative finite per-item provider cost, and allowlisted provider. The real adapter exposes `provider`; unknown provider is rejected, never stored as `unknown`.
 2. Acquire global budget lock, provider budget lock, then the existing per-user money lock. Use this order in generation/training reservations, including every retry. Re-read the authoritative subscription/limits while locked.
@@ -334,7 +334,7 @@ return v_result;
 
 No exceptions are caught inside this transaction: a job/expense/submission insertion failure rolls back the charge and all rows. P8 adds request_snapshots in this same transaction after its schema exists.
 
-- [ ] **Step 4: Implement persona creation and training as real worker work**
+- [x] **Step 4: Implement persona creation and training as real worker work**
 
 Use the SAME user/key replay table and money lock for persona creation. Under lock count live draft/training/ready personas and enforce `PERSONA_SLOTS` from server policy, then create the draft and replay record atomically. Route-side counting is only UI guidance.
 
@@ -342,7 +342,7 @@ Create `training_jobs` with `id,user_id,persona_id,state,provider_ref,dispatch_k
 
 Add `fn_settle_training(p_job,p_token,p_outcome,p_lora_url,p_error)`: lock user + persona + training job, require current unexpired token and training state, then atomically mark ready/failed and refund charged buckets once on confirmed failure. Persist provider-hosted `lora_url` as a provider artifact, never a fabricated local `lora_path`. P6 adds its external-artifact deletion record.
 
-- [ ] **Step 5: Run SQL and concurrent tests GREEN**
+- [x] **Step 5: Run SQL and concurrent tests GREEN**
 
 ```bash
 psql "$VANSEN_LOCAL_DB" -X -v ON_ERROR_STOP=1 -f supabase/tests/dispatch.sql
@@ -378,11 +378,11 @@ interface JobDeps {
 
 `StoredPayload` is defined in Task 4; imports use the existing shared Supabase/provider types. `lease.ts` exports `claimJobs(admin,limit)`, `renewLease(admin,id,token)`, and `releaseJob(admin,id,token,nextState,providerRef,delaySeconds,errorCode)`. Each function checks RPC errors and returns a boolean/typed result, never assumes a zero-row update succeeded. Export `runJob(deps,job):Promise<void>` from dispatch.
 
-- [ ] **Step 1: Write state-machine RED tests against real claim results**
+- [x] **Step 1: Write state-machine RED tests against real claim results**
 
 Run the same job across two claims: ready submits once; submitted polls without submitting again. A transient polling error, 429 Retry-After, or expired lease must not refund. A submit timeout with no ref becomes reconciling and never blindly submits again. Run two workers, let one lease expire, then finish its stale provider call: stale worker cannot persist ref, release the new lease or settle. Crash after provider acceptance/before DB ref write and verify reconciliation. Training has the same cases.
 
-- [ ] **Step 2: Implement atomic claim without modifying lifecycle state**
+- [x] **Step 2: Implement atomic claim without modifying lifecycle state**
 
 ```sql
 create function public.fn_claim_jobs(p_limit int)
@@ -400,7 +400,7 @@ $$;
 
 Renew/release UPDATEs require `id,lease_token,lease_until > now()`; use `RETURNING id` to prove success. Release clears only the lease and persists the explicit next state/ref/deadline. A lease-expiry sweep clears expired lease ownership; it NEVER sets state to ready. Claim joins generations in the service to obtain family_id; it is not a column in the returned jobs row. Training gets equivalent fixed-table RPCs.
 
-- [ ] **Step 3: Persist submit intent before making the remote request**
+- [x] **Step 3: Persist submit intent before making the remote request**
 
 Implement `runJob` with top-level guard clauses:
 
@@ -417,13 +417,13 @@ Any network timeout after the request might have reached the provider remains re
 
 `pollJob` calls adapter.check(provider_ref). Running/retryable results preserve submitted and set next_run_at; done uses shared finish with lease token; confirmed terminal failures use shared settleFailed with failureCode and lease token. Honor `retryAfterSeconds` with a bounded exponential backoff (1–300 seconds plus jitter), track polling separately from submit attempts. A retry count/deadline alone does not prove a paid remote job failed. Manual recovery records a decision and retains incurred expense.
 
-- [ ] **Step 4: Replace unsafe stale-refund sweeps and fence settlement**
+- [x] **Step 4: Replace unsafe stale-refund sweeps and fence settlement**
 
 Replace the old generation/persona timeout cron actions in `0020` with reconciliation scheduling. P4's settlement requires current lease token once a job is leased. Extend its transaction to set job state=done and release the lease only on a winning settlement. A stale `fn_fail_job` caller may enqueue recovery but cannot refund active submitted/reconciling work.
 
 Make cancellation a durable `cancel_requested_at` update under the user/job lock. Worker confirms provider cancellation before terminal refund; ready work can be cancelled before dispatch. Unsupported/unreachable cancellation keeps work pending with truthful status. P6 consumes this request mechanism.
 
-- [ ] **Step 5: Verify services, SQL fencing and bundling**
+- [x] **Step 5: Verify services, SQL fencing and bundling**
 
 Run `deno test --allow-all _shared/jobs` and local `dispatch.sql`; add retained tests for every state transition above. Fake deps implement `finish`, not an unused `storageFor`. Every shared module imports only other `_shared` modules, never `../../api/services`. User commits.
 
@@ -433,7 +433,7 @@ Run `deno test --allow-all _shared/jobs` and local `dispatch.sql`; add retained 
 
 **Files:** Modify `api/app.ts`, `_shared/generation-request.ts` and tests; create `job-worker/{index.ts,handler.ts,handler_test.ts,deno.json}`, its `_shared` symlink, `api/dispatch_routes_test.ts`; implement `_shared/jobs/payload.ts`.
 
-- [ ] **Step 1: Define and persist immutable worker input**
+- [x] **Step 1: Define and persist immutable worker input**
 
 ```ts
 export interface StoredPayload {
@@ -451,13 +451,13 @@ Store upload/generation/persona IDs, never signed URLs, base64 masks or mutable 
 
 Extend P3 normalization to video, edit/upscale and persona operations explicitly using the existing adapter mappings + verified capability record. Quote and provider payload consume the same normalized selections. Unsupported combinations/version mismatches fail before charging. Do not send image-normalizer fallbacks to video families.
 
-- [ ] **Step 2: Implement `resolvePayload` and prove URLs are refreshed**
+- [x] **Step 2: Implement `resolvePayload` and prove URLs are refreshed**
 
 `resolvePayload(admin,storageFor,job):Promise<SubmitCtx>` reads IDs as the job owner, requires current available/allowed records, signs each with the actual backend/bucket and a provider-suitable TTL, reads mask bytes only when needed, and preserves first/last slot order. Copy immutable op/prompt/settings/model mapping and resolve parentVideoUrl, interactionId and persona loraUrl from owned records. Missing/foreign/deleted records fail before a new submit and use P4's safe failure path.
 
 In `payload_test.ts`, construct a valid owned upload row with P1's `path,bytes,mime,purpose,width,height,moderation`. Sign it once, advance the injected clock beyond that URL's expiry, call resolvePayload again and assert a NEW URL and correct slot/purpose/owner. Delete it and assert no provider call. Cover image reference, mask, two keyframes, parent-video and persona. No empty “re-sign” test bodies.
 
-- [ ] **Step 3: Wire gateway, worker and read-only queries**
+- [x] **Step 3: Wire gateway, worker and read-only queries**
 
 POST normalizes, moderates, hashes and calls reservation, then returns 202 with persisted IDs promptly. Same-key replay returns the same IDs and never dispatches in the request. Remove inline dispatch and provider polling from `GET /jobs` AND `GET /personas`. The latter returns worker-maintained training state.
 
@@ -473,7 +473,7 @@ const finish = (job: ClaimedJob, result: CheckResult) =>
 
 Deno entrypoints import only bundled shared code. Type-check worker separately so an API-relative import cannot hide behind API tests.
 
-- [ ] **Step 4: Run route and offline contract tests**
+- [x] **Step 4: Run route and offline contract tests**
 
 ```bash
 cd supabase/functions
@@ -491,7 +491,7 @@ Route tests assert 202 without provider submit, persisted replay IDs, changed-bo
 - Modify: `supabase/migrations/0020_durable_dispatch.sql` (add the worker cron), `src/app/features/workspace/pending-video-card/pending-video-card.html` and other background-completion copy
 - Create: `docs/superpowers/plans/2026-09-20-dispatch-verification-log.md`
 
-- [ ] **Step 1: Add the worker cron to the migration**
+- [x] **Step 1: Add the worker cron to the migration**
 
 Append to `0020_durable_dispatch.sql`:
 
@@ -517,7 +517,7 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_LOCAL_DB" -t -A -c "select e
 
 Expected: both names. If `pg_net` is absent, add `create extension if not exists pg_net;` to the migration and re-run.
 
-- [ ] **Step 2: Write the offline-completion rehearsal log**
+- [x] **Step 2: Write the offline-completion rehearsal log**
 
 Create `docs/superpowers/plans/2026-09-20-dispatch-verification-log.md` with the scenarios that must be demonstrated on the local stack:
 
@@ -534,7 +534,7 @@ Create `docs/superpowers/plans/2026-09-20-dispatch-verification-log.md` with the
 | A provider that never answers | Kept in reconciliation with backoff and an alert; only confirmed failure/cancellation or an audited recovery decision settles/refunds |
 | A reference whose signed URL would have expired | Re-signed at submit time; the provider receives a working URL |
 
-- [ ] **Step 3: Remove the current unconditional promise and gate verified copy**
+- [x] **Step 3: Remove the current unconditional promise and gate verified copy**
 
 Search the web client for copy that was written around the old constraint:
 
@@ -556,7 +556,7 @@ Add a failing copy/capability test with these cases before changing the UI:
 
 Keep “We'll notify you” unavailable on both platforms until the source spec's D6 prerequisites pass. Prove outbox retry after a send failure and duplicate handling; link actual background/closed-client receipt from MT-04 in the release record. Permission-denied clients must receive truthful recovery guidance. Job lease ownership remains a lifecycle implementation detail, not a redefinition of D6. Run the copy tests GREEN after wiring the release capability state, retaining the existing visual composition.
 
-- [ ] **Step 4: Final run**
+- [x] **Step 4: Final run**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && cd supabase/functions && deno test --allow-all _shared api job-worker stripe-webhook appstore-webhook && cd .. && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f tests/dispatch.sql && ./tests/caps_concurrency.sh
@@ -568,15 +568,15 @@ Expected: all green. User commits.
 
 ## Exit criteria for P5
 
-- [ ] A generation submitted with every client then closed reaches `done` with retrievable media, driven only by the worker.
-- [ ] The same idempotency key and body charges once and returns the original generation; the same key with a different body returns 409.
-- [ ] No `pending` generation exists without a job row — asserted by a SQL check after the rehearsal.
-- [ ] Four concurrent video submissions produce exactly three pending videos, proven three times by `caps_concurrency.sh`.
-- [ ] A refunded job's provider cost still counts against the daily budget.
-- [ ] A submit whose outcome is unknown is reconciled using verified provider lookup, or held for explicit recovery if lookup is unavailable; it is never blindly submitted again.
-- [ ] A worker whose lease expired cannot settle over the worker that took over.
-- [ ] `GET /jobs` makes zero provider calls.
-- [ ] A job deferred past the signed-URL lifetime re-signs its references before submitting.
-- [ ] D3 copy is gated on deployed, verified background completion; D6 notification copy remains unavailable until P4/P5 and mobile MT-04 delivery/receipt evidence passes in P9 Task 6.
+- [x] A generation submitted with every client then closed reaches `done` with retrievable media, driven only by the worker. *(Proven in-process against the real route, worker, dispatcher and finisher with fake transports — `api/offline_completion_test.ts`. The deployed rehearsal needs the function and its cron, which is P9.)*
+- [x] The same idempotency key and body charges once and returns the original generation; the same key with a different body returns 409.
+- [x] No `pending` generation exists without a job row — asserted by a SQL check after the rehearsal (`supabase/tests/dispatch.sql` block 17, against the local database).
+- [x] Four concurrent video submissions produce exactly three pending videos, proven three times by `caps_concurrency.sh`.
+- [x] A refunded job's provider cost still counts against the daily budget.
+- [x] A submit whose outcome is unknown is reconciled using verified provider lookup, or held for explicit recovery if lookup is unavailable; it is never blindly submitted again.
+- [x] A worker whose lease expired cannot settle over the worker that took over.
+- [x] `GET /jobs` makes zero provider calls.
+- [x] A job deferred past the signed-URL lifetime re-signs its references before submitting.
+- [x] D3 copy is gated on deployed, verified background completion; D6 notification copy remains unavailable until P4/P5 and mobile MT-04 delivery/receipt evidence passes in P9 Task 6.
 
 **Known carry-forward:** deleting an account or a generation still leaves stored objects behind — P6. The `job-worker` function is written and tested but **not deployed**, and its Vault configuration is not set; P9 does both.

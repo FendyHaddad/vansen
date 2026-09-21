@@ -29,11 +29,7 @@ import {
 } from "./_shared/model-families.ts";
 import { applyStyle, styleById } from "./_shared/style-presets.ts";
 import { GenerationOp, LedgerType, MediaKind } from "./_shared/enums.ts";
-import {
-  checkPersonaTraining,
-  PERSONA_TRIGGER,
-  submitPersonaTraining,
-} from "./_shared/providers/fal.ts";
+import { PERSONA_TRIGGER } from "./_shared/providers/fal.ts";
 import { zipSync } from "npm:fflate@0.8.2";
 import type {
   CheckResult,
@@ -43,8 +39,10 @@ import {
   type StorageAdapter,
   type StorageBackend,
   thumbPath,
-  videoPath,
 } from "./_shared/storage/index.ts";
+import { finishJob as storeFinishedJob } from "./_shared/jobs/store.ts";
+import type { StoredPayload } from "./_shared/jobs/payload.ts";
+import { bodyHash, readIdempotencyKey } from "./services/idempotency.ts";
 import { imageSize } from "./_shared/image-size.ts";
 import { validateSettings } from "./services/request-validation.ts";
 import {
@@ -55,7 +53,7 @@ import {
 import {
   type ReferenceError,
   resolveOwnedUpload,
-} from "./services/reference-resolver.ts";
+} from "./_shared/reference-resolver.ts";
 import {
   dailyCapState,
   expectedSecondsFor,
@@ -68,14 +66,12 @@ import type {
   ModerationResult,
 } from "./_shared/moderation.ts";
 import { safetyId } from "./_shared/safety.ts";
-import {
-  type PushEvent,
-  sendGenerationPush,
-  type ServiceAccount,
-} from "./_shared/push.ts";
+import type { ServiceAccount } from "./_shared/push.ts";
 import { laneFor } from "./_shared/billing-lanes.ts";
 import { applyIapTransaction } from "./_shared/iap-grants.ts";
 import { applyFulfillment } from "./_shared/billing-fulfillment.ts";
+import { settleDone, settleFailed } from "./_shared/jobs/settlement.ts";
+import { classifyProviderError } from "./_shared/providers/provider-errors.ts";
 
 export interface ApiEnv {
   appOrigins: string[];
@@ -96,6 +92,10 @@ export interface ApiDeps {
       jws: string,
     ): Promise<JWSTransactionDecodedPayload>;
   };
+  /**
+   * Kept on the deps, unused by the routes: settlement queues notifications in
+   * the outbox and P5's scheduled drainer is what sends them.
+   */
   fcmAccount: ServiceAccount | null;
   env: ApiEnv;
   now: () => Date;
@@ -226,7 +226,6 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     adapterFor,
     storageFor,
     appleVerifier,
-    fcmAccount,
   } = deps;
   const APP_ORIGINS = deps.env.appOrigins;
   const PLAN_PRICE_IDS = deps.env.planPriceIds;
@@ -706,193 +705,56 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     return { ok: true };
   }
 
-  /** Fire-and-forget push on job settle; never fails the request. */
-  function notifySettled(
-    userId: string,
-    generationId: string,
-    type: PushEvent["type"],
-  ): void {
-    if (!fcmAccount) return;
-    pushToDevices(userId, generationId, type).catch((e) =>
-      console.error("push_notify_failed", e)
-    );
-  }
+  // Nothing pushes from inside a request any more. `fn_settle_job` writes a
+  // notification_outbox row in the same transaction as the settlement, and
+  // `_shared/jobs/notifications.ts` delivers it on its own schedule (wired up
+  // in P5). A push that fails can no longer fail a paid request, and "was the
+  // customer told" is answerable from the database.
 
-  async function pushToDevices(
-    userId: string,
-    generationId: string,
-    type: PushEvent["type"],
-  ): Promise<void> {
-    const { data: devices } = await admin.from("devices").select("token").eq(
-      "user_id",
-      userId,
-    );
-    if (!devices || devices.length === 0) return;
-    const stale = await sendGenerationPush(
-      fcmAccount!,
-      devices.map((d) => d.token),
-      { type, generationId },
-    );
-    if (stale.length === 0) return;
-    await admin.from("devices").delete().eq("user_id", userId).in(
-      "token",
-      stale,
-    );
-  }
-
-  const MAX_STORE_ATTEMPTS = 3;
-
-  /** Upload finished bytes to private storage, flip the generation done. */
-  async function finishJob(
-    job: {
-      id: string;
-      user_id: string;
-      generation_id: string;
-      attempts?: number;
-    },
-    result: CheckResult,
-  ): Promise<void> {
-    if (result.state === "running") {
-      await admin
-        .from("jobs")
-        .update({
-          ...(result.progress != null ? { progress: result.progress } : {}),
-          ...(result.queuePosition != null
-            ? { queue_position: result.queuePosition }
-            : {}),
-          phase: result.phase ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-      return;
-    }
-    if (result.state === "failed") {
-      await admin.rpc("fn_fail_job", { p_job: job.id, p_error: result.error });
-      notifySettled(job.user_id, job.generation_id, "generation_failed");
-      return;
-    }
-    if (isUrlResult(result)) {
-      await storeVideoResult(job, result);
-      return;
-    }
-    const path = `${job.user_id}/${job.generation_id}.png`;
-    await admin.storage.from("media").upload(path, result.bytes, {
-      contentType: result.contentType,
-      upsert: true,
-    });
-    await admin.from("generations").update({ status: "done", media_path: path })
-      .eq("id", job.generation_id);
-    await admin.from("jobs").update({ updated_at: new Date().toISOString() })
-      .eq("id", job.id);
-    notifySettled(job.user_id, job.generation_id, "generation_done");
-  }
-
-  // Zero rows can also mean a previous attempt already committed `done` and only
-  // its response was lost; never delete media a done row still points at.
-  async function dropLostObject(
+  // A staged library row is only a promise of media. When the promise cannot be
+  // kept, both halves are rolled back; a cleanup that itself fails leaves an
+  // orphan, which P6's durable object registry is what finally collects.
+  async function dropStagedObject(
     generationId: string,
     path: string,
   ): Promise<void> {
-    const { data: row } = await admin.from("generations").select("status").eq(
-      "id",
+    const { error } = await admin.storage.from("media").remove([path]);
+    if (!error) return;
+    console.error("staged_object_cleanup_failed", {
       generationId,
-    ).maybeSingle();
-    if (row?.status === "done") return;
-    console.warn(
-      "[finishJob] generation already settled, dropping object",
-      generationId,
-    );
-    await storageFor("r2").delete(path).catch(() => undefined);
+      path,
+      message: error.message,
+    });
   }
 
-  async function storeVideoResult(
+  async function dropStagedRow(generationId: string): Promise<void> {
+    const { error } = await admin.from("generations").delete().eq(
+      "id",
+      generationId,
+    );
+    if (!error) return;
+    console.error("staged_row_cleanup_failed", {
+      generationId,
+      message: error.message,
+    });
+  }
+
+  /**
+   * Store the finished bytes and settle, via the one shared finalizer that
+   * P5's dispatcher will also call. Nothing about "store then settle" is
+   * implemented twice.
+   */
+  function finishJob(
     job: {
       id: string;
       user_id: string;
       generation_id: string;
       attempts?: number;
+      lease_token?: string;
     },
-    result: Extract<CheckResult, { url: string }>,
+    result: CheckResult,
   ): Promise<void> {
-    // Claim: only one poller streams the file. No row back (and no error) → someone else has it.
-    const { data: claimed, error: claimError } = await admin
-      .from("jobs")
-      .update({ claimed_at: new Date().toISOString(), phase: "saving" })
-      .eq("id", job.id)
-      .is("claimed_at", null)
-      .select("id");
-    if (claimError) {
-      console.error("[finishJob] claim failed", job.id, claimError.message);
-      return;
-    }
-    if (!claimed || claimed.length === 0) return;
-
-    const path = videoPath(job.user_id, job.generation_id);
-    try {
-      const res = await fetch(result.url, { headers: result.headers });
-      if (!res.ok || !res.body) throw new Error(`video fetch ${res.status}`);
-      // Buffer before the PUT: a streaming body makes fetch send chunked transfer
-      // encoding, which R2's S3 PutObject rejects.
-      const bytes = new Uint8Array(await new Response(res.body).arrayBuffer());
-      await storageFor("r2").put(
-        path,
-        bytes,
-        result.contentType || "video/mp4",
-      );
-    } catch (e) {
-      const attempts = (job.attempts ?? 0) + 1;
-      console.error("store_failed", job.id, attempts, e);
-      if (attempts >= MAX_STORE_ATTEMPTS) {
-        await admin.rpc("fn_fail_job", {
-          p_job: job.id,
-          p_error: "store_failed",
-        });
-        notifySettled(job.user_id, job.generation_id, "generation_failed");
-        return;
-      }
-      await admin.from("jobs").update({
-        claimed_at: null,
-        phase: "rendering",
-        attempts,
-      }).eq("id", job.id);
-      return;
-    }
-
-    // Conditional on still-pending: a cancel or the stale sweep can have failed +
-    // refunded the row while the bytes were in flight. Losing that race must not
-    // hand the user the video on top of the refund.
-    const { data: finished, error: genError } = await admin
-      .from("generations")
-      .update({
-        status: "done",
-        media_path: path,
-        storage_backend: "r2",
-        duration_s: result.durationS ?? null,
-        width: result.width ?? null,
-        height: result.height ?? null,
-      })
-      .eq("id", job.generation_id)
-      .eq("status", "pending")
-      .select("id");
-    if (genError) {
-      console.error(
-        "[finishJob] generation update failed",
-        job.generation_id,
-        genError.message,
-      );
-      await admin.from("jobs").update({ claimed_at: null, phase: "rendering" })
-        .eq("id", job.id);
-      return;
-    }
-    if (!finished || finished.length === 0) {
-      await dropLostObject(job.generation_id, path);
-      return;
-    }
-    await admin.from("jobs").update({
-      progress: 1,
-      updated_at: new Date().toISOString(),
-    }).eq("id", job.id);
-    notifySettled(job.user_id, job.generation_id, "generation_done");
+    return storeFinishedJob({ admin, storageFor }, job, result);
   }
 
   function toLedgerDto(row: Record<string, unknown>) {
@@ -1253,45 +1115,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     );
     if (ids.length === 0) return c.json({ items: [] });
 
-    const { data: jobs } = await admin
-      .from("jobs")
-      .select(
-        "id,user_id,generation_id,provider_ref,error,progress,phase,claimed_at,created_at,attempts,queue_position",
-      )
-      .eq("user_id", userId)
-      .in("generation_id", ids);
-
-    for (const job of jobs ?? []) {
-      // Skip already-errored/resolved jobs, inline providers resolved at submit,
-      // and jobs another concurrent tick is currently saving (claimed_at set).
-      if (
-        job.error || !job.provider_ref || job.provider_ref === "inline" ||
-        job.claimed_at
-      ) continue;
-      const { data: gen } = await admin
-        .from("generations")
-        .select("status,family_id")
-        .eq("id", job.generation_id)
-        .single();
-      if (!gen || gen.status !== "pending") continue;
-      try {
-        const result = await adapterFor(gen.family_id).check(job.provider_ref);
-        await finishJob({
-          id: job.id,
-          user_id: job.user_id,
-          generation_id: job.generation_id,
-          attempts: job.attempts,
-        }, result);
-      } catch (e) {
-        logError(c, "provider_check_failed", e);
-        await admin.rpc("fn_fail_job", {
-          p_job: job.id,
-          p_error: String(e).slice(0, 500),
-        });
-        notifySettled(job.user_id, job.generation_id, "generation_failed");
-      }
-    }
-
+    // Read-only. Progress used to be produced by polling providers from inside
+    // this request, which meant a closed tab stranded the job until a timeout
+    // refunded it. The worker drives every job now; this only reports.
     const { data: freshJobs } = await admin
       .from("jobs")
       .select(
@@ -1332,41 +1158,52 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
     const { data: job } = await admin
       .from("jobs")
-      .select("id,provider_ref,claimed_at")
+      .select("id,state,provider_ref,lease_token")
       .eq("generation_id", generationId)
       .is("error", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (!job) return fail(c, 404, "not_found", "Job not found.");
-    if (job.claimed_at) return fail(c, 409, "not_pending", "Already saving.");
 
-    const adapter = adapterFor(gen.family_id);
-    if (adapter.cancel && job.provider_ref && job.provider_ref !== "inline") {
-      try {
-        await adapter.cancel(job.provider_ref);
-      } catch (e) {
-        logError(c, "provider_cancel_failed", e);
-      }
-    }
-    const { error } = await admin.rpc("fn_fail_job", {
-      p_job: job.id,
-      p_error: "cancelled",
-    });
-    if (error) return fail(c, 500, "cancel_failed", error.message);
-
-    const { data: settled } = await admin
-      .from("generations")
-      .select("status")
-      .eq("id", generationId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (settled?.status !== "failed") {
-      return fail(c, 409, "not_pending", "This video already finished.");
+    // Cancellation is a durable request, not an action. The worker owns the
+    // provider conversation, and only a provider that confirms it stopped
+    // earns a refund — the route cannot know that from here.
+    const { error: markError } = await admin
+      .from("jobs")
+      .update({ cancel_requested_at: new Date().toISOString(), next_run_at: new Date().toISOString() })
+      .eq("id", job.id);
+    if (markError) {
+      return fail(
+        c,
+        503,
+        "cancel_failed",
+        "Could not record your cancellation. Try again.",
+      );
     }
 
+    // Work that never left the building is different: nothing is running and
+    // nothing is billing us, so it can be refunded here and now.
+    const untouched = job.state === "ready" && !job.lease_token &&
+      !job.provider_ref;
+    if (!untouched) {
+      return c.json({
+        cancelling: true,
+        refundedCredits: 0,
+        credits: await creditsOf(userId),
+      }, 202);
+    }
+
+    const settled = await settleFailed(admin, job.id, "cancelled");
+    if (!settled.settled) {
+      return c.json({
+        cancelling: true,
+        refundedCredits: 0,
+        credits: await creditsOf(userId),
+      }, 202);
+    }
     return c.json({
-      refundedCredits: Number(gen.price_credits),
+      refundedCredits: settled.refunded,
       credits: await creditsOf(userId),
     });
   });
@@ -1473,62 +1310,10 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
     if (parentResult) Object.assign(prep, parentResult);
 
-    const { count: pendingCount, error: pendingErr } = await admin
-      .from("generations")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("kind", MediaKind.Video)
-      .eq("status", "pending");
-    if (pendingErr) {
-      return fail(
-        c,
-        503,
-        "cap_check_failed",
-        "Could not verify your video limits. Try again.",
-      );
-    }
-    if (videoJobCapReached(pendingCount ?? 0)) {
-      return fail(
-        c,
-        429,
-        "too_many_jobs",
-        "3 videos are still rendering — wait for one to finish",
-      );
-    }
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: recent, error: recentErr } = await admin
-      .from("generations")
-      .select("price_credits,created_at")
-      .eq("user_id", userId)
-      .eq("kind", MediaKind.Video)
-      .neq("status", "failed")
-      .gte("created_at", since)
-      .order("created_at", { ascending: true });
-    if (recentErr) {
-      return fail(
-        c,
-        503,
-        "cap_check_failed",
-        "Could not verify your video limits. Try again.",
-      );
-    }
-    const spentUsd =
-      (recent ?? []).reduce((sum, r) => sum + Number(r.price_credits), 0) *
-      (1 - STUDIO_MARGIN) / 100;
-    const oldest = recent?.[0]?.created_at
-      ? new Date(recent[0].created_at)
-      : null;
-    const cap = dailyCapState(spentUsd, oldest, new Date());
-    if (cap.blocked) {
-      return c.json({
-        error: {
-          code: "daily_cap",
-          message: "Daily video limit reached.",
-          resetsAt: cap.resetsAt,
-        },
-      }, 429);
-    }
+    // Caps are NOT checked here any more. A select before the charge is a
+    // suggestion, not a limit — four simultaneous submissions all passed it.
+    // `fn_reserve_generation` enforces pending count and daily spend inside the
+    // charging transaction.
 
     for (const path of referencePaths) {
       const { data: signed, error } = await admin.storage.from("uploads")
@@ -1928,11 +1713,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const normalized = priced?.normalized;
     if (priced) unitCredits = priced.credits;
 
-    const total = unitCredits * batch;
     const ledgerType = op === GenerationOp.Variation
       ? LedgerType.Generate
       : (op as LedgerType);
-    const note = batch > 1 ? `${familyName} ×${batch}` : familyName;
 
     if (styleId) settings.style = styleId;
     if (personaId && persona) settings.persona = personaId;
@@ -1948,6 +1731,33 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       }
       : settings;
 
+    // A mask is stored like any other input, with an owner and a moderation
+    // record. Carrying base64 in the job payload would be an unbounded row
+    // nothing owns.
+    const maskUploadId = await storeMask(c, userId, body.maskPngBase64);
+    if (maskUploadId instanceof Response) return maskUploadId;
+
+    const sid = await safetyId(userId);
+    const payload: StoredPayload = {
+      familyId,
+      op,
+      prompt: effectivePrompt,
+      settings: { ...settings },
+      providerModel: normalized?.providerModel ?? familyId,
+      providerSettings: normalized?.providerSettings ?? {},
+      quoteVersion: normalized?.quoteVersion ?? 0,
+      catalogVersion: normalized?.catalogVersion ?? "",
+      safetyId: sid,
+      referenceUploadId: referenceUploadId ?? undefined,
+      parentId: parentId ?? undefined,
+      maskUploadId: maskUploadId ?? undefined,
+      referenceSlots: video ? slotsOf(video) : undefined,
+      personaId: personaId ?? undefined,
+      styleId: styleId ?? undefined,
+      trendId: trendId ?? undefined,
+      mode: video?.mode,
+    };
+
     const items = Array.from({ length: batch }, () => ({
       kind,
       familyId,
@@ -1961,96 +1771,166 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       client: clientOf(c) ?? "",
     }));
 
-    const { data, error } = await admin.rpc("fn_charge_and_generate", {
+    // One transaction decides everything: the caps, the charge, the generation
+    // rows, their jobs and the provider expense. A crash anywhere takes the
+    // charge with it — the old two-step left charged generations with no job,
+    // which the stale sweep could never find.
+    const reservation = await admin.rpc("fn_reserve_generation", {
       p_user: userId,
-      p_amount: total,
-      p_type: ledgerType,
-      p_family_id: familyId,
-      p_note: note,
+      p_key: readIdempotencyKey(c) ?? crypto.randomUUID(),
+      p_hash: await bodyHash(body),
       p_items: items,
+      p_quote: {
+        provider: adapterFor(familyId).provider,
+        chargeType: ledgerType,
+        unitCredits,
+        unitProviderCostUsd: providerCostUsd(familyId, quoteFamily, settings),
+        catalogVersion: normalized?.catalogVersion ?? "",
+        quoteVersion: normalized?.quoteVersion ?? 0,
+      },
+      p_payload: payload,
     });
-    if (error) {
-      if (error.message.includes("insufficient_balance")) {
-        return fail(
-          c,
-          402,
-          "insufficient_credits",
-          "Not enough credits for this run",
-        );
-      }
-      logError(c, "charge_failed", new Error(error.message));
-      return fail(c, 400, "charge_failed", "Charge could not be completed");
+    if (reservation.error) {
+      return await reservationFailure(c, userId, reservation.error.message);
     }
 
-    // Dispatch each generation to its provider.
-    const adapter = adapterFor(familyId);
-    const sid = await safetyId(userId);
-    const created = (data ?? []) as Record<string, unknown>[];
-    for (const gen of created) {
-      const genId = gen.id as string;
-      const { data: jobRow } = await admin
-        .from("jobs")
-        .insert({
-          generation_id: genId,
-          user_id: userId,
-          provider: adapter.provider,
-        })
-        .select("id")
-        .single();
-      try {
-        const submitted: SubmitResult = await adapter.submit({
-          familyId,
-          op,
-          prompt: effectivePrompt,
-          settings: { ...settings },
-          normalized,
-          referenceUrl,
-          maskPngBase64: typeof body.maskPngBase64 === "string"
-            ? body.maskPngBase64
-            : undefined,
-          loraUrl: persona?.lora_url,
-          safetyId: sid,
-          mode: video?.mode,
-          referenceUrls: video?.referenceUrls,
-          parentVideoUrl: video?.parentVideoUrl,
-          interactionId: video?.interactionId,
-        });
-        await admin.from("jobs").update({ provider_ref: submitted.providerRef })
-          .eq("id", jobRow!.id);
-        if (submitted.interactionId) {
-          await admin
-            .from("generations")
-            .update({
-              settings: { ...settings, interactionId: submitted.interactionId },
-            })
-            .eq("id", genId);
-        }
-        if (submitted.inline) {
-          await finishJob({
-            id: jobRow!.id,
-            user_id: userId,
-            generation_id: genId,
-          }, submitted.inline);
-        }
-      } catch (e) {
-        logError(c, "provider_submit_failed", e);
-        await admin.rpc("fn_fail_job", {
-          p_job: jobRow!.id,
-          p_error: String(e).slice(0, 500),
-        });
-        notifySettled(userId, genId, "generation_failed");
-      }
-    }
-
-    const { data: finalRows } = await admin
+    const generationIds = ((reservation.data ?? {}) as {
+      generationIds?: string[];
+    }).generationIds ?? [];
+    const { data: createdRows } = await admin
       .from("generations")
       .select("*")
-      .in("id", created.map((g) => g.id));
+      .in("id", generationIds);
+    // 202: accepted, not finished. The worker executes it whether or not this
+    // client is still here to watch.
     return c.json({
-      items: await toGenerationDtos(finalRows ?? []),
+      items: await toGenerationDtos(createdRows ?? []),
       credits: await creditsOf(userId),
-    });
+    }, 202);
   });
+
+  /**
+   * Persist an edit mask as an owned upload and return its path.
+   *
+   * It arrives as base64 in the request because that is what the editor has,
+   * but it must not travel in the job payload: the worker dispatches hours
+   * later, and an unbounded blob with no owner and no moderation record is not
+   * something to keep in a row.
+   */
+  async function storeMask(
+    c: Context,
+    userId: string,
+    raw: unknown,
+  ): Promise<string | null | Response> {
+    if (typeof raw !== "string" || raw.length === 0) return null;
+    let bytes: Uint8Array;
+    try {
+      bytes = Uint8Array.from(atob(raw), (ch) => ch.charCodeAt(0));
+    } catch {
+      return fail(c, 400, "invalid_payload", "Mask must be base64 PNG");
+    }
+    if (sniffImage(bytes) !== "png") {
+      return fail(c, 400, "invalid_payload", "Mask must be a PNG");
+    }
+    const path = `${userId}/${crypto.randomUUID()}.png`;
+    const { error: upErr } = await admin.storage.from("uploads").upload(
+      path,
+      bytes,
+      { contentType: "image/png" },
+    );
+    if (upErr) {
+      return fail(c, 503, "mask_unavailable", "Could not store your mask.");
+    }
+    // A mask is a shape, not a picture of anything — it is moderated by the
+    // image it is applied to, so it is registered as allowed on arrival.
+    const { error: regErr } = await admin.from("uploads").insert({
+      user_id: userId,
+      path,
+      purpose: "mask",
+      mime: "image/png",
+      bytes: bytes.byteLength,
+      width: 0,
+      height: 0,
+      moderation: "allowed",
+    });
+    if (regErr) {
+      await admin.storage.from("uploads").remove([path]).catch(() => undefined);
+      return fail(c, 503, "mask_unavailable", "Could not store your mask.");
+    }
+    return path;
+  }
+
+  /** Video reference slots, keeping first/last positional order. */
+  function slotsOf(video: VideoPrep): StoredPayload["referenceSlots"] {
+    if (video.mode === "keyframes") {
+      return { first: video.referencePaths[0], last: video.referencePaths[1] };
+    }
+    return { references: [...video.referencePaths] };
+  }
+
+  /**
+   * What this run is expected to cost US, for the budget. The catalog knows it
+   * for its own families; the fixed-price tools are priced backwards from their
+   * retail credits, which is an estimate and is labelled as one.
+   */
+  function providerCostUsd(
+    familyId: string,
+    family: ModelFamily | undefined,
+    settings: GenerationSettings,
+  ): number {
+    if (family) return family.providerCost(settings);
+    if (familyId === UPSCALER.id) return UPSCALER.providerCost;
+    if (familyId === PERSONA_GEN.id) return PERSONA_GEN.providerCost;
+    const tool = editToolById(familyId);
+    if (tool) return (tool.creditCost / 100) * (1 - STUDIO_MARGIN);
+    return 0;
+  }
+
+  /** The reservation raises plain codes; each one has a customer-facing answer. */
+  async function reservationFailure(
+    c: Context,
+    userId: string,
+    message: string,
+  ): Promise<Response> {
+    if (message.includes("idempotency_conflict")) {
+      return fail(
+        c,
+        409,
+        "idempotency_conflict",
+        "That request id was already used for a different request.",
+      );
+    }
+    if (message.includes("insufficient_balance")) {
+      return fail(
+        c,
+        402,
+        "insufficient_credits",
+        "Not enough credits for this run",
+      );
+    }
+    if (message.includes("too_many_jobs")) {
+      return fail(
+        c,
+        429,
+        "too_many_jobs",
+        "3 videos are still rendering — wait for one to finish",
+      );
+    }
+    if (message.includes("daily_cap")) {
+      const { data: resetsAt } = await admin.rpc("fn_spend_resets_at", {
+        p_user: userId,
+      });
+      return c.json({
+        error: {
+          code: "daily_cap",
+          message: "Daily video limit reached.",
+          resetsAt: resetsAt ?? null,
+        },
+      }, 429);
+    }
+    logError(c, "reservation_failed", new Error(message));
+    return fail(c, 400, "charge_failed", "Charge could not be completed");
+  }
 
   app.post("/billing/subscribe", async (c) => {
     const laneBlocked = requireWebLane(c);
@@ -2844,47 +2724,17 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     };
   }
 
-  /** List personas; lazily settle any in-flight trainings (same pattern as GET /jobs). */
+  /**
+   * List personas. Read-only: training is advanced by the job worker, so a
+   * persona finishes whether or not anyone has this screen open.
+   */
   app.get("/personas", async (c) => {
     const userId = c.get("userId");
-    const { data: rows } = await admin
+    const { data: fresh } = await admin
       .from("personas")
       .select("*")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
-
-    let changed = false;
-    for (const row of rows ?? []) {
-      if (row.status !== "training" || !row.provider_ref) continue;
-      try {
-        const check = await checkPersonaTraining(row.provider_ref);
-        if (check.state === "done") {
-          await admin
-            .from("personas")
-            .update({
-              status: "ready",
-              lora_url: check.loraUrl,
-              trained_at: new Date().toISOString(),
-            })
-            .eq("id", row.id);
-          changed = true;
-        } else if (check.state === "failed") {
-          await admin.rpc("fn_fail_persona", {
-            p_persona: row.id,
-            p_error: check.error,
-          });
-          changed = true;
-        }
-      } catch (e) {
-        logError(c, "persona_check_failed", e);
-      }
-    }
-    const { data: fresh } = changed
-      ? await admin.from("personas").select("*").eq("user_id", userId).order(
-        "created_at",
-        { ascending: false },
-      )
-      : { data: rows };
 
     const plan = await activePlan(userId);
     const max = plan ? PERSONA_SLOTS[plan] : 0;
@@ -3028,21 +2878,36 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       );
     }
 
-    const { error: chargeErr } = await admin.rpc("fn_charge_persona", {
+    // The zip is built and stored BEFORE the charge: the worker signs it fresh
+    // at dispatch time, so an hour-old signed URL never reaches the provider.
+    const zipPath = `persona-zips/${userId}/${personaId}.zip`;
+    const { error: upErr } = await admin.storage.from("uploads").upload(
+      zipPath,
+      zipSync(files, { level: 0 }), // JPEGs don't compress
+      { contentType: "application/zip", upsert: true },
+    );
+    if (upErr) {
+      logError(c, "persona_zip_failed", new Error(upErr.message));
+      return fail(c, 503, "train_failed", "Training could not be prepared");
+    }
+
+    // fn_reserve_training re-reads the photo count from the persona, so the
+    // selection has to be recorded before the reservation validates it.
+    await admin
+      .from("personas")
+      .update({ photo_paths: photoIds, trigger_word: PERSONA_TRIGGER })
+      .eq("id", personaId)
+      .eq("user_id", userId);
+
+    const { error: reserveErr } = await admin.rpc("fn_reserve_training", {
       p_user: userId,
       p_persona: personaId,
-      p_amount: PERSONA_TRAINING.creditCost,
+      p_key: readIdempotencyKey(c) ?? crypto.randomUUID(),
+      p_hash: await bodyHash({ personaId, photoIds }),
+      p_payload: { provider: "fal", zipPath },
     });
-    if (chargeErr) {
-      if (chargeErr.message.includes("insufficient_balance")) {
-        return fail(
-          c,
-          402,
-          "insufficient_credits",
-          "Not enough credits for training",
-        );
-      }
-      if (chargeErr.message.includes("invalid_persona_status")) {
+    if (reserveErr) {
+      if (reserveErr.message.includes("invalid_persona_status")) {
         return fail(
           c,
           400,
@@ -3050,56 +2915,30 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
           "Persona not found or already training",
         );
       }
-      logError(c, "persona_charge_failed", new Error(chargeErr.message));
-      return fail(c, 400, "charge_failed", "Charge could not be completed");
-    }
-
-    try {
-      const zip = zipSync(files, { level: 0 }); // JPEGs don't compress
-      const zipPath = `persona-zips/${userId}/${personaId}.zip`;
-      const { error: upErr } = await admin.storage.from("uploads").upload(
-        zipPath,
-        zip,
-        {
-          contentType: "application/zip",
-          upsert: true,
-        },
-      );
-      if (upErr) throw new Error(`zip upload: ${upErr.message}`);
-      const { data: signed } = await admin.storage.from("uploads")
-        .createSignedUrl(zipPath, 3600);
-      if (!signed?.signedUrl) throw new Error("zip sign failed");
-      const providerRef = await submitPersonaTraining(signed.signedUrl);
-      await admin
-        .from("personas")
-        .update({
-          provider_ref: providerRef,
-          photo_paths: photoIds,
-          trigger_word: PERSONA_TRIGGER,
-        })
-        .eq("id", personaId);
-    } catch (e) {
-      logError(c, "persona_train_submit_failed", e);
-      await admin.rpc("fn_fail_persona", {
-        p_persona: personaId,
-        p_error: String(e).slice(0, 500),
-      });
-      return fail(
-        c,
-        502,
-        "train_failed",
-        "Training could not be started — credits refunded",
-      );
+      if (reserveErr.message.includes("bad_photo_count")) {
+        return fail(
+          c,
+          400,
+          "invalid_payload",
+          `Between ${PERSONA_TRAINING.minPhotos} and ${PERSONA_TRAINING.maxPhotos} unique photos required`,
+        );
+      }
+      if (reserveErr.message.includes("not_found")) {
+        return fail(c, 404, "not_found", "Persona not found");
+      }
+      return await reservationFailure(c, userId, reserveErr.message);
     }
 
     const { data: row } = await admin.from("personas").select("*").eq(
       "id",
       personaId,
     ).single();
+    // 202: the worker submits and polls this training; the customer may close
+    // the tab and the persona still finishes.
     return c.json({
       item: await toPersonaDto(row!),
       credits: await creditsOf(userId),
-    });
+    }, 202);
   });
 
   /** Persist a locally-edited canvas as a new $0 generation version. */
@@ -3183,7 +3022,10 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         prompt: parent.prompt,
         settings: parent.settings,
         price_credits: 0,
-        status: "done",
+        // Staged, not done: a row only becomes `done` once the bytes are
+        // stored AND that fact is persisted. Inserting `done` up front is how
+        // library rows that point at nothing were created.
+        status: "pending",
         media_url: "",
         parent_id: parentId,
       })
@@ -3203,15 +3045,27 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       },
     );
     if (upErr) {
-      await admin.from("generations").delete().eq("id", gen.id);
+      await dropStagedRow(gen.id);
       return fail(c, 400, "save_failed", "Storage rejected the file");
     }
-    await admin.from("generations").update({ media_path: path }).eq(
-      "id",
-      gen.id,
-    );
+    const { data: saved, error: saveError } = await admin.from("generations")
+      .update({ media_path: path, status: "done" })
+      .eq("id", gen.id)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+    if (saveError || !saved) {
+      await dropStagedObject(gen.id, path);
+      await dropStagedRow(gen.id);
+      return fail(
+        c,
+        503,
+        "save_failed",
+        "Your image could not be saved. Please retry.",
+      );
+    }
     return c.json({
-      item: await toGenerationDto({ ...gen, media_path: path }),
+      item: await toGenerationDto({ ...gen, media_path: path, status: "done" }),
     });
   });
 
@@ -3290,7 +3144,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         prompt: "Imported image",
         settings: {},
         price_credits: 0,
-        status: "done",
+        // See /edits/save: staged until the stored object is recorded.
+        status: "pending",
         media_url: "",
       })
       .select("*")
@@ -3309,15 +3164,27 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       },
     );
     if (upErr) {
-      await admin.from("generations").delete().eq("id", gen.id);
+      await dropStagedRow(gen.id);
       return fail(c, 400, "save_failed", "Storage rejected the file");
     }
-    await admin.from("generations").update({ media_path: path }).eq(
-      "id",
-      gen.id,
-    );
+    const { data: saved, error: saveError } = await admin.from("generations")
+      .update({ media_path: path, status: "done" })
+      .eq("id", gen.id)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+    if (saveError || !saved) {
+      await dropStagedObject(gen.id, path);
+      await dropStagedRow(gen.id);
+      return fail(
+        c,
+        503,
+        "save_failed",
+        "Your image could not be saved. Please retry.",
+      );
+    }
     return c.json({
-      item: await toGenerationDto({ ...gen, media_path: path }),
+      item: await toGenerationDto({ ...gen, media_path: path, status: "done" }),
     });
   });
 

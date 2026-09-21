@@ -682,8 +682,10 @@ export class WorkspacePage {
   /** Cancel a still-rendering video job from its pending card. */
   async onCancel(id: string): Promise<void> {
     try {
-      const refunded = await this.store.cancel(id);
-      this.notice.set(`Cancelled. Refunded ${refunded} cr.`);
+      await this.store.cancel(id);
+      // No refund is promised here: the worker asks the provider, and a render
+      // that has already started keeps going and keeps its credits.
+      this.notice.set('Cancelling — we\'ll refund if it stops in time.');
     } catch (e) {
       this.showError(e, 'Could not cancel');
     }

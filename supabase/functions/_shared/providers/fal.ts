@@ -1,6 +1,7 @@
 // fal.ai adapter — FLUX, Seedream, and the clarity upscaler. Queue API:
 // submit returns a request_id; check polls status then pulls the result.
-import { CheckResult, ProviderAdapter, SubmitCtx, fetchBytes } from './types.ts';
+import { CancelOutcome, CheckResult, ProviderAdapter, SubmitCtx } from './types.ts';
+import { classifyStatus } from './provider-errors.ts';
 
 const FAL_BASE = 'https://queue.fal.run';
 
@@ -136,6 +137,19 @@ async function auth(): Promise<Record<string, string>> {
   return { Authorization: `Key ${key()}`, 'Content-Type': 'application/json' };
 }
 
+/**
+ * A non-OK answer from fal, turned into the right kind of terminal state.
+ * A 429 or a 502 is fal being busy — refunding there loses the customer a job
+ * that was about to succeed and still bills us for the render.
+ */
+function falHttpFailure(response: Response): CheckResult {
+  const error = `fal_http_${response.status}`;
+  if (classifyStatus(response.status) !== 'retryable') return { state: 'failed', error };
+  const numeric = Number(response.headers.get('retry-after'));
+  const seconds = Number.isFinite(numeric) && numeric > 0 ? numeric : 10;
+  return { state: 'retryable_failure', error, retryAfterSeconds: Math.min(300, seconds) };
+}
+
 export const falAdapter: ProviderAdapter = {
   provider: 'fal',
 
@@ -156,53 +170,71 @@ export const falAdapter: ProviderAdapter = {
   },
 
   async check(providerRef: string): Promise<CheckResult> {
-    const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
-    if (!ref.statusUrl?.startsWith(FAL_BASE) || !ref.responseUrl?.startsWith(FAL_BASE)) {
-      return { state: 'failed', error: 'fal ref missing queue urls' };
+    try {
+      const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
+      if (!ref.statusUrl?.startsWith(FAL_BASE) || !ref.responseUrl?.startsWith(FAL_BASE)) {
+        return { state: 'failed', error: 'fal ref missing queue urls' };
+      }
+      const statusRes = await fetch(ref.statusUrl, {
+        headers: { Authorization: `Key ${key()}` },
+      });
+      if (!statusRes.ok) return falHttpFailure(statusRes);
+      const status = await statusRes.json();
+      if (status.status === 'IN_QUEUE' && typeof status.queue_position === 'number') {
+        return { state: 'running', phase: 'queued', queuePosition: status.queue_position };
+      }
+      if (status.status === 'IN_QUEUE') return { state: 'running', phase: 'queued' };
+      if (status.status === 'IN_PROGRESS') return { state: 'running', phase: 'rendering' };
+      if (status.status !== 'COMPLETED') {
+        return { state: 'failed', error: `fal status ${status.status}` };
+      }
+      const resultRes = await fetch(ref.responseUrl, {
+        headers: { Authorization: `Key ${key()}` },
+      });
+      if (!resultRes.ok) return falHttpFailure(resultRes);
+      const result = await resultRes.json();
+      if (result.video?.url) {
+        return { state: 'done', url: result.video.url, contentType: 'video/mp4' };
+      }
+      const imageUrl = result.images?.[0]?.url ?? result.image?.url;
+      if (!imageUrl) return { state: 'failed', error: 'fal result had no image' };
+      // The bytes are downloaded by the bounded shared store, not here: an
+      // unbounded fetch inside a poll is how one oversized result takes the
+      // whole function down with it.
+      return { state: 'done', url: imageUrl, contentType: 'image/png' };
+    } catch (error) {
+      // A ref we cannot parse will never parse; retrying it forever is worse
+      // than failing it. Anything else is transport, and must not refund.
+      if (error instanceof SyntaxError) {
+        return { state: 'failed', error: 'invalid_provider_reference' };
+      }
+      return { state: 'retryable_failure', error: 'fal_unreachable', retryAfterSeconds: 10 };
     }
-    const statusRes = await fetch(ref.statusUrl, {
-      headers: { Authorization: `Key ${key()}` },
-    });
-    if (!statusRes.ok) return { state: 'failed', error: `fal status ${statusRes.status}` };
-    const status = await statusRes.json();
-    if (status.status === 'IN_QUEUE' && typeof status.queue_position === 'number') {
-      return { state: 'running', phase: 'queued', queuePosition: status.queue_position };
-    }
-    if (status.status === 'IN_QUEUE') return { state: 'running', phase: 'queued' };
-    if (status.status === 'IN_PROGRESS') return { state: 'running', phase: 'rendering' };
-    if (status.status !== 'COMPLETED') {
-      return { state: 'failed', error: `fal status ${status.status}` };
-    }
-    const resultRes = await fetch(ref.responseUrl, {
-      headers: { Authorization: `Key ${key()}` },
-    });
-    if (!resultRes.ok) {
-      const detail = (await resultRes.text()).slice(0, 300);
-      return { state: 'failed', error: `fal result ${resultRes.status}: ${detail}` };
-    }
-    const result = await resultRes.json();
-    if (result.video?.url) return { state: 'done', url: result.video.url, contentType: 'video/mp4' };
-    const imageUrl = result.images?.[0]?.url ?? result.image?.url;
-    if (!imageUrl) return { state: 'failed', error: 'fal result had no image' };
-    const { bytes, contentType } = await fetchBytes(imageUrl);
-    return { state: 'done', bytes, contentType };
   },
 
-  async cancel(providerRef: string): Promise<void> {
-    const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
-    if (!ref.statusUrl?.startsWith(FAL_BASE) || !ref.responseUrl?.startsWith(FAL_BASE)) return;
-    const statusRes = await fetch(ref.statusUrl, { headers: { Authorization: `Key ${key()}` } });
-    if (!statusRes.ok) {
-      throw new Error(`fal cancel status ${statusRes.status}: ${(await statusRes.text()).slice(0, 300)}`);
-    }
-    const status = (await statusRes.json()) as { status: string };
-    if (status.status !== 'IN_QUEUE') return;
-    const cancelRes = await fetch(`${ref.responseUrl}/cancel`, {
-      method: 'PUT',
-      headers: { Authorization: `Key ${key()}` },
-    });
-    if (!cancelRes.ok) {
-      throw new Error(`fal cancel ${cancelRes.status}: ${(await cancelRes.text()).slice(0, 300)}`);
+  /**
+   * fal only cancels a request that is still IN_QUEUE. Ask first: reporting
+   * `cancelled` for a request already rendering would refund a customer for
+   * work fal still charges us for, and leave the output orphaned.
+   */
+  async cancel(providerRef: string): Promise<CancelOutcome> {
+    try {
+      const ref = JSON.parse(providerRef) as { statusUrl?: string; responseUrl?: string };
+      if (!ref.statusUrl?.startsWith(FAL_BASE) || !ref.responseUrl?.startsWith(FAL_BASE)) {
+        return 'unsupported';
+      }
+      const statusRes = await fetch(ref.statusUrl, { headers: { Authorization: `Key ${key()}` } });
+      if (!statusRes.ok) return 'unreachable';
+      const status = (await statusRes.json()) as { status: string };
+      if (status.status !== 'IN_QUEUE') return 'too_late';
+      const cancelRes = await fetch(`${ref.responseUrl}/cancel`, {
+        method: 'PUT',
+        headers: { Authorization: `Key ${key()}` },
+      });
+      if (!cancelRes.ok) return 'unreachable';
+      return 'cancelled';
+    } catch {
+      return 'unreachable';
     }
   },
 };

@@ -1,4 +1,11 @@
-import type { CheckResult, ProviderAdapter, SubmitCtx, SubmitResult } from './types.ts';
+import type {
+  CancelOutcome,
+  CheckResult,
+  ProviderAdapter,
+  SubmitCtx,
+  SubmitResult,
+} from './types.ts';
+import { classifyStatus } from './provider-errors.ts';
 
 const API_BASE = 'https://api.dev.runwayml.com/v1';
 const API_VERSION = '2024-11-06';
@@ -34,6 +41,15 @@ function isBlocked(code: string | undefined, message: string | undefined): boole
   return text.includes('SAFETY') || text.includes('MODERATION');
 }
 
+/** Runway being busy is not the task failing; see falHttpFailure for the rule. */
+function runwayHttpFailure(response: Response): CheckResult {
+  const error = `runway_http_${response.status}`;
+  if (classifyStatus(response.status) !== 'retryable') return { state: 'failed', error };
+  const numeric = Number(response.headers.get('retry-after'));
+  const seconds = Number.isFinite(numeric) && numeric > 0 ? numeric : 10;
+  return { state: 'retryable_failure', error, retryAfterSeconds: Math.min(300, seconds) };
+}
+
 export const runwayAdapter: ProviderAdapter = {
   provider: 'runway',
 
@@ -65,7 +81,9 @@ export const runwayAdapter: ProviderAdapter = {
   async check(providerRef: string): Promise<CheckResult> {
     if (!/^[\w-]+$/.test(providerRef)) return { state: 'failed', error: 'bad_provider_ref' };
     const res = await fetch(`${API_BASE}/tasks/${providerRef}`, { headers: headers() });
-    if (!res.ok) throw new Error(`runway poll ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    // A 429 or a 502 is Runway being busy, not the task failing. Throwing here
+    // used to reach the gateway's catch-all and refund a job still rendering.
+    if (!res.ok) return runwayHttpFailure(res);
     const t = (await res.json()) as {
       status: string;
       progress?: number;
@@ -85,9 +103,19 @@ export const runwayAdapter: ProviderAdapter = {
     return { state: 'failed', error: isBlocked(t.failureCode, t.failure) ? 'provider_blocked' : 'provider_failed' };
   },
 
-  async cancel(providerRef: string): Promise<void> {
-    if (!/^[\w-]+$/.test(providerRef)) return;
-    const res = await fetch(`${API_BASE}/tasks/${providerRef}`, { method: 'DELETE', headers: headers() });
-    if (!res.ok) throw new Error(`runway cancel ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  /** Runway can cancel a running task; a 404/409 means it already finished. */
+  async cancel(providerRef: string): Promise<CancelOutcome> {
+    if (!/^[\w-]+$/.test(providerRef)) return 'unsupported';
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${providerRef}`, {
+        method: 'DELETE',
+        headers: headers(),
+      });
+      if (res.ok) return 'cancelled';
+      if (res.status === 404 || res.status === 409) return 'too_late';
+      return 'unreachable';
+    } catch {
+      return 'unreachable';
+    }
   },
 };

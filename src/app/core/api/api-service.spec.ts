@@ -18,6 +18,24 @@ describe('ApiService', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it('sends an idempotency key when one is given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await api.post('/generations', { prompt: 'x' }, { idempotencyKey: 'key-1' });
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe('key-1');
+  });
+
+  it('sends no idempotency header when none is given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const api = makeApi('tok');
+    await api.post('/generations', { prompt: 'x' });
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBeUndefined();
+  });
+
   it('maps error body to ApiError with status and attaches bearer token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: { code: 'insufficient_credits', message: 'Top up' } }), {

@@ -8,7 +8,7 @@
   <div class="pv-bar" role="progressbar" [attr.aria-valuenow]="percent()" aria-valuemin="0" aria-valuemax="100">
     <div class="pv-bar-fill" [style.--p]="progress()"></div>
   </div>
-  <p class="pv-note">You can leave this page. We'll notify you when it's ready.</p>
+  <p class="pv-note">{{ note() }}</p>
   @if (cancellable()) {
     <button type="button" class="pv-cancel" (click)="onCancel($event)">
       <ng-icon name="lucideX" size="12" />

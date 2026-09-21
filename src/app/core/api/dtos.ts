@@ -128,6 +128,8 @@ export interface CreateGenerationResponse {
 }
 
 export interface CancelJobResponse {
+  /** The request was recorded; the worker asks the provider. */
+  cancelling?: boolean;
   refundedCredits: number;
   credits: CreditsDto;
 }

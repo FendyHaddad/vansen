@@ -1,6 +1,7 @@
 import { assertEquals } from 'jsr:@std/assert';
 import { createApp } from './app.ts';
 import { fakeAdapter, FakeDb, TEST_USER, testDeps } from './testing/fakes.ts';
+import { runWorkerTick } from './_shared/testing/worker.ts';
 import { MODEL_FAMILIES } from './_shared/model-families.ts';
 
 const AUTH = { authorization: 'Bearer test-token' };
@@ -24,22 +25,6 @@ function ready(db: FakeDb, familyId: string) {
     },
   ];
   db.storage.from('uploads').upload(MINE, new Uint8Array([1]), { contentType: 'image/png' });
-  db.rpcHandlers.fn_charge_and_generate = (args) => {
-    const items = args.p_items as Record<string, unknown>[];
-    return items.map((item, i) => ({
-      id: `g${i}`,
-      user_id: TEST_USER,
-      kind: item.kind,
-      family_id: item.familyId,
-      family_name: item.familyName,
-      op: item.op,
-      prompt: item.prompt,
-      settings: item.settings,
-      price_credits: item.priceCredits,
-      status: 'pending',
-      media_path: null,
-    }));
-  };
 }
 
 // Driven from the catalog, not a literal list: FLUX dropped its reference
@@ -75,8 +60,15 @@ for (const familyId of REFERENCE_FAMILIES) {
       }),
     });
 
-    assertEquals(res.status, 200);
-    assertEquals(db.rpcCalls.filter((r) => r.name === 'fn_charge_and_generate').length, 1);
+    // The route reserves and returns; nothing has been sent yet.
+    assertEquals(res.status, 202);
+    assertEquals(db.rpcCalls.filter((r) => r.name === 'fn_reserve_generation').length, 1);
+    assertEquals(provider.submits.length, 0);
+
+    // The worker re-signs the reference from the stored upload path and
+    // submits it — hours later, in production.
+    await runWorkerTick(db, { adapterFor: () => provider.adapter });
+
     assertEquals(provider.submits.length, 1);
     assertEquals(provider.submits[0].op, 'generate');
     assertEquals(typeof provider.submits[0].referenceUrl, 'string');

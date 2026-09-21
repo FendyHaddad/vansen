@@ -27,6 +27,11 @@ export class GenerationStore {
   private readonly notifications = inject(NotificationStore);
   private readonly profile = inject(ProfileStore);
 
+  /** Request fingerprint -> the key its retries must reuse. */
+  private readonly submissionKeys = new Map<string, string>();
+  /** Request fingerprint -> the call already running for it. */
+  private readonly inflight = new Map<string, Promise<GenerationDto[]>>();
+
   private readonly itemsSig = signal<GenerationDto[]>([]);
   private readonly loadedSig = signal(false);
 
@@ -78,8 +83,42 @@ export class GenerationStore {
   }
 
   /** Charges on the server, prepends the created items, updates the balance. */
+  /**
+   * One submission, however many times the button is pressed.
+   *
+   * The idempotency key belongs to the REQUEST, not to the call: a retry of a
+   * submission that failed halfway reuses it and is answered with the first
+   * result instead of charging twice, while an edited prompt is a different
+   * submission and gets its own key. A second click while the first is still
+   * in flight joins that request rather than starting another.
+   */
   async create(request: CreateGenerationRequest): Promise<GenerationDto[]> {
-    const response = await this.api.post<CreateGenerationResponse>('/generations', request);
+    const fingerprint = JSON.stringify(request);
+    const inflight = this.inflight.get(fingerprint);
+    if (inflight) return await inflight;
+
+    const key = this.submissionKeys.get(fingerprint) ?? crypto.randomUUID();
+    this.submissionKeys.set(fingerprint, key);
+    const run = this.send(request, key, fingerprint);
+    this.inflight.set(fingerprint, run);
+    try {
+      return await run;
+    } finally {
+      this.inflight.delete(fingerprint);
+    }
+  }
+
+  private async send(
+    request: CreateGenerationRequest,
+    idempotencyKey: string,
+    fingerprint: string,
+  ): Promise<GenerationDto[]> {
+    const response = await this.api.post<CreateGenerationResponse>('/generations', request, {
+      idempotencyKey,
+    });
+    // Accepted: the key has done its job. Deliberately submitting the same
+    // prompt again is a NEW piece of work and must not replay this one.
+    this.submissionKeys.delete(fingerprint);
     this.itemsSig.update((list) => [...response.items, ...list]);
     this.ledger.setCredits(response.credits);
     void this.persist();
@@ -125,13 +164,17 @@ export class GenerationStore {
     () => this.itemsSig().filter((i) => i.status === 'pending' && i.kind === 'video').length,
   );
 
+  /**
+   * Ask for a cancellation. The answer is 202, not a refund: only the worker
+   * can ask the provider whether it actually stopped, and a render that is
+   * already running is still billed to us. The item therefore stays pending —
+   * the poller reports the real outcome — and only the button goes away.
+   */
   async cancel(id: string): Promise<number> {
     const res = await this.api.post<CancelJobResponse>(`/jobs/${id}/cancel`, {});
     this.itemsSig.update((list) =>
-      // Cancelled, not failed: the grid reads `error` to say so instead of
-      // offering a retry for something the user deliberately stopped.
       list.map((i) =>
-        i.id === id ? { ...i, status: 'failed' as const, error: 'cancelled', job: undefined } : i
+        i.id === id && i.job ? { ...i, job: { ...i.job, cancellable: false } } : i
       ),
     );
     this.ledger.setCredits(res.credits);
