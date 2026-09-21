@@ -177,8 +177,8 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | Item | State |
 |---|---|
 | `0025_release_telemetry.sql` | **applied to production 2026-09-22.** See §10 |
-| `api` | v44 deployed — predates the manifest route and the error-id change |
-| `stripe-webhook`, `appstore-webhook` | **not redeployed since P2 rewrote them** |
+| `api` | **v49**, deployed 2026-09-21 — predates the manifest route and the error-id change |
+| `stripe-webhook` v19, `appstore-webhook` v9 | last deployed **2026-07-15** and **2026-07-18** — two months before P2 rewrote them |
 | `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | unset, so the manifest would report `unknown` |
 | `RUNWAY_API_KEY` | unset |
 | R2 CORS policy, `storage_config.r2_bucket` row | not created |

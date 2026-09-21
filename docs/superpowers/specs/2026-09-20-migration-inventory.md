@@ -137,8 +137,8 @@ inferred.
 
 | Item | Observed |
 |---|---|
-| Edge functions | `api` v44, `job-worker` v3, `cleanup-worker` v2 — all deployed `--no-verify-jwt` |
-| Functions in repo not deployed this cycle | `stripe-webhook`, `appstore-webhook` — **redeploy pending** (P2 rewrote both) |
+| Edge functions | `api` **v49**, `job-worker` **v8**, `cleanup-worker` **v7** — all deployed 2026-09-21, `--no-verify-jwt`. (An earlier draft of this table said v44/v3/v2; that reading was stale, corrected 2026-09-22 from `supabase functions list`.) |
+| Functions in repo not deployed this cycle | `stripe-webhook` v19 (last deployed **2026-07-15**), `appstore-webhook` v9 (**2026-07-18**) — both predate P2's 2026-09-20 rewrite by two months. **Redeploy pending.** |
 | Cron jobs | `advance_account_deletions`, `drive_cleanup_worker`, `drive_job_worker`, `expire_lapsed_packs`, `purge_app_errors`, `purge_lapsed`, `reap_deleted_content`, `reconcile_stale_jobs`, `reconcile_stale_trainings` |
 | Enabled model families | `edit-bg`, `edit-expand`, `edit-fill`, `edit-remove`, `flux`, `gpt-image`, `nano-banana`, `persona`, `seedream`, `upscaler` |
 | Disabled families | all five video families (`veo`, `omni`, `kling`, `seedance`, `runway`) |
