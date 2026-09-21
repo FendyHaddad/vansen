@@ -401,3 +401,29 @@ A second correction, owed to the owner who caught it: I described `runway` as a
 live manifest. **No Runway generation has ever run.** Reporting a code mapping
 as an operating integration was the same mistake as reporting `api` v44 when it
 was v49: describing a file instead of checking the running system.
+
+### 2026-09-22 — catalog refresh deployed
+
+Commit `81552a1`, `api` **v55**. Read back from production:
+
+```
+gitRevision    81552a1      ← matches the commit
+workerVersion  v55
+deployedAt     2026-09-21T20:17:39Z
+schemaVersion  0025
+catalogVersion 2026-09-22.1 ← the proof the new bundle shipped
+```
+
+`catalogVersion` moving from `2026-09-21.1` is what establishes that the new
+`_shared` bundle actually went out, and with it the change that matters:
+`nano-banana` **fast** no longer calls `gemini-2.5-flash-image`, which Google
+shuts down on **2026-10-02**. That failure is averted with eleven days to
+spare. Also live: `gpt-image` version 1 withdrawn, 2.5 Flare and 2.5 Sunburst
+added.
+
+The first read after deploy reported `workerVersion v51` against an actual v55
+— the secret had been set from the previous deploy and no longer matched. The
+manifest catching its own staleness is the mechanism working, not failing.
+
+**Not yet done:** the new Dart fixture in `contracts/catalog/` has not been
+handed to the mobile repo, so mobile is one catalog version behind.

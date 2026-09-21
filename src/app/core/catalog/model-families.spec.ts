@@ -64,6 +64,27 @@ describe('model families', () => {
     expect(
       gpt.providerCost({ version: '2', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
     ).toBeCloseTo(0.0123, 3);
+    // The 4K multiplier is not version-2-only. When 2.5 shipped it inherited
+    // the flat 1K figure at every size, so a 4K render was sold at the 1K cost
+    // and the margin came out of us.
+    expect(
+      gpt.providerCost({ version: '2.5-flare', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
+    ).toBeCloseTo(0.00588 * 2.05, 5);
+    // 1.5 cannot produce 4K, so it never multiplies whatever it is sent.
+    expect(
+      gpt.providerCost({ version: '1.5', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
+    ).toBeCloseTo(0.009);
+  });
+
+  it('gpt image offers 2K and 4K on every version that can render them', () => {
+    const gpt = familyById('gpt-image')!;
+    const limits = gpt.capabilities.versionResolutions ?? {};
+    // Only 1.5 is capped. A version missing from the map is unrestricted, so
+    // adding a model cannot silently withhold tiers it supports.
+    expect(limits['1.5']).toEqual(['1K']);
+    for (const version of ['2', '2.5-flare', '2.5-sunburst']) {
+      expect(limits[version]).toBeUndefined();
+    }
   });
 
   it('video cost scales with duration', () => {

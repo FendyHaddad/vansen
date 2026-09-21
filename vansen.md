@@ -269,8 +269,9 @@ true at this revision; the dated evidence for every line is in
 `docs/superpowers/plans/2026-09-20-release-evidence.md`, and the ordered
 deployment procedure is `docs/superpowers/plans/2026-09-20-release-runbook.md`.
 
-Deployed 2026-09-22 from commit `c4a6953`: `api` **v51** (first version carrying
-`/manifest` and the quotable error id), `stripe-webhook` **v21** and
+Deployed 2026-09-22: `api` **v55** from commit `81552a1` (catalog `2026-09-22.1`
+— GPT Image 2.5 added, version 1 withdrawn, and `nano-banana` fast repointed off
+a model Google shuts down on 2026-10-02). `stripe-webhook` **v21** and
 `appstore-webhook` **v11** — both had been stale since July, two months before
 P2 rewrote them. `job-worker` v9, `cleanup-worker` v8 unchanged. Production schema is at **`0025`** — `0025_release_telemetry.sql` was applied
 2026-09-22 and `fn_check_alerts()` runs clean against the live database with

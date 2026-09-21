@@ -213,23 +213,13 @@ export class LeftPanel {
     if (!f.capabilities.resolutions) return null;
     // Aspect-driven limits first: FLUX.2 cannot fill a 4MP tier off-square.
     const list = resolutionsFor(f, this.settings().aspectRatio);
-    // GPT Image: 2K/4K exist on version 2 only
-    if (f.id === 'gpt-image' && this.settings().version !== '2') {
-      return list.filter((o) => o.value === '1K');
-    }
-    // Nano Banana Fast outputs ~1K only
-    if (f.id === 'nano-banana' && this.settings().version === 'fast') {
-      return list.filter((o) => o.value === '1K');
-    }
-    // Veo Fast has no 4K
-    if (f.id === 'veo' && this.settings().version === 'fast') {
-      return list.filter((o) => o.value !== '4K');
-    }
-    // Veo Lite tops out at 1080p
-    if (f.id === 'veo' && this.settings().version === 'lite') {
-      return list.filter((o) => o.value !== '4K');
-    }
-    return list;
+    // Then the per-version ceiling, which the catalog carries as data. Reading
+    // it from the family rather than naming versions here is deliberate: the
+    // hardcoded form withheld 2K and 4K from GPT Image 2.5 the day it shipped.
+    const version = this.settings().version;
+    const allowed = version ? f.capabilities.versionResolutions?.[version] : undefined;
+    if (!allowed) return list;
+    return list.filter((o) => allowed.includes(o.value));
   });
 
   readonly qualityOptions = computed<FamilyOption[] | null>(

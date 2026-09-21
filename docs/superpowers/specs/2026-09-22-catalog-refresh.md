@@ -188,3 +188,35 @@ production. When someone smokes a 2.5 generation, move the flag.
   is ever allowed above 1K the rate must be rechecked.
 - `npm run verify` is green, but **this does not reach customers until `api` is
   redeployed**, and the new Dart fixture must be handed to the mobile repo.
+
+## 10. Two defects shipped with the 2.5 addition, fixed 2026-09-22 (catalog `2026-09-22.2`)
+
+Adding two versions to a family exposed two places that named a version by hand
+rather than reading the catalog. Both shipped to production in `2026-09-22.1`.
+
+**The 2.5 models were sold at 1K only.** `LeftPanel.resolutionOptions` filtered
+with `f.id === 'gpt-image' && version !== '2'`, a literal written when `2` was
+the only version that could exceed 1K. GPT Image 2.5 Flare and Sunburst both
+take arbitrary sizes to 3840×2160 — the server already knew this, because
+`gptMaxResolution` in `_shared/provider-capabilities.json` was updated — so the
+composer withheld a capability the API would have served.
+
+The per-version ceiling is now catalog data (`capabilities.versionResolutions`,
+keyed by version, absent meaning unrestricted). The same move retired the three
+other literals in that method, for Nano Banana Fast and Veo Fast/Lite.
+
+**A 4K render on a 2.5 model was priced as 1K.** `providerCost` read
+`version === '2' && resolution === '4K' ? 2.05 : 1`, so the 2.05× area
+multiplier did not apply to the new versions. Combined with the first defect
+the money was not actually at risk — the tier could not be selected — but
+either fix alone would have left a live underpriced path. The multiplier now
+applies to every version except `1.5`, which cannot render 4K at all.
+
+The 2.05× figure is version 2's, and its application to the 2.5 models is
+**assumed, not measured**, for the same reason §5 lists: the one real
+generation with `usage` read back has still not been run.
+
+Tests added: `model-families.spec.ts` pins the 4K multiplier on 2.5 and the
+`versionResolutions` shape; `left-panel.spec.ts` asserts 2K/4K are offered on
+`2`, `2.5-flare` and `2.5-sunburst`, that `1.5` caps at 1K and drags a stale 4K
+selection down with it, and that Nano Banana Fast is still capped.

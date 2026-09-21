@@ -220,6 +220,46 @@ describe('LeftPanel resolution tiers follow the aspect ratio', () => {
 });
 
 /**
+ * The panel used to name GPT Image version '2' in a literal, so the two 2.5
+ * models shipped on 2026-09-22 offering 1K only — a capability we sell, hidden
+ * by the control that was supposed to expose it. The ceiling is catalog data
+ * now; these lock the offer to it.
+ */
+describe('LeftPanel resolution tiers follow the model version', () => {
+  it('offers 2K and 4K on GPT Image 2 and both 2.5 models', () => {
+    const component = makeComponent();
+    component.selectFamily('gpt-image');
+
+    for (const version of ['2', '2.5-flare', '2.5-sunburst']) {
+      component.setAxis('version', version);
+      expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K', '2K', '4K']);
+    }
+  });
+
+  it('caps GPT Image 1.5 at 1K and pulls a 4K selection back down', () => {
+    const component = makeComponent();
+    component.selectFamily('gpt-image');
+    component.setAxis('version', '2');
+    component.setAxis('resolution', '4K');
+
+    component.setAxis('version', '1.5');
+
+    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K']);
+    expect(component.settings().resolution).toBe('1K');
+  });
+
+  it('still caps Nano Banana Fast at 1K', () => {
+    const component = makeComponent();
+    component.selectFamily('nano-banana');
+    component.setAxis('version', 'fast');
+    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K']);
+
+    component.setAxis('version', 'standard');
+    expect(component.resolutionOptions()?.map((o) => o.value)).toEqual(['1K', '2K', '4K']);
+  });
+});
+
+/**
  * R25: the composer must not offer Generate for a request it would have to
  * compact. ref2v accepts 1–3 references, so [empty, filled] passes a naive
  * count and would ship the second reference as the first.

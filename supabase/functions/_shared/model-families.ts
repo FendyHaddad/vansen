@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-22.1';
+export const CATALOG_VERSION = '2026-09-22.2';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -69,6 +69,17 @@ export interface ModelFamily {
      * offered at a price that describes the unclamped size.
      */
     resolutionExclusions?: Record<string, string[]>;
+    /**
+     * Resolution tiers each version can actually produce, keyed by version.
+     * A version absent from this map is unrestricted.
+     *
+     * This lives here as data because it used to live in the left panel as a
+     * hardcoded `version !== '2'`: adding GPT Image 2.5 on 2026-09-22 silently
+     * withheld 2K and 4K from the two new models, which both support them.
+     * Encoding the limit next to the versions it describes means adding a
+     * version cannot quietly narrow the offer again.
+     */
+    versionResolutions?: Record<string, string[]>;
     qualities?: FamilyOption[];
     durations?: number[];
     audio?: AudioCapability;
@@ -275,6 +286,10 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] },
         { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] },
       ],
+      // Gemini 3.1 Flash Lite Image outputs ~1K only.
+      versionResolutions: {
+        fast: ['1K'],
+      },
       imageInput: true,
       maskInput: false,
     },
@@ -293,7 +308,7 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'OpenAI',
     logo: '/logos/openai.svg',
     kind: 'image',
-    blurb: 'Quality dial for compute effort; v2 adds true 4K and masked edits.',
+    blurb: 'Quality dial for compute effort; 2 and 2.5 add true 4K and masked edits.',
     capabilities: {
       versions: [
         { value: '1.5', label: '1.5', tooltip: 'Previous generation, ~1K output.' },
@@ -318,9 +333,15 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       aspectRatios: AR_IMAGE,
       resolutions: [
         { value: '1K', label: '1K', tooltip: RES_TOOLTIPS['1K'] },
-        { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] + ' (GPT Image 2 only.)' },
-        { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] + ' (GPT Image 2 only.)' },
+        { value: '2K', label: '2K', tooltip: RES_TOOLTIPS['2K'] + ' (Not on version 1.5.)' },
+        { value: '4K', label: '4K', tooltip: RES_TOOLTIPS['4K'] + ' (Not on version 1.5.)' },
       ],
+      // gpt-image-1.5 accepts only the three standard sizes, so every request
+      // collapses to ~1K. Versions 2 and both 2.5 models take arbitrary
+      // dimensions up to 3840x2160 — see `_shared/provider-capabilities.json`.
+      versionResolutions: {
+        '1.5': ['1K'],
+      },
       qualities: [
         { value: 'low', label: 'Low', tooltip: GPT_QUALITY_TOOLTIPS['low'] },
         { value: 'medium', label: 'Medium', tooltip: GPT_QUALITY_TOOLTIPS['medium'] },
@@ -330,9 +351,16 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       maskInput: true,
     },
     providerCost: (s) => {
-      const base = GPT_COST[s.version ?? '2']?.[s.quality ?? 'medium'] ?? 0.053;
-      const mult = (s.version ?? '2') === '2' && s.resolution === '4K' ? 2.05 : 1;
-      return base * mult;
+      const version = s.version ?? '2';
+      const base = GPT_COST[version]?.[s.quality ?? 'medium'] ?? 0.053;
+      // OpenAI bills image output tokens, and tokens track pixel area, so a 4K
+      // render costs materially more than the 1024x1024 the GPT_COST rows are
+      // quoted at. 2.05x is the ratio measured for version 2. It is applied to
+      // the 2.5 models on the assumption that they bill the same way; that is
+      // NOT verified — see docs/superpowers/specs/2026-09-22-catalog-refresh.md.
+      // Version 1.5 cannot produce 4K at all, so it never multiplies.
+      if (version === '1.5' || s.resolution !== '4K') return base;
+      return base * 2.05;
     },
   },
   {
@@ -409,6 +437,11 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         { value: '1080p', label: '1080p', tooltip: 'Full HD. Standard $0.40/s, Fast $0.12/s.' },
         { value: '4K', label: '4K', tooltip: 'Ultra HD. Standard and Fast only.' },
       ],
+      // Veo Lite tops out at 1080p; Fast is sold without a 4K tier.
+      versionResolutions: {
+        fast: ['720p', '1080p'],
+        lite: ['720p', '1080p'],
+      },
       durations: [4, 6, 8],
       audio: 'included',
       modes: ['t2v', 'i2v', 'ref2v', 'keyframes', 'extend'],
