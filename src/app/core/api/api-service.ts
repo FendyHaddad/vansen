@@ -22,10 +22,31 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly details: Record<string, unknown> = {},
+    /**
+     * The gateway's id for this exact failure, for a support conversation.
+     * Empty when the server did not give one — never invented, because an id
+     * that matches no log line is worse than none.
+     */
+    readonly errorId: string = '',
   ) {
     super(message);
   }
 }
+
+/**
+ * A read that has not answered in thirty seconds is not going to.
+ *
+ * Before this, no request carried a deadline at all: a hung connection hung
+ * the UI until the user reloaded, and the 408 and 504 copy in STATUS_MESSAGES
+ * was unreachable because nothing could ever time out.
+ */
+export const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * An upload of a large reference over a phone connection legitimately takes
+ * longer than a read. Failing it at thirty seconds would break a working flow.
+ */
+export const UPLOAD_TIMEOUT_MS = 120_000;
 
 export type TokenProvider = () => Promise<string | null>;
 
@@ -105,7 +126,7 @@ export class ApiService {
     const token = await this.tokenProvider();
     const headers: Record<string, string> = { 'x-vansen-client': 'web' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await this.fetch('POST', path, { headers, body: form });
+    const response = await this.fetch('POST', path, { headers, body: form }, UPLOAD_TIMEOUT_MS);
     const parsed = await this.handle<T>('POST', path, response);
     return this.fresh(epoch, path, parsed);
   }
@@ -143,11 +164,31 @@ export class ApiService {
     throw new StaleSessionError(path);
   }
 
-  /** Runs fetch; turns a dropped connection into a readable ApiError instead of a raw TypeError. */
-  private async fetch(method: string, path: string, init: RequestInit): Promise<Response> {
+  /**
+   * Runs fetch under a deadline; turns a dropped connection or an expired
+   * deadline into a readable ApiError instead of a raw TypeError.
+   *
+   * The two are kept apart deliberately. "Check your connection" is wrong and
+   * unhelpful advice when the connection is fine and the server is simply
+   * taking too long.
+   */
+  private async fetch(
+    method: string,
+    path: string,
+    init: RequestInit,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
+  ): Promise<Response> {
     try {
-      return await fetch(environment.apiBaseUrl + path, { method, ...init });
+      return await fetch(environment.apiBaseUrl + path, {
+        method,
+        ...init,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        console.error(`[api] ${method} ${path} — no answer in ${timeoutMs}ms`);
+        throw new ApiError('timeout', friendlyMessage(408), 408);
+      }
       console.error(`[api] ${method} ${path} — network error`, err);
       throw new ApiError(
         'network',
@@ -167,10 +208,14 @@ export class ApiService {
     const parsed = await response.json().catch(() => null);
     const code = parsed?.error?.code ?? 'unknown';
     const message = parsed?.error?.message ?? friendlyMessage(response.status);
+    // The body is the better source, but an edge-level 502 never reaches our
+    // handler to put one there -- the gateway's header still carries it.
+    const errorId = parsed?.error?.errorId ?? response.headers.get('x-request-id') ?? '';
     console.error(
       `[api] ${method} ${path} — ${response.status} ${code}: ${message}`,
+      errorId ? `(id ${errorId})` : '(no id)',
       parsed ?? '(no body)',
     );
-    throw new ApiError(code, message, response.status, parsed?.error ?? {});
+    throw new ApiError(code, message, response.status, parsed?.error ?? {}, errorId);
   }
 }

@@ -1,18 +1,30 @@
-# Punchlist — as of 2026-09-06
+# Punchlist — as of 2026-09-22
 
-Working tree has Video (Phase 4b) code plus this doc refresh (`README.md`, `vansen.md`,
-`CLAUDE.md`, this file) uncommitted. All automated gates are green: `ng build` clean,
-239 vitest + 40 deno tests; `api` v41 deployed 2026-08-14; Phase 4b gateway changes (video branch, cancel, thumb, R2) are NOT yet deployed
-for everything except Video, whose deploy is pending redeploy (see 🟡 below), health
-`{"ok":true,"db":true}`.
+Superseded in part by the release hardening plans P1–P9. The authoritative record
+of what is proven is
+[`plans/2026-09-20-release-evidence.md`](plans/2026-09-20-release-evidence.md);
+the deployment procedure is
+[`plans/2026-09-20-release-runbook.md`](plans/2026-09-20-release-runbook.md).
+Where this file and those disagree, those win.
+
+Automated gates at 2026-09-22: 565 vitest, 530 deno, 72 script tests, 11 SQL and
+concurrency gates, production build clean, all against a database reset from
+empty (0001→0025). **`npm run verify` exits 0.** `api` v44 is
+deployed and predates the P9 manifest and error-id work; `stripe-webhook` and
+`appstore-webhook` have not been redeployed since P2 rewrote them. Production
+schema is `0024`; `0025_release_telemetry.sql` is not applied.
+
+Still-open items below that the release documents also track: persona live smoke
+(#2) and the go-live blockers (#4). Item #1 is **done** — see below.
 
 ---
 
 ## 🔴 Needs your attention (paid or account-level — yours to run)
 
-### 1. Trend thumbnails not generated (~$0.50 OpenAI)
-Trend tiles bind to `/trends/<id>.webp`; `public/trends/` does not exist, so tiles render
-alt text. Run:
+### 1. ~~Trend thumbnails not generated~~ — DONE 2026-09-22
+All twelve generated with `gpt-image-1` (low quality, ~$0.50), converted to 160px webp in
+`public/trends/`, each reviewed by eye. `npm run check:assets` reports 12/12. Regenerate
+with:
 ```bash
 OPENAI_API_KEY=… node scripts/gen-trend-thumbs.mjs public/trends
 ```

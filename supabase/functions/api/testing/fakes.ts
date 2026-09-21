@@ -210,6 +210,9 @@ export function testDeps(over: Partial<ApiDeps> = {}): ApiDeps {
       planPriceIds: {},
       launchCouponId: undefined,
       releaseFlags: { backgroundCompletion: false, completionNotifications: false },
+      // Unknown by default: a test that cares about the manifest sets these,
+      // and one that does not must not accidentally assert a real revision.
+      release: { gitRevision: "", workerVersion: "", deployedAt: null },
     },
     now: () => db.now(),
     ...over,

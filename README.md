@@ -19,7 +19,7 @@ contributors and Claude: [`CLAUDE.md`](CLAUDE.md). Open follow-ups:
 | `supabase/functions/api/` | Hono gateway Edge Function. The only data path — tables are RLS deny-all, RPCs service-role only. |
 | `supabase/functions/stripe-webhook/`, `appstore-webhook/` | Sole ledger writers for Stripe top-ups and Apple IAP respectively. |
 | `supabase/functions/_shared/` | Provider adapters, moderation, push (FCM), IAP verification, generated catalog copies. Bundled into `api` on deploy. |
-| `supabase/migrations/` | Schema record `0001` … `0015`, applied via MCP. |
+| `supabase/migrations/` | Schema record `0001` … `0025`. Inventory and applied-versus-repository mapping: `docs/superpowers/specs/2026-09-20-migration-inventory.md`. |
 | `public/styles/` | Style preset thumbnails (`public/trends/` still to be generated). |
 | `scripts/` | `sync-shared.mjs` (catalog → edge copy), `gen-style-thumbs.mjs`, `gen-trend-thumbs.mjs`. |
 | `docs/superpowers/specs/`, `plans/` | Design specs and implementation plans, dated. |
@@ -75,6 +75,45 @@ are stale. After editing anything in `src/app/core/catalog/`, run:
 npm run sync-shared
 ```
 
+## Release
+
+Every automated gate, fastest-failing first:
+
+```bash
+npm run verify
+```
+
+Set `VANSEN_LOCAL_DB` first or the SQL gates are skipped — and a skipped check is
+scored as a failure, deliberately. To get a local database to point it at:
+
+```bash
+npm run db:test:start
+```
+
+That starts the full Supabase stack (auth, storage, roles, `pg_cron`, `pg_net` —
+a bare Postgres is not equivalent and the gates would lie). It refuses to start
+against a Supabase CLI other than the pinned one, or against a migration whose
+hash is not recorded in `supabase/tests/bootstrap-manifest.json`. Stop it with
+`npm run db:test:stop`.
+
+The same gates run in CI on every push: `.github/workflows/ci.yml`.
+
+- **What is actually proven**, gate by gate, with dates:
+  [`docs/superpowers/plans/2026-09-20-release-evidence.md`](docs/superpowers/plans/2026-09-20-release-evidence.md)
+- **How to deploy**, in order, with a rollback for each step:
+  [`docs/superpowers/plans/2026-09-20-release-runbook.md`](docs/superpowers/plans/2026-09-20-release-runbook.md)
+
+### Turning a family off at three in the morning
+
+```sql
+update public.models set enabled = false where id = '<family>';
+```
+
+New submissions for that family are refused immediately. Work already in flight
+settles and refunds normally, so this is safe to run without draining anything
+first. Confirm with `GET <apiBaseUrl>/manifest`, which reports the running
+revision, the schema version and every family's flag.
+
 ## Deploy
 
 Redeploy `api` after any change under `supabase/functions/api/` or `_shared/` (the bundle
@@ -84,9 +123,11 @@ must include every `_shared/` file, including `providers/`):
 supabase functions deploy api --project-ref bnorhcxhvxydkgvcxjad --no-verify-jwt
 ```
 
-Check health at `GET <apiBaseUrl>/health` → `{"ok":true,"db":true}`. Schema changes are
-applied through the Supabase MCP tooling and recorded as a new file in
-`supabase/migrations/`.
+Check health at `GET <apiBaseUrl>/health` → `{"ok":true,"db":true}`, and confirm the
+deploy landed with `GET <apiBaseUrl>/manifest`, which reports the running git revision
+and schema version — a stale revision there means the deploy did not land. Schema
+changes go in a new file in `supabase/migrations/` and are applied with
+`supabase db push --linked`. Never renumber a migration that has been applied.
 
 ## Ground rules
 

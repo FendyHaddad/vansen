@@ -28,6 +28,20 @@ const appOrigins = (Deno.env.get("APP_ORIGIN") ?? "")
   .map((o) => o.trim())
   .filter(Boolean);
 
+/**
+ * What this deployment says it is, for `GET /manifest`.
+ *
+ * Only this file reads the environment; `app.ts` takes these as dependencies,
+ * so a test can state a revision without touching global Deno.env. Absent
+ * values stay empty and the route reports "unknown" -- never a remembered
+ * previous revision, which would make a failed deploy look successful.
+ */
+const release = {
+  gitRevision: Deno.env.get("GIT_REVISION") ?? "",
+  workerVersion: Deno.env.get("WORKER_VERSION") ?? "",
+  deployedAt: Deno.env.get("DEPLOYED_AT") ?? null,
+};
+
 const app = createApp({
   admin,
   stripe,
@@ -44,6 +58,7 @@ const app = createApp({
     },
     launchCouponId: Deno.env.get("STRIPE_LAUNCH_COUPON_ID"), // $5 off, 2 months
     releaseFlags: releaseFlagsFromEnv((k) => Deno.env.get(k)),
+    release,
   },
   now: () => new Date(),
 });

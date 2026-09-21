@@ -70,6 +70,7 @@ import {
   normalizeGenerationRequest,
   type NormalizedRequest,
   quote,
+  QUOTE_VERSION,
 } from "./_shared/generation-request.ts";
 import {
   type ReferenceError,
@@ -94,12 +95,27 @@ import { applyFulfillment } from "./_shared/billing-fulfillment.ts";
 import { settleDone, settleFailed } from "./_shared/jobs/settlement.ts";
 import { classifyProviderError } from "./_shared/providers/provider-errors.ts";
 
+/**
+ * What `GET /manifest` reports about this deployment.
+ *
+ * Set from Edge Function secrets at deploy time. Empty means "we do not know",
+ * never a remembered previous value: reporting a stale revision would make a
+ * failed deploy look like a successful one, which is the exact question the
+ * manifest exists to answer.
+ */
+export interface ReleaseIdentity {
+  gitRevision: string;
+  workerVersion: string;
+  deployedAt: string | null;
+}
+
 export interface ApiEnv {
   appOrigins: string[];
   planPriceIds: Record<string, string | undefined>;
   launchCouponId: string | undefined;
   /** Promises the deployment has been verified to keep. Default: none. */
   releaseFlags: ReleaseFlags;
+  release: ReleaseIdentity;
 }
 
 export interface ApiDeps {
@@ -317,12 +333,22 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   );
 
   function fail(
-    c: { json: (b: unknown, s: number) => Response },
+    c: {
+      json: (b: unknown, s: number) => Response;
+      get?: (k: "requestId") => string | undefined;
+    },
     status: number,
     code: string,
     message: string,
   ) {
-    return c.json({ error: { code, message } }, status);
+    // A 4xx is the caller's to fix and reads as plain advice. Attaching an
+    // incident id to "that file is too large" would suggest we think something
+    // broke, and train people to quote ids that lead nowhere useful.
+    if (status < 500) return c.json({ error: { code, message } }, status);
+    // A 5xx is ours. The id is the whole support conversation: it matches the
+    // x-request-id header and the app_errors row for this exact request.
+    const errorId = c.get?.("requestId") ?? "";
+    return c.json({ error: { code, message, errorId } }, status);
   }
 
   type ErrCtx = {
@@ -387,8 +413,13 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   app.use("*", async (c, next) => {
-    c.set("requestId", crypto.randomUUID().slice(0, 8));
+    const requestId = crypto.randomUUID().slice(0, 8);
+    c.set("requestId", requestId);
     await next();
+    // On every answer, not only the failures. The request people report is
+    // often the one that succeeded slowly, or returned the wrong thing --
+    // neither has an error body to carry the id in.
+    c.header("x-request-id", requestId);
   });
 
   // Any exception nothing else caught: log it, answer with a request id the
@@ -400,6 +431,10 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         error: {
           code: "internal",
           message: "Something went wrong",
+          // Both names, on purpose: `errorId` is what every failure now calls
+          // it, and `requestId` is what older clients already read. Dropping
+          // it would silently blind an app we cannot force to update.
+          errorId: c.get("requestId"),
           requestId: c.get("requestId"),
         },
       },
@@ -424,6 +459,43 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   app.get("/capabilities", async (c) => {
     const { data } = await admin.from("models").select("id,enabled");
     return c.json(publicCapabilities(data ?? [], deps.env.releaseFlags));
+  });
+
+  // Public, unauthenticated: exactly what is running here. After a deploy the
+  // only way to tell whether a fix was live was to try it and infer; the
+  // rollout gates in the runbook read this before and after every step.
+  //
+  // Public on purpose. It carries versions and on/off switches -- the same
+  // facts /capabilities already gives anyone -- and no names, counts, costs or
+  // credentials. A deploy check that needs a token is a deploy check nobody
+  // runs.
+  app.get("/manifest", async (c) => {
+    const { data: models } = await admin.from("models").select("id,enabled");
+    const capabilities = Object.fromEntries(
+      (models ?? []).map((m: { id: string; enabled: unknown }) => [m.id, m.enabled === true]),
+    );
+
+    // A missing or failed fn_schema_version is itself worth reporting, and is
+    // not a reason to fail the request: this endpoint is most needed exactly
+    // when something is wrong.
+    let schemaVersion = "unknown";
+    try {
+      const { data, error } = await admin.rpc("fn_schema_version");
+      if (!error && typeof data === "string" && data) schemaVersion = data;
+    } catch {
+      schemaVersion = "unknown";
+    }
+
+    const { gitRevision, workerVersion, deployedAt } = deps.env.release;
+    return c.json({
+      gitRevision: gitRevision || "unknown",
+      workerVersion: workerVersion || "unknown",
+      deployedAt: deployedAt ?? null,
+      schemaVersion,
+      catalogVersion: CATALOG_VERSION,
+      quoteVersion: QUOTE_VERSION,
+      capabilities,
+    });
   });
 
   app.use("*", async (c, next) => {

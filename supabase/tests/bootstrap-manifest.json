@@ -1,0 +1,111 @@
+{
+  "cliVersion": "2.114.0",
+  "recordedAt": "2026-09-21",
+  "note": "Regenerate with: node scripts/supabase-test-stack.mjs write-manifest",
+  "migrations": [
+    {
+      "file": "0001_foundation_schema.sql",
+      "sha256": "2d73451603b6"
+    },
+    {
+      "file": "0002_input_hardening.sql",
+      "sha256": "615ba0fe3b05"
+    },
+    {
+      "file": "0003_billing.sql",
+      "sha256": "5e29f121bd7c"
+    },
+    {
+      "file": "0004_generation.sql",
+      "sha256": "6f0f9cf91568"
+    },
+    {
+      "file": "0005_studio_editing.sql",
+      "sha256": "a0bef6d149ef"
+    },
+    {
+      "file": "0006_observability.sql",
+      "sha256": "14fc1a11fbfb"
+    },
+    {
+      "file": "0007_owner_tier.sql",
+      "sha256": "70b509d020be"
+    },
+    {
+      "file": "0008_credit_plans.sql",
+      "sha256": "2b8438f32d62"
+    },
+    {
+      "file": "00091_age_gate.sql",
+      "sha256": "9aef16ed22f4"
+    },
+    {
+      "file": "0009_pending_plan_change.sql",
+      "sha256": "815bf0b4b386"
+    },
+    {
+      "file": "0010_cancel_reason.sql",
+      "sha256": "0eb38a15f1a4"
+    },
+    {
+      "file": "0011_devices.sql",
+      "sha256": "b1a895ab5cbc"
+    },
+    {
+      "file": "0012_iap.sql",
+      "sha256": "166d67883c0c"
+    },
+    {
+      "file": "0013_personas.sql",
+      "sha256": "1624494b6d3b"
+    },
+    {
+      "file": "0014_client_tracking.sql",
+      "sha256": "35bb4346ec62"
+    },
+    {
+      "file": "0015_backoffice_feature_usage.sql",
+      "sha256": "21fe347b3721"
+    },
+    {
+      "file": "0016_video.sql",
+      "sha256": "e334b99446cc"
+    },
+    {
+      "file": "0017_upload_registry.sql",
+      "sha256": "e6b1495fc93f"
+    },
+    {
+      "file": "0018_billing_fulfillment.sql",
+      "sha256": "7fce316fa687"
+    },
+    {
+      "file": "0019_job_settlement.sql",
+      "sha256": "7b6f639c523c"
+    },
+    {
+      "file": "0020_durable_dispatch.sql",
+      "sha256": "d663bb6d54b1"
+    },
+    {
+      "file": "0021_durable_deletion.sql",
+      "sha256": "7163d945e964"
+    },
+    {
+      "file": "0022_thumbnails.sql",
+      "sha256": "47a0bdb16345"
+    },
+    {
+      "file": "0023_request_snapshots.sql",
+      "sha256": "d562b0ce2325"
+    },
+    {
+      "file": "0024_worker_drive_guard.sql",
+      "sha256": "31af71f71e5c"
+    },
+    {
+      "file": "0025_release_telemetry.sql",
+      "sha256": "4b40e52e01c4"
+    }
+  ]
+}

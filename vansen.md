@@ -262,33 +262,67 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
   spartan already provides; copy them in, style via Tailwind + CSS variables.
 
-## Status (2026-09-06)
+## Status (2026-09-22)
 
-Deployed: `api` v41 (2026-08-14, in sync with backend HEAD apart from Video — see below),
-`stripe-webhook` v12, `appstore-webhook` v2. Gates green: `ng build` clean, vitest + deno
-tests (counts in `docs/superpowers/punchlist.md`). Recent commits (07-24 → 09-05) are
-UI/auth fixes plus AI Sharpen; Video (Phase 4b) is code-complete this session but not
-yet rolled out.
+**Not released. The public does not know Vansen exists.** What follows is what is
+true at this revision; the dated evidence for every line is in
+`docs/superpowers/plans/2026-09-20-release-evidence.md`, and the ordered
+deployment procedure is `docs/superpowers/plans/2026-09-20-release-runbook.md`.
 
-**Video (Phase 4b) — code complete, rollout pending (2026-09-06):** five families
-(Veo 3.1, Gemini Omni Flash 1.1, Kling 3.0 Pro, Runway Gen-4.5, Seedance 2.5),
-full mode matrix, R2 storage, waiting UX, caps and refunds all implemented per
-`docs/superpowers/specs/2026-09-05-video-generation-phase4b-design.md`. Still pending
-(user, needs Cloudflare/Supabase credentials + a live Pro account): apply migration
-`0016_video.sql`; set secrets `RUNWAY_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY`, `R2_BUCKET`; create the R2 bucket + CORS; redeploy `api`; enable
-each family in `models` one at a time and smoke it live. See
-`docs/superpowers/punchlist.md` for the itemized rollout list.
+Deployed: `api` v44, `job-worker` v3, `cleanup-worker` v2. `stripe-webhook` and
+`appstore-webhook` are **still the versions from before P2 rewrote them** — a
+redeploy is the first item in the runbook. Production schema is at **`0025`** — `0025_release_telemetry.sql` was applied
+2026-09-22 and `fn_check_alerts()` runs clean against the live database with
+nothing firing.
+
+Automated gates, run 2026-09-22 against a database reset from empty: 565 Angular
+tests, 530 Deno tests, 72 script tests, 11 SQL/concurrency gates, production
+build clean, all twelve trend thumbnails present. **`npm run verify` exits 0 —
+every check green, none skipped.**
+
+CI exists now — `.github/workflows/ci.yml` runs every gate on every push.
+
+**What is not qualified:** there is no staging environment, so Gate A (staging
+regressions) is recorded BLOCKED by owner decision rather than inferred. Gate B
+(browser, roles, devices, accessibility) is untouched. Gate C (mobile) is
+explicitly outside this release. Stripe is still in TEST mode.
+
+**Video (Phase 4b) — written, not live (D7, confirmed 2026-09-22):** five
+families (Veo 3.1, Gemini Omni Flash 1.1, Kling 3.0 Pro, Runway Gen-4.5,
+Seedance 2.5), full mode matrix, R2 storage, waiting UX, caps and refunds all
+implemented per `docs/superpowers/specs/2026-09-05-video-generation-phase4b-design.md`.
+
+What has since changed, from the live system rather than from this document:
+`0016_video.sql` **is applied**; the R2 bucket `vansen-media` **exists** and the
+four `R2_*` secrets **are set**. What is still missing: the bucket's CORS policy,
+the `storage_config.r2_bucket` row, `RUNWAY_API_KEY`, and any live smoke. **All
+five video families are `enabled = false`.** No video capability may be claimed
+anywhere until each family has passed the per-family checklist in the runbook.
+
+## Decisions D1–D7
+
+| Decision | Answer | Enforced by |
+|---|---|---|
+| D1 launch grant | Full plan credits on launch-coupon invoices | P2 Task 4; `stripe-webhook` tests |
+| D2 retention | No lapse grace — purge the day the paid period ends. 7 years for financial records, 12 months for moderation evidence, 30 days for `app_errors` | `0021`; `supabase/tests/deletion.sql`; `docs/superpowers/specs/2026-09-20-retention-policy.md` |
+| D3 background-completion promise | Allowed only once offline completion is proven **on a deployment**. It is not | P5 Task 5; `job-worker`; release evidence §4 |
+| D4 launch locales | **OPEN.** This document still promises en + ms below and still lists i18n as not started. One of those has to change | `docs/superpowers/specs/2026-09-20-launch-locales.md` |
+| D5 library video references | Uploads only for the first release | P8 Task 3; composer copy |
+| D6 completion notifications | **UNRESOLVED.** Needs P4's outbox, P5's lifecycle *and* mobile MT-04 client receipt. "We'll notify you" stays hidden; "You can leave this page and return to check the result" is permitted | P4 Task 6 + P5 Task 5 + mobile MT-04 |
+| D7 video live state | **NOT LIVE.** Schema and storage exist; every family is disabled | Release evidence §8; re-confirmed from `/manifest` at each deploy |
 
 **Open items (carry-forward):**
 - Stripe still TEST mode; live keys flip once bank authorization clears.
-- Trend thumbnails not generated (`scripts/gen-trend-thumbs.mjs`, ~$0.50 OpenAI);
-  `public/trends/` missing so trend tiles render alt text.
+- `flux` has no agreed retail price (deferred 2026-09-22). Decide before enabling it.
+- Alert **delivery** is deferred: `0025` writes rows to `public.alerts` and
+  nothing sends them anywhere. A person must run the query. Nothing pages anyone.
+- Production carries two objects no migration creates and no code reads —
+  `public.admins` and `profiles.monthly_budget`. Keep or drop, but decide.
 - Persona live smoke never run (~$2.30 fal); analytics manual smoke pending
   (`docs/superpowers/punchlist.md`).
 - Leaked-password protection waits on Supabase Pro upgrade.
-- Not started: i18n (en + ms), session cap / account-sharing heuristics, dispatch rate
-  limit, daily spend alarm, CI. Denoise / Colorize need offline ONNX export + self-host.
+- Not started: i18n (en + ms, pending D4), session cap / account-sharing
+  heuristics, dispatch rate limit. Denoise / Colorize need offline ONNX export + self-host.
 - Legal pages are AI-drafted; attorney review (Malaysia + EU/US) outstanding.
 - Known scope reductions in Video: "From library" picker for video reference slots was
   removed (needs gateway `referenceIds` support, see `reference-drop.ts`); the

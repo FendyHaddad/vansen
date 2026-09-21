@@ -1,12 +1,37 @@
-# Local stack only. Nothing here touches the hosted project (ref
-# bnorhcxhvxydkgvcxjad) -- that is configured in the dashboard and in Edge
-# Function secrets.
+# Local development stack. Mirrors the deployed project's shape so an SQL test
+# that passes here means something. Nothing here touches the hosted project
+# (ref bnorhcxhvxydkgvcxjad) -- that is configured in the dashboard and in Edge
+# Function secrets. Secrets never live in this file.
 
 project_id = "vansen"
 
 [db]
 port = 54322
+# The hosted project runs Postgres 17.6. A local stack on a different major
+# version proves nothing about a migration that will run on 17.
 major_version = 17
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:4200"
+# The three public routes P8 added. A redirect the allow-list does not name is
+# dropped by GoTrue, which is exactly how a recovery link dies silently.
+additional_redirect_urls = [
+  "http://localhost:4200/reset",
+  "http://localhost:4200/confirm",
+  "http://localhost:4200/app",
+]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+# On, so the confirmation link is actually issued and lands in Inbucket. With
+# this off the signup flow cannot be tested at all.
+enable_confirmations = true
 
 # Logflare plus its Vector sidecar is the heaviest thing in the stack, and it
 # is the first to be OOM-killed on a machine with a small Docker allocation.

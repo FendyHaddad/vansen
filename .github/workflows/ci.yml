@@ -1,0 +1,81 @@
+# Every release gate, on every push.
+#
+# Before this, the suite ran when someone remembered to run it, which means the
+# honest description of coverage was "whatever was recently on someone's mind".
+# The three jobs are split by what they need rather than by what they test: the
+# web job needs Node, the edge job needs Deno, and the database job needs Docker
+# and four minutes of it. Splitting them means a Deno type error is visible
+# while the Supabase stack is still booting.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Script unit tests
+        run: npm run test:scripts
+      - name: Migration filenames
+        run: npm run check:migrations
+      - name: Shared catalog drift
+        run: npm run check:shared
+      - name: JSON and Dart catalog drift
+        run: npm run check:catalog
+      # Currently RED on purpose: the twelve trend thumbnails are not generated
+      # yet. Deleting the gate to get a green tick would be deleting the only
+      # thing that remembers.
+      - name: Trend assets
+        run: npm run check:assets
+      - name: Web unit tests
+        run: npm test -- --watch=false
+      - name: Production build
+        run: npx ng build --configuration production
+
+  edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: "2.9.5"
+      - name: Type check every function
+        working-directory: supabase/functions
+        run: deno check api/index.ts api/app.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts
+      - name: Test every function
+        working-directory: supabase/functions
+        run: deno test --allow-all --lock=deno.lock _shared api job-worker cleanup-worker stripe-webhook appstore-webhook
+
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The version is pinned to the one the baseline was proven on. A newer
+      # CLI ships newer auth, storage and postgres images, and db:test:start
+      # refuses to run against a baseline nobody has looked at.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.114.0
+      - name: Start the full Supabase baseline
+        run: npm run db:test:start
+      - name: SQL and concurrency gates
+        env:
+          VANSEN_LOCAL_DB: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: npm run test:sql
+      - name: Stop the disposable stack
+        if: always()
+        run: npm run db:test:stop

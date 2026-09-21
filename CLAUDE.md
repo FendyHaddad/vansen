@@ -24,7 +24,9 @@
   Secrets live in Supabase Edge Function secrets: STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET, STRIPE_STUDIO_PRICE_ID. Never put Stripe keys in the repo.
 - First purchase $15 = $10 credits + $5/mo Studio; top-up presets 10/20/50/100 (min $10).
-- Purge cron `purge_lapsed_libraries` daily 03:00 UTC (30-day grace after lapse).
+- Purge cron `purge_lapsed` (NOT `purge_lapsed_libraries`) daily 03:00 UTC. D2 removed
+  the 30-day grace: content is purged the day the paid period ends. Retention policy:
+  `docs/superpowers/specs/2026-09-20-retention-policy.md`.
 - Generation (Phase 3a, live): provider adapters in `supabase/functions/_shared/providers/`
   (google=Nano Banana inline, openai=GPT Image inline, fal=FLUX/Seedream/upscaler via
   queue + `GET /jobs` polling). Generations insert `pending`; `fn_fail_job` refunds once
@@ -56,16 +58,19 @@
   ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,
   fal FLUX-fill (mask as data URI) + BiRefNet, kill-switch rows in `models`.
   Expand = client pads canvas 25%/side + border mask.
-  Video (Phase 4b, code-complete): five families veo/omni (Google, no cancel), kling/seedance (fal), runway
+  Video (Phase 4b, written but DISABLED — see D7): five families veo/omni (Google, no cancel), kling/seedance (fal), runway
   (direct) in `_shared/providers/`; modes t2v/i2v/ref2v/keyframes/extend/edit gated by
   `capabilities.modes`; Pro-only; caps = 3 pending videos + $40/day provider spend
   (`VIDEO_DAILY_CAP_USD`). Files stream to Cloudflare R2 (`_shared/storage/`, secrets R2_*),
   posters are client-captured JPEGs via `POST /generations/:id/thumb`. Cancel =
   `POST /jobs/:id/cancel` (fal queued-only, runway any). Stale sweep: video 30 min.
   Secrets: RUNWAY_API_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
-  Rollout pending as of 2026-09-06: migration `0016_video.sql` not yet applied, secrets not
-  set, R2 bucket + CORS not created, `api` not redeployed, and per-family `models.enabled`
-  live smoke not run — code is complete but nothing is live yet.
+  State as of 2026-09-22, from the live system: `0016_video.sql` IS applied, the R2
+  bucket `vansen-media` exists and the four R2_* secrets are set. Still missing:
+  bucket CORS, the `storage_config.r2_bucket` row, RUNWAY_API_KEY, and every live
+  smoke. All five families are `enabled = false`. Claim no video capability
+  anywhere until a family passes the per-family checklist in
+  `docs/superpowers/plans/2026-09-20-release-runbook.md`.
 - Studio expansion (2026-07-11): 17 filter presets (new: fade/noir/matte/tealorange/
   goldenhour/crossprocess/infrared/bleach/duotone/clarity; duotone takes colorA/colorB,
   clarity precomputes blurred luminance), Dehaze (dark-channel prior, `ops/dehaze.ts`) +
@@ -79,6 +84,18 @@
   and Colorize (DDColor tiny, Apache) have NO license-clean hosted ONNX — need offline
   export + self-hosting (see docs/superpowers/plans/2026-07-11-phase4-model-notes.md).
   GFPGAN / CodeFormer / MODNet weights / face-parsing CelebA weights = banned (NC).
+
+## Release
+- Run every gate: `npm run verify` (set `VANSEN_LOCAL_DB` or the SQL gates are
+  scored as a failure, because a skipped check is not a passed check).
+- Local stack: `npm run db:test:start` / `npm run db:test:stop`. Start refuses a
+  Supabase CLI other than the pinned 2.114.0, or a migration whose hash is not in
+  `supabase/tests/bootstrap-manifest.json`.
+- CI: `.github/workflows/ci.yml`, three jobs, every push.
+- Emergency kill switch: `update public.models set enabled = false where id = '<family>';`
+  New submissions are refused; work already in flight settles and refunds normally.
+- What is proven: `docs/superpowers/plans/2026-09-20-release-evidence.md`.
+  How to deploy: `docs/superpowers/plans/2026-09-20-release-runbook.md`.
 
 ## Project docs
 - Product spec: `vansen.md`

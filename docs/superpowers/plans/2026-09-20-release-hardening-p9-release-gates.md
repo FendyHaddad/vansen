@@ -82,7 +82,7 @@ There is no `.github/` directory, so nothing runs on a push: the whole suite is 
 - Create: `.nvmrc`, `supabase/config.toml`, `scripts/verify-all.mjs`, `scripts/run-sql-tests.mjs`, `scripts/run-sql-tests.test.mjs`
 - Modify: `package.json`
 
-- [ ] **Step 1: Pin Node and Deno**
+- [x] **Step 1: Pin Node and Deno**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && echo "22.23.1" > .nvmrc && node --version && deno --version | head -1
@@ -102,7 +102,7 @@ Generate a Deno lockfile for the user to commit so CI resolves the same dependen
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno cache --lock=deno.lock api/index.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts && ls -la deno.lock
 ```
 
-- [ ] **Step 2: Write `supabase/config.toml`**
+- [x] **Step 2: Write `supabase/config.toml`**
 
 There is none today, so every local stack differs. Create it with the project's actual settings — ports, the `media` bucket, auth providers, and **no secrets**:
 
@@ -137,7 +137,7 @@ cd /Users/user/IdeaProjects/vansen && supabase start 2>&1 | tail -15
 
 Expected: a running stack printing a DB URL and a service-role key. Export them as `VANSEN_LOCAL_DB`, `VANSEN_LOCAL_URL` and `VANSEN_LOCAL_SERVICE_KEY`, which P2 through P8's SQL tests already expect.
 
-- [ ] **Step 3: Write `scripts/verify-all.mjs`**
+- [x] **Step 3: Write `scripts/verify-all.mjs`**
 
 ```js
 #!/usr/bin/env node
@@ -188,7 +188,7 @@ process.exit(failed.length || skipped.length ? 1 : 0);
 
 `scripts/run-sql-tests.mjs` runs every file in `supabase/tests/*.sql` against `$VANSEN_LOCAL_DB` with `ON_ERROR_STOP=1`, then every `*.sh` concurrency harness, and reports each by name.
 
-- [ ] **Step 3a: Implement the SQL runner, not just its command name**
+- [x] **Step 3a: Implement the SQL runner, not just its command name**
 
 Create `scripts/run-sql-tests.mjs`:
 
@@ -220,7 +220,7 @@ for (const file of files) {
 
 Preflight should test `pg_net` extension/schema presence rather than assume a particular overloaded function signature if the pinned version differs; lock that signature in the baseline test. Create retained Node tests with injected command runner and temporary fixtures: missing env, remote URL, missing schemas/extensions, empty test list, failed SQL, failed shell harness, spawn error and signal all fail; all real checks succeed only on zero exits. No SQL/harness runs twice in CI. P8's request_snapshots.sql is included automatically. Never print connection strings/credentials.
 
-- [ ] **Step 4: Add the scripts**
+- [x] **Step 4: Add the scripts**
 
 ```json
   "verify": "node scripts/verify-all.mjs",
@@ -230,7 +230,7 @@ Preflight should test `pg_net` extension/schema presence rather than assume a pa
   "check:migrations": "node scripts/migration-inventory.mjs"
 ```
 
-- [ ] **Step 5: Run it**
+- [x] **Step 5: Run it**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null && nvm use 22.23.1 >/dev/null && npm run verify
@@ -247,7 +247,7 @@ Expected: every line `PASS`, no `SKIPPED`. Add a retained Node test in `scripts/
 
 **The hazard.** Two files share the `0008_` prefix, seven new migrations arrive from P1 through P8, and nobody has compared the deployed history to the repository. Applying `0017` to a database that already has something called `0017` — or renaming a file Postgres has already recorded — corrupts the ledger of what ran. The fix is to **record reality**, never to rewrite it.
 
-- [ ] **Step 1: Read the deployed history**
+- [x] **Step 1: Read the deployed history**
 
 This is a read-only prerequisite, not a production change. Reuse or refresh P1 Task 6's dated inventory before finalizing migration filenames. Also inventory current function revisions, worker/cron state, enabled model families, R2 bucket/CORS and required secrets by name/presence only. Historical September 6 rollout notes are hypotheses until verified.
 
@@ -257,7 +257,7 @@ cd /Users/user/IdeaProjects/vansen && psql "$VANSEN_PROD_DB_READONLY" -c "select
 
 If no read-only production connection string exists, ask the user for one, or have them run the query and paste the output. **Do not connect to project `bnorhcxhvxydkgvcxjad` with a write credential for this.**
 
-- [ ] **Step 2: Write the inventory script**
+- [x] **Step 2: Write the inventory script**
 
 ```js
 #!/usr/bin/env node
@@ -294,13 +294,13 @@ console.log(`${files.length} migration files, ${duplicates.length} duplicate pre
 process.exit(unexpected.length ? 1 : 0);
 ```
 
-- [ ] **Step 3: Record the inventory**
+- [x] **Step 3: Record the inventory**
 
 Create `docs/superpowers/specs/2026-09-20-migration-inventory.md` with a row per migration: repository filename/hash, recorded deployed version/name, applied state (`confirmed applied`, `confirmed absent`, or `unknown`), observation time, schema/body evidence and proposed action. A `has_body` flag alone cannot map two same-prefix files: compare the stored statements and resulting schema without dumping secrets. Do not claim either `0008_*` file ran until that mapping is evidenced. Treat `0016` the same way. Check proposed `0017`–`0024` versions for collisions before creating/applying them; update all cross-plan references if unallocated versions must change. Preserve proven applied history.
 
 The script above only detects repository collisions; its green result is not deployed-history reconciliation. Attach the read-only query and schema comparison to the inventory. Missing access remains `unknown` and blocks deployment, rather than being filled with expected answers. Reuse the P1 inventory and perform this read-only step early, before any new migration or local baseline is finalized.
 
-- [ ] **Step 4: Test both bootstrap paths**
+- [x] **Step 4: Test both bootstrap paths**
 
 An empty database must reach the same schema as an upgraded one, or a fresh environment diverges silently.
 
@@ -316,7 +316,7 @@ cd /Users/user/IdeaProjects/vansen && supabase db diff --schema public > /privat
 
 Expected: an empty diff. Any difference is a migration that is not idempotent across the two paths; fix it before going further.
 
-- [ ] **Step 5: Run the check**
+- [x] **Step 5: Run the check**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm run check:migrations
@@ -335,7 +335,7 @@ Expected: `known duplicate prefix 0008`, exit 0 for the repository filename chec
 **Interfaces:**
 - Produces: `GET /manifest` → `{ gitRevision, schemaVersion, catalogVersion, quoteVersion, workerVersion, capabilities, deployedAt }`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `supabase/functions/api/manifest_test.ts`:
 
@@ -379,7 +379,7 @@ Deno.test('the manifest leaks no secret', async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails, then implement it**
+- [x] **Step 2: Run to verify it fails, then implement it**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/manifest_test.ts
@@ -415,7 +415,7 @@ Add `gitRevision:string`, `workerVersion:string`, `deployedAt:string|null` to Ap
 
 `fn_schema_version` is created in Task 3 by opening 0024 with that helper; Task 4 appends telemetry. Apply the complete final 0024 once during integration, never apply a partial migration and later change it. `GIT_REVISION` and `DEPLOYED_AT` are set as function secrets at deploy time by the runbook.
 
-- [ ] **Step 3: Run**
+- [x] **Step 3: Run**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen/supabase/functions && deno test --allow-all api/manifest_test.ts
@@ -433,7 +433,7 @@ Expected: `3 passed | 0 failed`. User commits.
 
 **The alerts correspond one-for-one to what the earlier plans made detectable.** Each is a query over a table an earlier plan created; none of them could have been written before.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `supabase/migrations/0024_release_telemetry.sql`:
 
@@ -572,7 +572,7 @@ grant execute on function public.fn_resolve_stale_alerts() to service_role;
 
 Write `supabase/tests/alerts.sql` proving each condition raises its alert, a repeat refreshes rather than duplicates, and a condition that stops recurring resolves after an hour.
 
-- [ ] **Step 2: Write the failing client deadline spec**
+- [x] **Step 2: Write the failing client deadline spec**
 
 Append to `src/app/core/api/api-service.spec.ts`:
 
@@ -613,7 +613,7 @@ describe('R27: request deadlines and empty responses', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails, then fix `ApiService`**
+- [x] **Step 3: Run to verify it fails, then fix `ApiService`**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false src/app/core/api/api-service.spec.ts
@@ -656,7 +656,7 @@ Create `_shared/alerts/delivery.ts`, `delivery_test.ts` and `alert_deliveries` o
 
 Add alert cases for stalled training, moderation_unavailable, notification dead letters and incomplete inventories. Do not auto-resolve incidents just because monitoring stopped: resolution requires a successful check that proves the condition clear; monitor heartbeat failure raises a separate incident.
 
-- [ ] **Step 4: Run both suites**
+- [x] **Step 4: Run both suites**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && npm test -- --watch=false && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/migrations/0024_release_telemetry.sql && psql "$VANSEN_LOCAL_DB" -v ON_ERROR_STOP=1 -f supabase/tests/alerts.sql
@@ -671,7 +671,7 @@ Expected: all green. User commits.
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 ```yaml
 # Every release gate, on every push. Before this, the suite ran when someone
@@ -756,17 +756,17 @@ Expected: every check `PASS`. Fix anything CI catches that the local run did not
 
 **Inputs:** Exact web/backend revision, schema/catalog/worker versions, staging environment, synthetic user fixtures for free/Studio/Pro/owner/suspended/lapsed states, and an explicit account/provider spending scope for paid smokes. Browser authentication, device access and spending authorization are obtained at execution, not assumed by this document.
 
-- [ ] **Step 1: Make a traceable gate record before qualification**
+- [x] **Step 1: Make a traceable gate record before qualification**
 
 Use these columns for **each checkbox** in source-spec section 8: gate/item, revision/artifact, environment/platform/provider, procedure, expected result, observed result, evidence link, date, status (`PASS`, `FAIL`, `BLOCKED`, or `DEFERRED`), and approved scope limitation. Also link R01–R28 closure evidence and D1–D7 outcomes. No empty cell or unchecked item means PASS. DEFERRED requires the affected capability to be unavailable and its claims removed; shared money/ownership/job blockers cannot be deferred while paid generation remains exposed.
 
-- [ ] **Step 2: Close Gate A against an isolated staging deployment**
+- [~] **Step 2: Close Gate A against an isolated staging deployment**
 
 After Task 2 proves clean-bootstrap/upgrade equivalence, deploy the candidate to isolated staging using Task 7's mechanics and test secrets. Run route and real-transaction regressions for R01/R02/R04–R11/R28; verify direct authenticated table reads and service-only RPC denial. Rehearse offline completion, duplicate submission/event delivery, unavailable moderation, foreign references, cancel-versus-success, retryable provider errors, deletion retries and lapse retention. Reconcile all charges/refunds and recorded provider expenses. Record the actual staging revision/schema/functions/workers and expected cron runs.
 
 Staging mechanics do not authorize a production deployment. Gate A's production-manifest item stays pending until Task 7 verifies it. No general availability follows merely from staging PASS.
 
-- [ ] **Step 3: Close Gate B with authenticated browser and device evidence**
+- [~] **Step 3: Close Gate B with authenticated browser and device evidence**
 
 | Check | Required proof |
 |---|---|
@@ -781,11 +781,11 @@ Staging mechanics do not authorize a production deployment. Gate A's production-
 
 Builds and fake tensor outputs cannot replace these rows. For a later change, identify affected rows and rerun them against the final release artifact. Record any unavailable login/browser/device as BLOCKED.
 
-- [ ] **Step 4: Track Gate C and preserve decisions D3/D6**
+- [x] **Step 4: Track Gate C and preserve decisions D3/D6**
 
 Link the mobile repository's MT-01…MT-09 and Gate C evidence; do not mark mobile ready from backend tests. A web-only rollout explicitly excludes mobile readiness. D6 means **completion notifications**, not worker leases: P4's outbox, P5's offline lifecycle and mobile MT-04's actual client receipt must pass before notification claims return on either platform. Include background/closed-client delivery, permission denied, duplicate delivery and retry after a send failure. If those prerequisites are unavailable, leave “We'll notify you” hidden; independently verified background completion may say “You can leave this page and return to check the result.”
 
-- [ ] **Step 5: Rehearse Gate D before any public enablement**
+- [~] **Step 5: Rehearse Gate D before any public enablement**
 
 | Check | Required evidence |
 |---|---|
@@ -799,7 +799,7 @@ Link the mobile repository's MT-01…MT-09 and Gate C evidence; do not mark mobi
 
 Production-only checks are performed under Task 7's approval steps and remain pending until then. Missing credentials or unapproved spend cannot become an inferred pass.
 
-- [ ] **Step 6: Enforce the qualification decision**
+- [~] **Step 6: Enforce the qualification decision**
 
 Before Task 7 enables any family, require all applicable staging/browser/device gates for that family plus shared backend gates to pass. Keep production flags disabled while production-only verification is pending; use only the explicitly approved test account/cohort for production smoke. Broader rollout requires all applicable production checks to pass. A failure blocks or disables the affected capability and preserves evidence for correction. Record the final decision and remaining platform exclusions; user commits.
 
@@ -812,7 +812,7 @@ Before Task 7 enables any family, require all applicable staging/browser/device 
 
 **Every step here changes production and is the user's decision.** Present each, wait for a yes, then run it. Never batch them.
 
-- [ ] **Step 1: Write the runbook**
+- [x] **Step 1: Write the runbook**
 
 Complete the existing `docs/superpowers/plans/2026-09-20-release-runbook.md` with the ordered procedure below, each step carrying its command, its verification and its rollback.
 
@@ -966,11 +966,11 @@ Record the exact output as one part of D7, alongside the deployed revision, migr
 - Modify: `vansen.md`, `CLAUDE.md`, the punchlist, `README.md`
 - Modify: `docs/superpowers/plans/2026-09-20-release-evidence.md` (created in Task 6)
 
-- [ ] **Step 1: Write the evidence record**
+- [x] **Step 1: Write the evidence record**
 
 Complete `docs/superpowers/plans/2026-09-20-release-evidence.md`: the tested revision SHA, the date, the `npm run verify` output, the CI run link, every SQL and concurrency result, Task 6's complete Gate A–D evidence matrix, the reconciliation outputs, each family's rollout record, and the rollback/restore rehearsal table. This document is what "release ready" means from now on.
 
-- [ ] **Step 2: Replace the aspirational claims**
+- [x] **Step 2: Replace the aspirational claims**
 
 ```bash
 cd /Users/user/IdeaProjects/vansen && grep -rn "code-complete\|code complete\|Rollout pending\|not yet live" vansen.md CLAUDE.md docs/superpowers/plans/*punchlist* 2>/dev/null | head -20
@@ -978,7 +978,7 @@ cd /Users/user/IdeaProjects/vansen && grep -rn "code-complete\|code complete\|Ro
 
 Each hit becomes a statement about what is actually true at the tested revision, with a link into the evidence document. `CLAUDE.md`'s video paragraph — "Rollout pending as of 2026-09-06: migration `0016_video.sql` not yet applied, secrets not set, R2 bucket + CORS not created, `api` not redeployed" — is replaced by what Task 7 actually achieved, family by family.
 
-- [ ] **Step 3: Record decisions D1 through D7**
+- [x] **Step 3: Record decisions D1 through D7**
 
 Add a decisions table to `vansen.md` with each decision, the answer, the date and where it is enforced:
 
@@ -992,7 +992,7 @@ Add a decisions table to `vansen.md` with each decision, the answer, the date an
 | D6 completion notifications | Evidence-gated on both platforms; unresolved until backend delivery and client receipt pass | P4 Task 6 + P5 Task 5 + mobile MT-04; P9 Task 6 |
 | D7 video live state | (from Task 2 inventory and Task 7 Step 10) | Dashboard/history, manifest, cron/storage and per-family smoke evidence |
 
-- [ ] **Step 4: Document the release process in the README**
+- [x] **Step 4: Document the release process in the README**
 
 A short section: how to run the local stack, how to run `npm run verify`, where the runbook is, and how to disable a family in an emergency — the single `update public.models set enabled = false where id = '<family>';` that anyone on call needs at three in the morning.
 
@@ -1022,3 +1022,54 @@ Expected: every check `PASS`, none skipped. User commits.
 - [ ] `vansen.md`, `CLAUDE.md` and the punchlist describe the tested revision, and D1 through D7 are recorded with where each is enforced.
 
 **This is the last web/backend plan.** The release-readiness review's section 8 is complete only when every applicable gate has dated evidence for the release revision. CI or a manifest alone cannot establish readiness. Gate C stays with the mobile companion; a web-only release must explicitly exclude mobile and retain the D6 notification restriction until its prerequisites pass.
+
+---
+
+## Execution notes (2026-09-22)
+
+Evidence: `docs/superpowers/plans/2026-09-20-release-evidence.md`.
+Runbook: `docs/superpowers/plans/2026-09-20-release-runbook.md`.
+Inventory: `docs/superpowers/specs/2026-09-20-migration-inventory.md`.
+
+Legend: `[x]` done, `[~]` blocked or deferred by a recorded decision, `[ ]` a
+production action that is the user's to authorise.
+
+Five things were decided or discovered during execution that change the plan's
+shape, and are recorded here rather than silently absorbed:
+
+1. **Task 4's migration is `0025`, not `0024`.** `0024_worker_drive_guard.sql`
+   was written and applied to production earlier the same day. Renumbering an
+   applied migration corrupts the ledger that says what ran.
+
+2. **Task 5's disposable project copy was not built.** Its purpose was to work
+   around two migrations sharing the `0008_` prefix; that collision no longer
+   exists (`0008_age_gate.sql` became `00091_age_gate.sql` before it had been
+   applied anywhere). Copying would now mean CI proving something about a
+   rewritten duplicate of the repository instead of the repository.
+   `scripts/supabase-test-stack.mjs` keeps the guard the copy existed to
+   provide: a pinned CLI version and a per-file hash manifest, and it refuses to
+   start on any drift.
+
+3. **Two SQL suites had never actually run.** `dispatch.sql` and
+   `caps_concurrency.sh` were written during P5, before `0023` made the request
+   snapshot mandatory, and the local stack had been unable to start ever since.
+   Both failed on first execution. Both are fixed. The live API was never
+   affected, but for two plans those files were decoration.
+
+4. **`fn_check_alerts` needed `clock_timestamp()`, not `now()`.** `now()` is
+   frozen for the transaction, so an alert seen twice in one pass recorded both
+   sightings at the same instant and `last_seen_at > first_seen_at` could never
+   hold. That was a defect in the migration, not in its test.
+
+5. **The error id is emitted under two names.** The gateway already returned
+   `error.requestId` from P1 and a shipped client may read it, so `errorId` was
+   added beside it rather than replacing it.
+
+Four owner decisions taken during review, all on 2026-09-22: staging recorded
+**BLOCKED** and the release shipped web-only; trend assets **to be generated**;
+the FLUX retail price **deferred** until before `flux` is enabled; alert
+delivery **database rows only** — nothing pages anyone, and that is stated in
+the evidence document rather than assumed away.
+
+Task 7 was not executed. Every step in it changes production and needs the
+user's yes, one at a time.
