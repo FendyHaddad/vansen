@@ -2,67 +2,117 @@
 #
 # Vansen production deployment.
 #
-# Deploys the Supabase `api` Edge Function and the Cloudflare Worker that
-# serves the Angular bundle, then stamps the release manifest and proves the
-# running system matches what was just sent.
+# Deploys the Supabase `api` Edge Function, then the Cloudflare Worker that
+# serves the Angular bundle, stamps the release manifest, and proves the
+# running system matches what was just sent. `api` goes first because it
+# owns pricing: a stale browser against a new server shows a stale price,
+# a new browser against a stale server makes broken requests.
 #
-# Order is not arbitrary. `api` goes first because it owns pricing: the server
-# stamps its own CATALOG_VERSION onto every charge, so a browser running the
-# previous bundle against the new server is merely showing a stale price,
-# while the reverse — a new composer offering tiers the old server refuses —
-# is a broken request.
+# Never commits, never branches, never pushes. Refuses a dirty tree because
+# GIT_REVISION in the manifest promises the deployed code is the committed code.
 #
-# This script never commits, never branches, never pushes. It refuses to run
-# on a dirty tree instead, because GIT_REVISION in the manifest is a promise
-# that the deployed code is the code at that commit, and a dirty tree makes
-# that promise false.
+# Output is one progress line plus a verdict. Every command's full output goes
+# to a log file whose path is printed on failure.
 #
 # Usage:
 #   ./deploy.sh                 full gates, then deploy
 #   ./deploy.sh --dry-run       gates and preflight only, deploy nothing
-#   ./deploy.sh --skip-verify   deploy without gates (asks twice)
+#   ./deploy.sh --skip-verify   deploy without gates (asks for 'unverified')
 #   ./deploy.sh --yes           no confirmation prompt (for a rerun)
 #
 # Environment:
 #   VANSEN_PROJECT_REF  Supabase project ref (default: the production project)
-#   VANSEN_LOCAL_DB     Postgres URL for the SQL gates. Without it `npm run
-#                       verify` scores the SQL integration tests as a FAILURE,
-#                       which is deliberate: a skipped check is not a passed
-#                       check. Start one with `npm run db:test:start`.
+#   VANSEN_LOCAL_DB     Postgres URL for the SQL gates. Without it the SQL
+#                       gates are scored as a FAILURE, by design.
+#                       Start one with `npm run db:test:start`.
 
 set -euo pipefail
 
 PROJECT_REF="${VANSEN_PROJECT_REF:-bnorhcxhvxydkgvcxjad}"
 NODE_VERSION="22.23.1"
 FUNCTIONS_URL="https://${PROJECT_REF}.supabase.co/functions/v1/api"
+WEB_URL="https://vansen.fendyhaddad-d36.workers.dev/"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
 SKIP_VERIFY=0
 ASSUME_YES=0
 
+usage() { sed -n '3,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --skip-verify) SKIP_VERIFY=1 ;;
     --yes|-y) ASSUME_YES=1 ;;
-    -h|--help) sed -n '3,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
 
-step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+# ---------------------------------------------------------------------------
+# Output: one redrawn progress line, one verdict line, everything else logged
+# ---------------------------------------------------------------------------
+LOG="$(mktemp -t vansen-deploy)"
+STEP_OUT="$(mktemp -t vansen-step)"
+TTY=0; [ -t 1 ] && TTY=1
+TOTAL=6
+DONE=0
 
-ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
-warn() { printf '    \033[33m!\033[0m %s\n' "$1"; }
-die()  { printf '\n\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+clearline() { [ "$TTY" = "1" ] && printf '\r\033[K'; return 0; }
 
-# The Supabase CLI draws a progress spinner on STDOUT when it is attached to a
-# terminal, so `... | jq` gets "\u2819{...}" and dies on the first byte. It only
-# shows up in an interactive shell, never in a piped test run, which is exactly
-# how it reached a live deploy. Drop everything before the opening brace.
+progress() {
+  local width=24
+  local filled=$(( DONE * width / TOTAL ))
+  local fill rest
+  fill="$(printf '%*s' "$filled" '' | tr ' ' '█')"
+  rest="$(printf '%*s' $(( width - filled )) '' | tr ' ' '░')"
+  if [ "$TTY" = "1" ]; then
+    printf '\r\033[K\033[2m[%s%s]\033[0m %d/%d  %s' "$fill" "$rest" "$DONE" "$TOTAL" "$1"
+    return 0
+  fi
+  printf '[%d/%d] %s\n' "$DONE" "$TOTAL" "$1"
+}
+
+tick() { DONE=$(( DONE + 1 )); }
+
+# fail REASON [DETAIL]: the last thing printed, always says why.
+fail() {
+  clearline
+  printf '\033[31m✗ DEPLOY FAILED\033[0m — %s\n' "$1" >&2
+  [ -n "${2:-}" ] && printf '%s\n' "$2" | sed 's/^/    /' >&2
+  printf '    log: %s\n' "$LOG" >&2
+  exit 1
+}
+
+trap 'fail "unexpected error at line $LINENO: $BASH_COMMAND"' ERR
+
+# Why a step failed, in as few lines as possible. `npm run verify` prints a
+# summary table; quote its FAIL/SKIPPED rows. Otherwise the tail of the output.
+detail() {
+  if grep -q '─── verify-all ───' "$STEP_OUT"; then
+    awk '/─── verify-all ───/{f=1;next} f && /^(FAIL|SKIPPED)/' "$STEP_OUT"
+    return 0
+  fi
+  grep -v '^\s*$' "$STEP_OUT" | tail -n 8
+}
+
+# run REASON CMD...: run quietly, log everything, fail with REASON + detail.
+run() {
+  local reason="$1"; shift
+  printf '\n$ %s\n' "$*" >> "$LOG"
+  if "$@" >"$STEP_OUT" 2>&1; then
+    cat "$STEP_OUT" >> "$LOG"
+    return 0
+  fi
+  cat "$STEP_OUT" >> "$LOG"
+  fail "$reason" "$(detail)"
+}
+
+# The Supabase CLI draws a spinner on STDOUT when attached to a terminal, so
+# `| jq` gets "⠙{...}". Drop everything before the opening brace.
 apiVersion() {
-  supabase functions list --project-ref "$PROJECT_REF" 2>/dev/null \
+  supabase functions list --project-ref "$PROJECT_REF" 2>>"$LOG" \
     | tr -d '\r' | sed -n 's/^[^{]*\({.*\)$/\1/p' | head -1 \
     | jq -r '.functions[] | select(.slug=="api") | .version'
 }
@@ -70,74 +120,59 @@ apiVersion() {
 cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
-# Preflight
+# 1. Preflight
 # ---------------------------------------------------------------------------
-step "Preflight"
+progress "preflight"
 
-[ -f "$HOME/.nvm/nvm.sh" ] || die "nvm not found at ~/.nvm/nvm.sh"
+[ -f "$HOME/.nvm/nvm.sh" ] || fail "nvm not found at ~/.nvm/nvm.sh"
 # shellcheck disable=SC1091
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" >/dev/null
-nvm use "$NODE_VERSION" >/dev/null || die "node $NODE_VERSION not installed (nvm install $NODE_VERSION)"
-ok "node $(node --version)"
+nvm use "$NODE_VERSION" >/dev/null 2>&1 || fail "node $NODE_VERSION not installed (nvm install $NODE_VERSION)"
 
 for tool in supabase npx git curl jq deno; do
-  command -v "$tool" >/dev/null || die "$tool is not on PATH"
+  command -v "$tool" >/dev/null || fail "$tool is not on PATH"
 done
-ok "supabase, npx, git, curl, jq, deno present"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[ "$BRANCH" = "main" ] || die "on branch '$BRANCH'; Vansen deploys from main only"
+[ "$BRANCH" = "main" ] || fail "on branch '$BRANCH'; Vansen deploys from main only"
 
-# A dirty tree would make GIT_REVISION a lie. Say exactly what is dirty rather
-# than making someone run git status to find out.
-if [ -n "$(git status --porcelain)" ]; then
-  git status --short
-  die "working tree is dirty — commit first (this script never commits for you)"
-fi
+DIRTY="$(git status --porcelain)"
+[ -z "$DIRTY" ] || fail "working tree is dirty — commit first (this script never commits)" "$DIRTY"
 
 REVISION="$(git rev-parse --short HEAD)"
-ok "branch main, clean, at $REVISION"
 
 CATALOG_VERSION="$(grep -o "CATALOG_VERSION = '[^']*'" src/app/core/catalog/model-families.ts | head -1 | cut -d"'" -f2)"
-[ -n "$CATALOG_VERSION" ] || die "could not read CATALOG_VERSION from the catalog"
-ok "catalog $CATALOG_VERSION"
+[ -n "$CATALOG_VERSION" ] || fail "could not read CATALOG_VERSION from src/app/core/catalog/model-families.ts"
 
-LIVE="$(curl -fsS "$FUNCTIONS_URL/manifest")"
+LIVE="$(curl -fsS "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "live manifest unreachable at $FUNCTIONS_URL/manifest"
 LIVE_CATALOG="$(printf '%s' "$LIVE" | jq -r '.catalogVersion // "unknown"')"
-LIVE_REVISION="$(printf '%s' "$LIVE" | jq -r '.gitRevision // "unknown"')"
-ok "currently live: catalog $LIVE_CATALOG from $LIVE_REVISION"
+tick
 
 # ---------------------------------------------------------------------------
-# Gates
+# 2. Gates (or a bare build when skipped)
 # ---------------------------------------------------------------------------
-step "Gates"
+if [ "$SKIP_VERIFY" = "1" ] && [ "$ASSUME_YES" != "1" ]; then
+  clearline
+  read -r -p "Deploy to PRODUCTION with no gates? type 'unverified': " reply
+  [ "$reply" = "unverified" ] || fail "aborted"
+fi
 
 if [ "$SKIP_VERIFY" = "1" ]; then
-  warn "SKIPPING npm run verify — nothing below is evidence of anything"
-  if [ "$ASSUME_YES" != "1" ]; then
-    read -r -p "    Deploy to production with no gates? type 'unverified': " reply
-    [ "$reply" = "unverified" ] || die "aborted"
-  fi
+  progress "building (gates skipped)"
+  run "production build failed" npx ng build --configuration production
 fi
 
 if [ "$SKIP_VERIFY" != "1" ]; then
-  [ -n "${VANSEN_LOCAL_DB:-}" ] || warn "VANSEN_LOCAL_DB unset — the SQL gates will be scored as a FAILURE, by design"
-  npm run verify || die "gates failed — nothing was deployed"
-  ok "all gates green"
+  progress "gates (npm run verify)"
+  run "gates failed — nothing was deployed" npm run verify
 fi
 
-# `npm run verify` builds with --configuration production as its last check, so
-# dist/ is already the artifact we want. Build here only when gates were
-# skipped, so wrangler never uploads a stale or missing bundle.
-if [ "$SKIP_VERIFY" = "1" ]; then
-  npx ng build --configuration production || die "build failed"
-fi
-[ -d dist/vansen/browser ] || die "dist/vansen/browser missing — nothing to upload"
-ok "bundle ready at dist/vansen/browser"
+[ -d dist/vansen/browser ] || fail "dist/vansen/browser missing — nothing to upload"
+tick
 
 if [ "$DRY_RUN" = "1" ]; then
-  step "Dry run"
-  ok "preflight and gates passed; deployed nothing"
+  clearline
+  printf '\033[32m✓ DRY RUN OK\033[0m — preflight and gates passed, deployed nothing (%s, catalog %s)\n' "$REVISION" "$CATALOG_VERSION"
   exit 0
 fi
 
@@ -145,85 +180,74 @@ fi
 # Confirm
 # ---------------------------------------------------------------------------
 if [ "$ASSUME_YES" != "1" ]; then
-  step "About to deploy to PRODUCTION ($PROJECT_REF)"
-  printf '    commit  %s\n    catalog %s  (live: %s)\n' "$REVISION" "$CATALOG_VERSION" "$LIVE_CATALOG"
-  read -r -p "    Continue? [y/N] " reply
-  case "$reply" in [yY]*) ;; *) die "aborted" ;; esac
+  clearline
+  read -r -p "Deploy $REVISION (catalog $CATALOG_VERSION, live $LIVE_CATALOG) to PRODUCTION $PROJECT_REF? [y/N] " reply
+  case "$reply" in [yY]*) ;; *) fail "aborted" ;; esac
 fi
 
 # ---------------------------------------------------------------------------
-# Deploy: api first (it owns pricing), then the web bundle
+# 3. api first (it owns pricing)
 # ---------------------------------------------------------------------------
-step "Deploying Edge Function: api"
-# --no-verify-jwt: the gateway authenticates requests itself and serves public
-# routes (/manifest, /capabilities, the Stripe return) that carry no JWT.
-supabase functions deploy api --no-verify-jwt --project-ref "$PROJECT_REF" \
-  || die "api deploy failed — the web bundle was NOT deployed"
+progress "deploying edge function api"
+# --no-verify-jwt: the gateway authenticates itself and serves public routes.
+run "api deploy failed — the web bundle was NOT deployed" \
+  supabase functions deploy api --no-verify-jwt --project-ref "$PROJECT_REF"
 
 API_VERSION="$(apiVersion)"
-[ -n "$API_VERSION" ] || die "deployed api but could not read its version back"
-ok "api is now version $API_VERSION"
-
-step "Deploying Cloudflare Worker"
-npx wrangler deploy || die "worker deploy failed — api is already on $CATALOG_VERSION, rerun this script"
-ok "worker deployed"
+[ -n "$API_VERSION" ] || fail "deployed api but could not read its version back"
+tick
 
 # ---------------------------------------------------------------------------
-# Stamp the manifest
+# 4. Web bundle
 # ---------------------------------------------------------------------------
-step "Stamping the release manifest"
+progress "deploying cloudflare worker"
+run "worker deploy failed — api is already on $CATALOG_VERSION, rerun this script" \
+  npx wrangler deploy
+tick
 
-# Writing Edge Function secrets itself redeploys the function, which bumps its
-# version by one. Stamping the version we just read would therefore record a
-# number that is stale the instant it is written — the exact defect that made
-# the manifest report v51 against a real v55 on 2026-09-21. Predict the bump,
-# then check the prediction below.
+# ---------------------------------------------------------------------------
+# 5. Stamp the manifest
+# ---------------------------------------------------------------------------
+progress "stamping manifest"
+# Setting secrets redeploys the function and bumps its version by one, so
+# stamp the predicted version and check the prediction below.
 STAMPED_VERSION="v$((API_VERSION + 1))"
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-supabase secrets set \
-  GIT_REVISION="$REVISION" \
-  WORKER_VERSION="$STAMPED_VERSION" \
-  DEPLOYED_AT="$DEPLOYED_AT" \
-  --project-ref "$PROJECT_REF" >/dev/null || die "could not stamp the manifest"
-ok "stamped $REVISION / $STAMPED_VERSION / $DEPLOYED_AT"
+run "could not stamp the manifest" \
+  supabase secrets set \
+    GIT_REVISION="$REVISION" \
+    WORKER_VERSION="$STAMPED_VERSION" \
+    DEPLOYED_AT="$DEPLOYED_AT" \
+    --project-ref "$PROJECT_REF"
+tick
 
 # ---------------------------------------------------------------------------
-# Prove it
+# 6. Prove it
 # ---------------------------------------------------------------------------
-step "Verifying the running system"
+progress "verifying running system"
+sleep 5  # the function restarts on a secret change
 
-# The function restarts on a secret change; give it a moment before asking.
-sleep 5
+MANIFEST="$(curl -fsS "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "manifest unreachable after deploy"
+printf '\n$ manifest\n%s\n' "$MANIFEST" >> "$LOG"
 
-MANIFEST="$(curl -fsS "$FUNCTIONS_URL/manifest")" || die "manifest unreachable after deploy"
-printf '%s\n' "$MANIFEST" | jq .
-
-FAILURES=0
+MISMATCH=""
 check() {
   local label="$1" actual="$2" expected="$3"
-  [ "$actual" = "$expected" ] && { ok "$label = $actual"; return 0; }
-  warn "$label = $actual, expected $expected"
-  FAILURES=$((FAILURES + 1))
+  [ "$actual" = "$expected" ] && return 0
+  MISMATCH="${MISMATCH}${label}: got ${actual}, expected ${expected}"$'\n'
 }
 
 check "gitRevision"    "$(printf '%s' "$MANIFEST" | jq -r '.gitRevision')"    "$REVISION"
 check "catalogVersion" "$(printf '%s' "$MANIFEST" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "workerVersion"  "$(printf '%s' "$MANIFEST" | jq -r '.workerVersion')"  "$STAMPED_VERSION"
+check "api version"    "v$(apiVersion)"                                       "$STAMPED_VERSION"
+check "capabilities"   "$(curl -fsS "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
+check "web app"        "$(curl -fsS -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
+tick
 
-REAL_VERSION="$(apiVersion)"
-check "api version on disk" "v$REAL_VERSION" "$STAMPED_VERSION"
+[ -z "$MISMATCH" ] || fail "deployed, but the running system disagrees with what was sent" "$MISMATCH"
 
-LIVE_CAPS="$(curl -fsS "$FUNCTIONS_URL/capabilities" | jq -r '.catalogVersion')"
-check "capabilities catalog" "$LIVE_CAPS" "$CATALOG_VERSION"
-
-WEB_STATUS="$(curl -fsS -o /dev/null -w '%{http_code}' https://vansen.fendyhaddad-d36.workers.dev/)"
-check "web app" "$WEB_STATUS" "200"
-
-step "Result"
-[ "$FAILURES" = "0" ] || die "$FAILURES manifest check(s) disagreed with the running system — read the warnings above before telling anyone this shipped"
-
-ok "production is on $REVISION, catalog $CATALOG_VERSION, api $STAMPED_VERSION"
-printf '\n    Record it in docs/superpowers/plans/2026-09-20-release-evidence.md.\n'
-printf '    A green run here is a deploy, not a release: the per-family smokes\n'
-printf '    and the authenticated browser pass in that document are still owed.\n\n'
+clearline
+printf '\033[32m✓ DEPLOYED\033[0m %s · catalog %s · api %s · %s\n' "$REVISION" "$CATALOG_VERSION" "$STAMPED_VERSION" "$WEB_URL"
+printf '  A deploy is not a release: record it in docs/superpowers/plans/2026-09-20-release-evidence.md\n'
