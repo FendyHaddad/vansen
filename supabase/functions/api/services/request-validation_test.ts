@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert';
-import { familyById, resolutionsFor } from '../_shared/model-families.ts';
+import { familyById, qualitiesFor, resolutionsFor } from '../_shared/model-families.ts';
 import { validateSettings } from './request-validation.ts';
 
 Deno.test('accepts every catalogued combination for each family', () => {
@@ -8,12 +8,18 @@ Deno.test('accepts every catalogued combination for each family', () => {
     const caps = family.capabilities;
     // Every ratio, not just the first: which tiers exist can depend on it.
     for (const aspectRatio of caps.aspectRatios) {
-      const offered = caps.resolutions
-        ? resolutionsFor(family, aspectRatio).map((r) => r.value)
-        : [undefined];
       for (const version of caps.versions?.map((v) => v.value) ?? [undefined]) {
+        // Per VERSION as well as per ratio. Enumerating the family-wide lists
+        // here is what let GPT Image 2.5 ship offering 1K only: the test passed
+        // because it never asked what a specific version actually allows.
+        const offered = caps.resolutions
+          ? resolutionsFor(family, aspectRatio, version).map((r) => r.value)
+          : [undefined];
+        const qualities = caps.qualities
+          ? qualitiesFor(family, version).map((q) => q.value)
+          : [undefined];
         for (const resolution of offered) {
-          for (const quality of caps.qualities?.map((q) => q.value) ?? [undefined]) {
+          for (const quality of qualities) {
             const result = validateSettings(family, { aspectRatio, version, resolution, quality });
             const where = `${familyId} ${aspectRatio} ${version}/${resolution}/${quality}`;
             assertEquals(result, null, where);
@@ -22,6 +28,42 @@ Deno.test('accepts every catalogued combination for each family', () => {
       }
     }
   }
+});
+
+/**
+ * xhigh and max exist on the GPT Image 2.5 models only. A stale client that
+ * still believes otherwise must be refused here, because this is where the
+ * charge happens — the provider would reject the request after we had taken
+ * the credits.
+ */
+Deno.test('refuses a quality the selected version does not accept', () => {
+  const family = familyById('gpt-image')!;
+  for (const version of ['2', '1.5']) {
+    for (const quality of ['xhigh', 'max']) {
+      const result = validateSettings(family, { aspectRatio: '1:1', version, quality });
+      assertEquals(result?.field, 'quality', `${version}/${quality}`);
+      assertEquals(result?.value, quality);
+    }
+  }
+  // And they are accepted where they are real.
+  for (const version of ['2.5-flare', '2.5-sunburst']) {
+    for (const quality of ['xhigh', 'max']) {
+      assertEquals(validateSettings(family, { aspectRatio: '1:1', version, quality }), null);
+    }
+  }
+});
+
+/** gpt-image-1.5 collapses every request to ~1K, so 2K and 4K are not sellable on it. */
+Deno.test('refuses a resolution the selected version cannot render', () => {
+  const family = familyById('gpt-image')!;
+  for (const resolution of ['2K', '4K']) {
+    const result = validateSettings(family, { aspectRatio: '1:1', version: '1.5', resolution });
+    assertEquals(result?.field, 'resolution', resolution);
+  }
+  assertEquals(
+    validateSettings(family, { aspectRatio: '1:1', version: '2', resolution: '4K' }),
+    null,
+  );
 });
 
 /**

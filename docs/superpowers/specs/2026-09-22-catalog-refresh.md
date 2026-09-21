@@ -220,3 +220,148 @@ Tests added: `model-families.spec.ts` pins the 4K multiplier on 2.5 and the
 `versionResolutions` shape; `left-panel.spec.ts` asserts 2K/4K are offered on
 `2`, `2.5-flare` and `2.5-sunburst`, that `1.5` caps at 1K and drags a stale 4K
 selection down with it, and that Nano Banana Fast is still capped.
+
+## 11. GPT Image 2 really is 4x GPT Image 2.5 — verified, plus two defects found proving it
+
+Source: OpenAI's own output-token calculator on
+`platform.openai.com/docs/guides/image-generation`, section "GPT Image 2.5 and
+GPT Image 2 output tokens", read 2026-09-22, driven directly. Pricing page
+(`platform.openai.com/docs/pricing`, same day) gives the rate.
+
+### The rate is identical; the token counts are not
+
+| model | image output rate |
+|---|---|
+| gpt-image-2.5-sunburst | $30.00 / 1M |
+| gpt-image-2.5-flare | $30.00 / 1M |
+| gpt-image-2 | $30.00 / 1M |
+| gpt-image-1.5 | $32.00 / 1M |
+
+The guide states it plainly: "The models can use different token counts for the
+same quality setting and share the same price per image output token."
+
+At 1024x1024:
+
+| quality | GPT Image 2 | GPT Image 2.5 |
+|---|---|---|
+| low | 196 tok = $0.00588 | 196 tok = $0.00588 |
+| medium | 1,756 tok = $0.05268 | 439 tok = $0.01317 |
+| high | 7,024 tok = $0.21072 | 1,756 tok = $0.05268 |
+
+**Our catalog is correct to the cent.** `GPT_COST['2']` = 0.006 / 0.053 / 0.211
+and `GPT_COST['2.5-*']` = 0.00588 / 0.01317 / 0.05268 both match. The '1.5' row
+(0.009 / 0.034 / 0.133) also reconciles: the earlier-model token table
+(272 / 1056 / 4160 at 1024x1024) at $32/1M gives 0.0087 / 0.0338 / 0.1331.
+
+This **retracts** the claim in §5 that the '2' and '1.5' rows are unverified and
+that the table's shape is wrong. All three rows are now verified. The apparent
+"shift" — 2's medium equalling 2.5's high — is real and intended: GPT Image
+2.5 **high** and GPT Image 2 **medium** are both exactly 1,756 tokens. 2.5 is
+strictly better value at every label, which is worth knowing before deciding
+which version `isDefault` should point at.
+
+### Defect A: the 2K tier is charged at the 1K price
+
+`providerCost` multiplies only when `resolution === '4K'`. Token count tracks
+pixels, not our tier names, so 2K is sold at the 1K cost. Measured tokens
+against what we actually charge (margin 0.4, version 2):
+
+| cell | real cost | our retail | margin |
+|---|---|---|---|
+| 1:1 2K low | $0.0119 | $0.01 | **-19%** |
+| 1:1 2K medium | $0.1070 | $0.09 | **-19%** |
+| 1:1 2K high | $0.4282 | $0.36 | **-19%** |
+| 16:9 1K high | $0.1136 | $0.36 | +68% |
+| 16:9 2K high | $0.1695 | $0.36 | +53% |
+| 1:1 4K high | $0.4607 | $0.73 | +37% |
+
+Every 1:1 2K generation on `gpt-image` is sold below cost — up to **-$0.068
+per image** at high. This is pre-existing, not introduced by the 2.5 addition:
+the `=== '2' && '4K'` multiplier has been there since the family shipped.
+
+The flat multiplier is wrong in both directions. Realised margin swings from
+-19% to +68% across a grid we sell at three prices, because the 4K/1K token
+ratio is 1.90x at 16:9, 2.02x at 4:3 and 2.19x at 1:1 — not the 2.05x the code
+applies everywhere.
+
+### Defect B: two sizes we send are below OpenAI's minimum
+
+The calculator refuses `1024x576` and `576x1024` with "Pixel budget must be at
+least 655,360 pixels, inclusive." Both are 589,824 px. They are
+`gptSizes['16:9:1K']` and `gptSizes['9:16:1K']` in
+`_shared/provider-capabilities.json` — the sizes we send for an ordinary
+16:9-at-1K request on the default version of a live family.
+
+`1280x720` (921,600 px) is the smallest 16:9 pair that clears the floor and
+keeps both edges divisible by 16; `720x1280` mirrors it. Measured tokens there:
+106 / 947 / 3,787.
+
+**Not yet observed against the live API.** This is a documentation finding: the
+published rule says the size is invalid, and we have not made a real call to
+see whether the endpoint enforces it. One 16:9 1K generation settles it.
+
+### Recommended fix
+
+Replace the multiplier with a measured token table keyed `aspectRatio:resolution`
+per version — the shape `FLUX_DIMS` already uses, for the same reason: price
+and request then come from one table and cannot drift. Both defects close
+together, because the invalid sizes stop being expressible.
+
+Deliberately not applied here: this changes live retail prices, which is the
+owner's call, alongside the FLUX price decision.
+
+## 12. Applied 2026-09-22 — catalog `2026-09-22.3`
+
+Both §11 defects are fixed, and GPT Image 2.5's two extra quality settings are
+now offered.
+
+### Price is a measured token table, not a multiplier
+
+`GPT_COST` and the `2.05x at 4K` rule are gone. `GPT_TOKENS` holds the image
+output tokens for all fifteen `aspectRatio:resolution` cells at the five
+quality steps OpenAI bills, read off its calculator one size at a time.
+`GPT_QUALITY_STEP` says which steps each version's labels select — GPT Image 2
+samples the same ladder at steps 0, 2 and 4, verified cell by cell rather than
+assumed. `GPT15_TOKENS` is separate: a different generation, a different rate
+($32/1M), and only three standard sizes.
+
+An unknown version or quality now falls back to the **dearest** step, not the
+cheapest. A bug upstream should not become a discount.
+
+Retail moves both ways: **24 of 45 cells get cheaper, 11 get dearer.** The
+cheapest cells were the overcharged ones (16:9 1K high drops 36 -> 19 credits);
+the dearest were at or below cost (1:1 2K high goes 36 -> 72, which is what it
+always cost us).
+
+### xhigh and max, on the 2.5 models only
+
+New `capabilities.versionQualities`, the same contract as `versionResolutions`.
+`qualitiesFor(family, version)` joins `resolutionsFor(family, ratio, version)`
+as a catalog helper, and **the composer and `validateSettings` both call them**,
+so a chip that is hidden is also a request that is refused — before the charge,
+not after the provider rejects it.
+
+### The undersized sizes
+
+`gptSizes['16:9:1K']` 1024x576 -> **1280x720** and `['9:16:1K']` 576x1024 ->
+**720x1280**.
+
+### Tests that would have caught all of this
+
+- `generation-request_test.ts` now walks **every** entry in `gptSizes` and
+  `gptStandardSizes` and asserts the four published rules, including the
+  655,360 px floor. The old table had no test that compared it to the rules.
+- `request-validation_test.ts` enumerated the family-wide option lists, which
+  is precisely why it stayed green while 2.5 shipped at 1K only. It now
+  enumerates **per version**, and separately asserts that xhigh/max on version
+  2 and 2K/4K on 1.5 are refused.
+- `model-families.spec.ts` pins the token arithmetic, the one-notch offset
+  between the two ladders, that 2K costs more than 1K, and that an unknown
+  quality is not priced as the cheapest.
+- `left-panel.spec.ts` covers the chips and the clamp both ways.
+
+### Still owed
+
+The 655,360 px floor is still a documentation finding. No 16:9 1K generation
+has been run against the live API, before or after the fix, so nothing here
+proves the old size actually failed — only that it violated the published rule.

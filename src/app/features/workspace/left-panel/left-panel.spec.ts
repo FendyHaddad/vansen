@@ -248,6 +248,32 @@ describe('LeftPanel resolution tiers follow the model version', () => {
     expect(component.settings().resolution).toBe('1K');
   });
 
+  it('shows X-High and Max on the 2.5 models and hides them elsewhere', () => {
+    const component = makeComponent();
+    component.selectFamily('gpt-image');
+
+    component.setAxis('version', '2.5-flare');
+    expect(component.qualityOptions()?.map((o) => o.value)).toEqual([
+      'low', 'medium', 'high', 'xhigh', 'max',
+    ]);
+
+    component.setAxis('version', '2');
+    expect(component.qualityOptions()?.map((o) => o.value)).toEqual(['low', 'medium', 'high']);
+  });
+
+  it('pulls a Max selection back to High when the version drops to 2', () => {
+    const component = makeComponent();
+    component.selectFamily('gpt-image');
+    component.setAxis('version', '2.5-sunburst');
+    component.setAxis('quality', 'max');
+
+    component.setAxis('version', '2');
+
+    // Not 'low': 2.5 max and version 2 high are the same 7,024 tokens, so this
+    // keeps what they asked for instead of quietly downgrading the render.
+    expect(component.settings().quality).toBe('high');
+  });
+
   it('still caps Nano Banana Fast at 1K', () => {
     const component = makeComponent();
     component.selectFamily('nano-banana');

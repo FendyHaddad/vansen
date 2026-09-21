@@ -2,7 +2,7 @@
 // well-formed string; this proves the selected family actually offers it, so a
 // nonsense axis can never be priced by the providerCost() fallback and then
 // charged for a request the provider will clamp or reject.
-import { resolutionsFor } from '../_shared/model-families.ts';
+import { qualitiesFor, resolutionsFor } from '../_shared/model-families.ts';
 import type { GenerationSettings, ModelFamily } from '../_shared/model-families.ts';
 
 export interface SettingsError {
@@ -33,16 +33,25 @@ export function validateSettings(
   const aspect = offered('aspectRatio', settings.aspectRatio, caps.aspectRatios);
   if (aspect) return aspect;
 
-  // Checked after the ratio, because which tiers exist depends on it: FLUX.2
-  // clamps every edge to 2048, so "4MP" is real at 1:1 and a lie at 16:9.
+  // Checked after the ratio and the version, because which tiers exist depends
+  // on both: FLUX.2 clamps every edge to 2048, so "4MP" is real at 1:1 and a
+  // lie at 16:9; and GPT Image 1.5 cannot exceed 1K whatever the ratio.
   const resolution = offered(
     'resolution',
     settings.resolution,
-    caps.resolutions ? resolutionsFor(family, settings.aspectRatio).map((r) => r.value) : [],
+    caps.resolutions
+      ? resolutionsFor(family, settings.aspectRatio, settings.version).map((r) => r.value)
+      : [],
   );
   if (resolution) return resolution;
 
-  const quality = offered('quality', settings.quality, caps.qualities?.map((q) => q.value) ?? []);
+  // Version-aware for the same reason: xhigh and max exist on GPT Image 2.5
+  // only, and version 2 would be rejected by the provider after we charged.
+  const quality = offered(
+    'quality',
+    settings.quality,
+    caps.qualities ? qualitiesFor(family, settings.version).map((q) => q.value) : [],
+  );
   if (quality) return quality;
 
   const durations = caps.durations ?? [];

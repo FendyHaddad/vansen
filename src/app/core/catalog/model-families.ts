@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-22.2';
+export const CATALOG_VERSION = '2026-09-22.3';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -80,6 +80,11 @@ export interface ModelFamily {
      * version cannot quietly narrow the offer again.
      */
     versionResolutions?: Record<string, string[]>;
+    /**
+     * Quality settings each version accepts, keyed by version. A version absent
+     * from this map is unrestricted. Same contract as `versionResolutions`.
+     */
+    versionQualities?: Record<string, string[]>;
     qualities?: FamilyOption[];
     durations?: number[];
     audio?: AudioCapability;
@@ -151,30 +156,91 @@ const RES_TOOLTIPS: Record<string, string> = {
 const GPT_QUALITY_TOOLTIPS: Record<string, string> = {
   low: 'Minimal compute — fast drafts and thumbnails. Same resolution, less detail.',
   medium: 'Balanced compute. Good default for final assets.',
-  high: 'Maximum compute per image — best textures and text rendering. Not a resolution setting.',
+  high: 'Strong detail and text rendering. Not a resolution setting.',
+  xhigh: 'More compute than High, for fine texture and dense text.',
+  max: 'Everything the model has. Slowest and dearest by a wide margin.',
 };
 
 /**
- * Provider cost per image (square, ~1K output) by version and quality.
+ * Image output tokens for GPT Image 2 and 2.5, keyed `aspectRatio:resolution`.
  *
- * The 2.5 rows are measured, not estimated: OpenAI's own calculator reports
- * 196 / 439 / 1756 output tokens for low / medium / high at 1024x1024, billed
- * at $30 per 1M image output tokens (platform.openai.com/docs/guides/image-generation,
- * read 2026-09-22).
+ * OpenAI bills images per output token, and the token count tracks pixel area,
+ * not our tier names. The previous shape — one flat price per quality, doubled
+ * at 4K — could not express that, and it cost real money: every 1:1 2K image
+ * was sold below cost, while 16:9 1K carried a 68% margin. See
+ * docs/superpowers/specs/2026-09-22-catalog-refresh.md §11.
  *
- * The '2' and '1.5' rows are NOT verified. They are flat per-image figures,
- * but OpenAI bills images per token, so a flat table cannot be right in shape —
- * and '2' happens to equal 2.5's low/high/max rather than its low/medium/high,
- * which is either coincidence or a tier shift nobody has checked. Settling it
- * needs one real generation with `usage` read back from the response. Until
- * then these stay as they were rather than being replaced by a better guess.
+ * Each row is the five quality steps OpenAI bills, in order:
+ * [low, medium, high, xhigh, max]. Measured from the calculator in
+ * platform.openai.com/docs/guides/image-generation on 2026-09-22 by entering
+ * every size below, not interpolated.
+ *
+ * GPT Image 2 offers only three qualities and they are the SAME ladder sampled
+ * at steps 0, 2 and 4 — verified cell by cell, not assumed, which is why one
+ * table serves both models (see GPT_QUALITY_STEP).
  */
-const GPT_COST: Record<string, Record<string, number>> = {
-  '2.5-sunburst': { low: 0.00588, medium: 0.01317, high: 0.05268 },
-  '2.5-flare': { low: 0.00588, medium: 0.01317, high: 0.05268 },
-  '2': { low: 0.006, medium: 0.053, high: 0.211 },
-  '1.5': { low: 0.009, medium: 0.034, high: 0.133 },
+const GPT_TOKENS: Record<string, readonly number[]> = {
+  '1:1:1K': [196, 439, 1756, 3122, 7024],
+  '4:3:1K': [134, 301, 1204, 2140, 4815],
+  '3:4:1K': [134, 301, 1204, 2140, 4815],
+  '16:9:1K': [106, 246, 947, 1683, 3787],
+  '9:16:1K': [106, 246, 947, 1683, 3787],
+  '1:1:2K': [397, 892, 3568, 6343, 14272],
+  '4:3:2K': [247, 556, 2223, 3952, 8892],
+  '3:4:2K': [247, 556, 2223, 3952, 8892],
+  '16:9:2K': [157, 367, 1413, 2511, 5650],
+  '9:16:2K': [157, 367, 1413, 2511, 5650],
+  '1:1:4K': [427, 960, 3840, 6826, 15358],
+  '4:3:4K': [395, 888, 3552, 6314, 14206],
+  '3:4:4K': [395, 888, 3552, 6314, 14206],
+  '16:9:4K': [371, 865, 3336, 5930, 13342],
+  '9:16:4K': [371, 865, 3336, 5930, 13342],
 };
+
+/** Which step of GPT_TOKENS each version's quality labels select. */
+const GPT_QUALITY_STEP: Record<string, Record<string, number>> = {
+  '2': { low: 0, medium: 2, high: 4 },
+  '2.5-flare': { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 },
+  '2.5-sunburst': { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 },
+};
+
+/**
+ * gpt-image-1.5 is a different generation with a different token table and a
+ * different rate. It accepts only the three standard sizes, so it is keyed by
+ * aspect ratio alone: [low, medium, high].
+ *
+ * Source: the "Older-model pricing examples" table in the same guide —
+ * 272/1056/4160 square, 408/1584/6240 portrait, 400/1568/6208 landscape.
+ */
+const GPT15_TOKENS: Record<string, readonly number[]> = {
+  '1:1': [272, 1056, 4160],
+  '4:3': [400, 1568, 6208],
+  '16:9': [400, 1568, 6208],
+  '3:4': [408, 1584, 6240],
+  '9:16': [408, 1584, 6240],
+};
+
+/** USD per image output token. 1.5 is dearer than the models that replaced it. */
+const GPT_RATE = 30 / 1_000_000;
+const GPT15_RATE = 32 / 1_000_000;
+
+function gptProviderCost(s: GenerationSettings): number {
+  const version = s.version ?? '2';
+  const aspectRatio = s.aspectRatio ?? '1:1';
+  const quality = s.quality ?? 'medium';
+
+  if (version === '1.5') {
+    const row = GPT15_TOKENS[aspectRatio] ?? GPT15_TOKENS['1:1'];
+    const step = ['low', 'medium', 'high'].indexOf(quality);
+    return row[step === -1 ? 1 : step] * GPT15_RATE;
+  }
+
+  const row = GPT_TOKENS[`${aspectRatio}:${s.resolution ?? '1K'}`] ?? GPT_TOKENS['1:1:1K'];
+  const step = GPT_QUALITY_STEP[version]?.[quality];
+  // An unknown version or quality is a bug upstream, not a discount: fall back
+  // to the dearest step this row has rather than the cheapest.
+  return row[step ?? row.length - 1] * GPT_RATE;
+}
 
 /** Margin baked into the credit charge table. 1 credit = $0.01 of Studio retail. */
 export const STUDIO_MARGIN = 0.4;
@@ -308,26 +374,26 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'OpenAI',
     logo: '/logos/openai.svg',
     kind: 'image',
-    blurb: 'Quality dial for compute effort; 2 and 2.5 add true 4K and masked edits.',
+    blurb: 'Five-step quality dial on 2.5; true 4K and masked edits from version 2 up.',
     capabilities: {
       versions: [
-        { value: '1.5', label: '1.5', tooltip: 'Previous generation, ~1K output.' },
+        { value: '1.5', label: '1.5', tooltip: 'Previous generation. ~1K output only, and dearer per pixel than 2.' },
         {
           value: '2',
           label: '2',
           isDefault: true,
-          tooltip: 'GPT Image 2. Any resolution up to 3840px, masked editing.',
+          tooltip: 'Any resolution up to 3840px, masked editing. Low/Medium/High only.',
         },
         {
           value: '2.5-flare',
           label: '2.5 Flare',
           tag: 'Latest',
-          tooltip: 'Fastest 2.5 model — high-quality everyday generation.',
+          tooltip: 'Fastest 2.5 model — everyday generation. Adds X-High and Max.',
         },
         {
           value: '2.5-sunburst',
           label: '2.5 Sunburst',
-          tooltip: 'Most capable 2.5 model — for edits where precision matters most.',
+          tooltip: 'Most capable 2.5 model — precision edits. Adds X-High and Max.',
         },
       ],
       aspectRatios: AR_IMAGE,
@@ -346,22 +412,21 @@ export const MODEL_FAMILIES: ModelFamily[] = [
         { value: 'low', label: 'Low', tooltip: GPT_QUALITY_TOOLTIPS['low'] },
         { value: 'medium', label: 'Medium', tooltip: GPT_QUALITY_TOOLTIPS['medium'] },
         { value: 'high', label: 'High', tooltip: GPT_QUALITY_TOOLTIPS['high'] },
+        { value: 'xhigh', label: 'X-High', tooltip: GPT_QUALITY_TOOLTIPS['xhigh'] },
+        { value: 'max', label: 'Max', tooltip: GPT_QUALITY_TOOLTIPS['max'] },
       ],
+      // Only the 2.5 models accept xhigh and max: "For gpt-image-2, the options
+      // are low, medium, and high" (platform.openai.com/docs/guides/image-generation).
+      // Sending either to version 2 or 1.5 is a provider rejection, so the
+      // chips are absent and the request is refused before it is charged.
+      versionQualities: {
+        '2': ['low', 'medium', 'high'],
+        '1.5': ['low', 'medium', 'high'],
+      },
       imageInput: true,
       maskInput: true,
     },
-    providerCost: (s) => {
-      const version = s.version ?? '2';
-      const base = GPT_COST[version]?.[s.quality ?? 'medium'] ?? 0.053;
-      // OpenAI bills image output tokens, and tokens track pixel area, so a 4K
-      // render costs materially more than the 1024x1024 the GPT_COST rows are
-      // quoted at. 2.05x is the ratio measured for version 2. It is applied to
-      // the 2.5 models on the assumption that they bill the same way; that is
-      // NOT verified — see docs/superpowers/specs/2026-09-22-catalog-refresh.md.
-      // Version 1.5 cannot produce 4K at all, so it never multiplies.
-      if (version === '1.5' || s.resolution !== '4K') return base;
-      return base * 2.05;
-    },
+    providerCost: gptProviderCost,
   },
   {
     id: 'flux',
@@ -646,11 +711,30 @@ export function familyById(id: string): ModelFamily | undefined {
  * tier the provider would clamp: the chip is absent in the UI and the request
  * is refused before charge.
  */
-export function resolutionsFor(family: ModelFamily, aspectRatio: string): FamilyOption[] {
+export function resolutionsFor(
+  family: ModelFamily,
+  aspectRatio: string,
+  version?: string,
+): FamilyOption[] {
   const all = family.capabilities.resolutions ?? [];
   const excluded = family.capabilities.resolutionExclusions?.[aspectRatio];
-  if (!excluded) return all;
-  return all.filter((o) => !excluded.includes(o.value));
+  const byRatio = excluded ? all.filter((o) => !excluded.includes(o.value)) : all;
+  const allowed = version ? family.capabilities.versionResolutions?.[version] : undefined;
+  if (!allowed) return byRatio;
+  return byRatio.filter((o) => allowed.includes(o.value));
+}
+
+/**
+ * The quality settings one version of a family really accepts.
+ *
+ * Same reason as `resolutionsFor`: GPT Image 2.5 takes xhigh and max, version 2
+ * does not, and a chip the provider would reject must not be offered or priced.
+ */
+export function qualitiesFor(family: ModelFamily, version?: string): FamilyOption[] {
+  const all = family.capabilities.qualities ?? [];
+  const allowed = version ? family.capabilities.versionQualities?.[version] : undefined;
+  if (!allowed) return all;
+  return all.filter((o) => allowed.includes(o.value));
 }
 
 export function defaultSettings(family: ModelFamily): GenerationSettings {

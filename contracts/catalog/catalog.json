@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "2026-09-22.2",
+  "catalogVersion": "2026-09-22.3",
   "studioMargin": 0.4,
   "planCredits": {
     "studio": 1500,
@@ -98,7 +98,9 @@
         "qualities": [
           "low",
           "medium",
-          "high"
+          "high",
+          "xhigh",
+          "max"
         ],
         "aspectRatios": [
           "1:1",

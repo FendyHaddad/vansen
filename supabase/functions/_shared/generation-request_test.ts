@@ -143,3 +143,52 @@ Deno.test('gpt-image 2K and 4K are refused on versions that cannot render them',
   }
   assertEquals(threw.startsWith('unsupported_'), true, `expected a refusal, got "${threw}"`);
 });
+
+/**
+ * Every size we can put on the wire has to satisfy OpenAI's own validator.
+ *
+ * 16:9:1K and 9:16:1K were 1024x576 and 576x1024 — 589,824 px against a
+ * documented floor of 655,360 — so an ordinary 16:9-at-1K request on the
+ * default version of a live family named a size the API does not accept. A
+ * table nobody checks against the published rules is how that survives.
+ *
+ * Rules, from platform.openai.com/docs/guides/image-generation (2026-09-22):
+ * both edges divisible by 16, neither over 3840, aspect between 1:3 and 3:1,
+ * total pixels between 655,360 and 8,294,400 inclusive.
+ */
+Deno.test('every gpt-image size we can send satisfies the published size rules', async () => {
+  const caps = JSON.parse(
+    await Deno.readTextFile(new URL('./provider-capabilities.json', import.meta.url)),
+  ) as { gptSizes: Record<string, string>; gptStandardSizes: Record<string, string> };
+
+  const sizes = [...Object.entries(caps.gptSizes), ...Object.entries(caps.gptStandardSizes)];
+  for (const [key, size] of sizes) {
+    const [w, h] = size.split('x').map(Number);
+    const pixels = w * h;
+    const ratio = Math.max(w / h, h / w);
+    assertEquals(w % 16, 0, `${key} ${size}: width not divisible by 16`);
+    assertEquals(h % 16, 0, `${key} ${size}: height not divisible by 16`);
+    assertEquals(w <= 3840 && h <= 3840, true, `${key} ${size}: edge over 3840`);
+    assertEquals(ratio <= 3, true, `${key} ${size}: aspect beyond 3:1`);
+    assertEquals(pixels >= 655_360, true, `${key} ${size}: ${pixels}px under the 655,360 floor`);
+    assertEquals(pixels <= 8_294_400, true, `${key} ${size}: ${pixels}px over the 4K ceiling`);
+  }
+});
+
+Deno.test('16:9 at 1K sends a size above the pixel floor', () => {
+  const r = norm('gpt-image', { version: '2', aspectRatio: '16:9', resolution: '1K', quality: 'low' });
+  assertEquals(r.providerSettings.size, '1280x720');
+  const r2 = norm('gpt-image', { version: '2', aspectRatio: '9:16', resolution: '1K', quality: 'low' });
+  assertEquals(r2.providerSettings.size, '720x1280');
+});
+
+/** xhigh and max reach the provider only on the versions that accept them. */
+Deno.test('gpt-image 2.5 carries xhigh and max through to the provider', () => {
+  for (const quality of ['xhigh', 'max']) {
+    const r = norm('gpt-image', {
+      version: '2.5-sunburst', aspectRatio: '1:1', resolution: '2K', quality,
+    });
+    assertEquals(r.providerModel, 'gpt-image-2.5-sunburst');
+    assertEquals(r.providerSettings.quality, quality);
+  }
+});

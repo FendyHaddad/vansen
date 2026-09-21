@@ -16,6 +16,7 @@ import {
   fluxDims,
   packCredits,
   personaGenCreditCost,
+  qualitiesFor,
   resolutionsFor,
   upscaleCreditCost,
   videoFamilySupports,
@@ -47,33 +48,37 @@ describe('model families', () => {
     expect(defaultSettings(nb).version).toBe('standard');
   });
 
-  it('gpt image priced by version x quality, v2 4K doubles', () => {
+  it('gpt image is priced from measured output tokens, not a flat tier', () => {
     const gpt = familyById('gpt-image')!;
-    expect(
-      gpt.providerCost({ version: '2', aspectRatio: '1:1', quality: 'high', resolution: '1K' }),
-    ).toBeCloseTo(0.211);
-    // Version '1' was withdrawn from the offer on 2026-09-22. The 2.5 models
-    // replace it, and their figures are measured from OpenAI's own calculator
-    // (196 tokens at $30/1M for low at 1024x1024) rather than estimated.
-    expect(
-      gpt.providerCost({ version: '2.5-flare', aspectRatio: '1:1', quality: 'low', resolution: '1K' }),
-    ).toBeCloseTo(0.00588);
-    expect(
-      gpt.providerCost({ version: '2.5-sunburst', aspectRatio: '1:1', quality: 'high', resolution: '1K' }),
-    ).toBeCloseTo(0.05268);
-    expect(
-      gpt.providerCost({ version: '2', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
-    ).toBeCloseTo(0.0123, 3);
-    // The 4K multiplier is not version-2-only. When 2.5 shipped it inherited
-    // the flat 1K figure at every size, so a 4K render was sold at the 1K cost
-    // and the margin came out of us.
-    expect(
-      gpt.providerCost({ version: '2.5-flare', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
-    ).toBeCloseTo(0.00588 * 2.05, 5);
-    // 1.5 cannot produce 4K, so it never multiplies whatever it is sent.
-    expect(
-      gpt.providerCost({ version: '1.5', aspectRatio: '1:1', quality: 'low', resolution: '4K' }),
-    ).toBeCloseTo(0.009);
+    const at = (version: string, quality: string, aspectRatio: string, resolution: string) =>
+      gpt.providerCost({ version, aspectRatio, resolution, quality });
+    const RATE = 30 / 1_000_000;
+
+    // Every figure below is an output-token count read from OpenAI's own
+    // calculator on 2026-09-22, times the published $30/1M rate.
+    expect(at('2', 'high', '1:1', '1K')).toBeCloseTo(7024 * RATE, 6);
+    expect(at('2.5-flare', 'low', '1:1', '1K')).toBeCloseTo(196 * RATE, 6);
+    expect(at('2.5-sunburst', 'high', '1:1', '1K')).toBeCloseTo(1756 * RATE, 6);
+
+    // The ladders are offset by one notch: GPT Image 2 'medium' and GPT Image
+    // 2.5 'high' are the same 1,756 tokens, and 2 'high' equals 2.5 'max'.
+    expect(at('2', 'medium', '1:1', '1K')).toBeCloseTo(at('2.5-flare', 'high', '1:1', '1K'), 6);
+    expect(at('2', 'high', '1:1', '1K')).toBeCloseTo(at('2.5-flare', 'max', '1:1', '1K'), 6);
+
+    // The defect this table replaced: 2K was charged at the 1K price, so a 1:1
+    // 2K image sold below cost. It must now cost more than the same image at 1K.
+    expect(at('2', 'high', '1:1', '2K')).toBeCloseTo(14272 * RATE, 6);
+    expect(at('2', 'high', '1:1', '2K')).toBeGreaterThan(at('2', 'high', '1:1', '1K'));
+
+    // Price tracks pixels, so the multiplier is not one number. 4K over 1K is
+    // 2.19x at 1:1 and 1.90x at 16:9 — the flat 2.05x was wrong at both.
+    expect(at('2', 'high', '1:1', '4K') / at('2', 'high', '1:1', '1K')).toBeCloseTo(2.19, 2);
+    expect(at('2', 'high', '16:9', '4K') / at('2', 'high', '16:9', '1K')).toBeCloseTo(3.52, 2);
+
+    // 1.5 is a different generation on a different rate: $32/1M against the
+    // older token table (272/1056/4160 square).
+    expect(at('1.5', 'medium', '1:1', '1K')).toBeCloseTo(1056 * (32 / 1_000_000), 6);
+    expect(at('1.5', 'high', '16:9', '1K')).toBeCloseTo(6208 * (32 / 1_000_000), 6);
   });
 
   it('gpt image offers 2K and 4K on every version that can render them', () => {
@@ -85,6 +90,38 @@ describe('model families', () => {
     for (const version of ['2', '2.5-flare', '2.5-sunburst']) {
       expect(limits[version]).toBeUndefined();
     }
+  });
+
+  it('offers xhigh and max on the 2.5 models only', () => {
+    const gpt = familyById('gpt-image')!;
+    const names = (v: string) => qualitiesFor(gpt, v).map((q) => q.value);
+    expect(names('2.5-flare')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(names('2.5-sunburst')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    // The guide is explicit that version 2 takes low, medium and high only.
+    expect(names('2')).toEqual(['low', 'medium', 'high']);
+    expect(names('1.5')).toEqual(['low', 'medium', 'high']);
+  });
+
+  it('prices xhigh and max above high on the 2.5 models', () => {
+    const gpt = familyById('gpt-image')!;
+    const at = (quality: string) =>
+      gpt.providerCost({ version: '2.5-flare', aspectRatio: '1:1', resolution: '1K', quality });
+    expect(at('xhigh')).toBeCloseTo(3122 * (30 / 1_000_000), 6);
+    expect(at('max')).toBeCloseTo(7024 * (30 / 1_000_000), 6);
+    expect(at('xhigh')).toBeGreaterThan(at('high'));
+    expect(at('max')).toBeGreaterThan(at('xhigh'));
+  });
+
+  it('never prices an unknown quality as the cheapest step', () => {
+    const gpt = familyById('gpt-image')!;
+    // A bug upstream must not become a discount.
+    const bogus = gpt.providerCost({
+      version: '2.5-flare', aspectRatio: '1:1', resolution: '1K', quality: 'free-please',
+    });
+    const max = gpt.providerCost({
+      version: '2.5-flare', aspectRatio: '1:1', resolution: '1K', quality: 'max',
+    });
+    expect(bogus).toBeCloseTo(max, 6);
   });
 
   it('video cost scales with duration', () => {

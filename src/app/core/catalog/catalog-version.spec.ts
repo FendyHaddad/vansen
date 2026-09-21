@@ -80,7 +80,7 @@ describe('catalog version', () => {
     // `npm run sync-shared` and `npm run export-catalog`, hand the new Dart
     // fixture to the mobile repo, then paste the new fingerprint here.
     expect({ version: CATALOG_VERSION, fingerprint: fingerprint() }).toEqual({
-      version: '2026-09-22.2',
+      version: '2026-09-22.3',
       fingerprint: recordedCatalogFingerprint,
     });
   });

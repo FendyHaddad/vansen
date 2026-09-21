@@ -31,6 +31,7 @@ import {
   familyById,
   personaGenCreditCost,
   referenceRule,
+  qualitiesFor,
   resolutionsFor,
   videoFamilySupports,
 } from '../../../core/catalog/model-families';
@@ -208,23 +209,21 @@ export class LeftPanel {
     })),
   );
 
+  // Both of these read the catalog's own helpers rather than naming versions
+  // here. The hardcoded form withheld 2K and 4K from GPT Image 2.5 the day it
+  // shipped, and the server uses the same two functions, so the chips on offer
+  // and the requests accepted cannot drift apart.
   readonly resolutionOptions = computed<FamilyOption[] | null>(() => {
     const f = this.family();
     if (!f.capabilities.resolutions) return null;
-    // Aspect-driven limits first: FLUX.2 cannot fill a 4MP tier off-square.
-    const list = resolutionsFor(f, this.settings().aspectRatio);
-    // Then the per-version ceiling, which the catalog carries as data. Reading
-    // it from the family rather than naming versions here is deliberate: the
-    // hardcoded form withheld 2K and 4K from GPT Image 2.5 the day it shipped.
-    const version = this.settings().version;
-    const allowed = version ? f.capabilities.versionResolutions?.[version] : undefined;
-    if (!allowed) return list;
-    return list.filter((o) => allowed.includes(o.value));
+    return resolutionsFor(f, this.settings().aspectRatio, this.settings().version);
   });
 
-  readonly qualityOptions = computed<FamilyOption[] | null>(
-    () => this.family().capabilities.qualities ?? null,
-  );
+  readonly qualityOptions = computed<FamilyOption[] | null>(() => {
+    const f = this.family();
+    if (!f.capabilities.qualities) return null;
+    return qualitiesFor(f, this.settings().version);
+  });
 
   readonly durationOptions = computed<FamilyOption[] | null>(() => {
     const durations = this.family().capabilities.durations;
@@ -476,11 +475,17 @@ export class LeftPanel {
     const f = this.family();
     const allowed = this.resolutionOptions();
     const stale = !!allowed && !allowed.some((o) => o.value === this.settings().resolution);
+    const quals = this.qualityOptions();
+    const staleQuality = !!quals && !quals.some((o) => o.value === this.settings().quality);
     this.settings.update((s) => {
       const next = { ...s };
       // Someone who picked the largest size wants the largest size still on
       // offer, not the smallest one in the list.
       if (stale) next.resolution = allowed![allowed!.length - 1]?.value;
+      // Same rule for quality, and it lands well: GPT Image 2.5 'max' and
+      // version 2 'high' are the same 7,024 tokens at 1K, so dropping from a
+      // 2.5 model to version 2 keeps both the intent and the price.
+      if (staleQuality) next.quality = quals![quals!.length - 1]?.value;
       if (f.kind === 'video' && !videoFamilySupports(f, next.mode ?? 't2v')) next.mode = 't2v';
       if (f.capabilities.audio !== 'selectable') delete next.audio;
       if (f.capabilities.audio === 'selectable' && !next.audio) next.audio = 'off';
