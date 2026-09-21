@@ -59,22 +59,48 @@ TTY=0; [ -t 1 ] && TTY=1
 TOTAL=7
 DONE=0
 
-clearline() { [ "$TTY" = "1" ] && printf '\r\033[K'; return 0; }
-
-progress() {
+# draw LABEL SPINNER ELAPSED: one line, redrawn in place.
+draw() {
   local width=24
   local filled=$(( DONE * width / TOTAL ))
   local fill rest
-  fill="$(printf '%*s' "$filled" '' | tr ' ' '█')"
-  rest="$(printf '%*s' $(( width - filled )) '' | tr ' ' '░')"
-  if [ "$TTY" = "1" ]; then
-    printf '\r\033[K\033[2m[%s%s]\033[0m %d/%d  %s' "$fill" "$rest" "$DONE" "$TOTAL" "$1"
+  fill="$(printf '%*s' "$filled" '')"; fill="${fill// /█}"
+  rest="$(printf '%*s' $(( width - filled )) '')"; rest="${rest// /░}"
+  printf '\r\033[K\033[2m[%s%s]\033[0m %d/%d  %s %s \033[2m%ss\033[0m' \
+    "$fill" "$rest" "$DONE" "$TOTAL" "$2" "$1" "$3"
+}
+
+# A step can be quiet for a minute (gates, wrangler upload). The spinner and
+# the elapsed seconds are the proof that it is working and not hung.
+SPIN_PID=""
+spin_stop() {
+  [ -n "$SPIN_PID" ] || return 0
+  kill "$SPIN_PID" 2>/dev/null || true
+  wait "$SPIN_PID" 2>/dev/null || true
+  SPIN_PID=""
+}
+
+progress() {
+  spin_stop
+  if [ "$TTY" != "1" ]; then
+    printf '[%d/%d] %s\n' "$DONE" "$TOTAL" "$1"
     return 0
   fi
-  printf '[%d/%d] %s\n' "$DONE" "$TOTAL" "$1"
+  (
+    trap - ERR EXIT
+    frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏); i=0; started=$SECONDS
+    while :; do
+      draw "$1" "${frames[i % 10]}" "$(( SECONDS - started ))"
+      i=$(( i + 1 ))
+      sleep 0.1
+    done
+  ) &
+  SPIN_PID=$!
 }
 
 tick() { DONE=$(( DONE + 1 )); }
+
+clearline() { spin_stop; [ "$TTY" = "1" ] && printf '\r\033[K'; return 0; }
 
 # The local database we started, if any. Stopped before every exit so a
 # failed run never leaves Docker containers behind.
@@ -87,7 +113,7 @@ cleanup() {
   progress "stopping local database"
   npm run db:test:stop >>"$LOG" 2>&1 || true
 }
-trap cleanup EXIT
+trap 'cleanup; spin_stop' EXIT
 
 # fail REASON [DETAIL]: the last thing printed, always says why.
 fail() {
@@ -126,12 +152,11 @@ run() {
   fail "$reason" "$(detail)"
 }
 
-# The Supabase CLI draws a spinner on STDOUT when attached to a terminal, so
-# `| jq` gets "⠙{...}". Drop everything before the opening brace.
+# Ask for JSON explicitly: the CLI's default output is a table in a terminal
+# and JSON in a pipe, which is how this read came back empty on a real run.
 apiVersion() {
-  supabase functions list --project-ref "$PROJECT_REF" 2>>"$LOG" \
-    | tr -d '\r' | sed -n 's/^[^{]*\({.*\)$/\1/p' | head -1 \
-    | jq -r '.functions[] | select(.slug=="api") | .version'
+  supabase functions list --project-ref "$PROJECT_REF" --output json 2>>"$LOG" \
+    | jq -r '(if type == "array" then . else .functions end)[] | select(.slug == "api") | .version'
 }
 
 cd "$REPO_ROOT"
