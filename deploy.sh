@@ -52,9 +52,20 @@ for arg in "$@"; do
 done
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$1"; }
 die()  { printf '\n\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+
+# The Supabase CLI draws a progress spinner on STDOUT when it is attached to a
+# terminal, so `... | jq` gets "\u2819{...}" and dies on the first byte. It only
+# shows up in an interactive shell, never in a piped test run, which is exactly
+# how it reached a live deploy. Drop everything before the opening brace.
+apiVersion() {
+  supabase functions list --project-ref "$PROJECT_REF" 2>/dev/null \
+    | tr -d '\r' | sed -n 's/^[^{]*\({.*\)$/\1/p' | head -1 \
+    | jq -r '.functions[] | select(.slug=="api") | .version'
+}
 
 cd "$REPO_ROOT"
 
@@ -91,8 +102,9 @@ CATALOG_VERSION="$(grep -o "CATALOG_VERSION = '[^']*'" src/app/core/catalog/mode
 [ -n "$CATALOG_VERSION" ] || die "could not read CATALOG_VERSION from the catalog"
 ok "catalog $CATALOG_VERSION"
 
-LIVE_CATALOG="$(curl -fsS "$FUNCTIONS_URL/manifest" | jq -r '.catalogVersion // "unknown"')"
-LIVE_REVISION="$(curl -fsS "$FUNCTIONS_URL/manifest" | jq -r '.gitRevision // "unknown"')"
+LIVE="$(curl -fsS "$FUNCTIONS_URL/manifest")"
+LIVE_CATALOG="$(printf '%s' "$LIVE" | jq -r '.catalogVersion // "unknown"')"
+LIVE_REVISION="$(printf '%s' "$LIVE" | jq -r '.gitRevision // "unknown"')"
 ok "currently live: catalog $LIVE_CATALOG from $LIVE_REVISION"
 
 # ---------------------------------------------------------------------------
@@ -148,8 +160,7 @@ step "Deploying Edge Function: api"
 supabase functions deploy api --no-verify-jwt --project-ref "$PROJECT_REF" \
   || die "api deploy failed — the web bundle was NOT deployed"
 
-API_VERSION="$(supabase functions list --project-ref "$PROJECT_REF" 2>/dev/null \
-  | jq -r '.functions[] | select(.slug=="api") | .version')"
+API_VERSION="$(apiVersion)"
 [ -n "$API_VERSION" ] || die "deployed api but could not read its version back"
 ok "api is now version $API_VERSION"
 
@@ -200,8 +211,7 @@ check "gitRevision"    "$(printf '%s' "$MANIFEST" | jq -r '.gitRevision')"    "$
 check "catalogVersion" "$(printf '%s' "$MANIFEST" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "workerVersion"  "$(printf '%s' "$MANIFEST" | jq -r '.workerVersion')"  "$STAMPED_VERSION"
 
-REAL_VERSION="$(supabase functions list --project-ref "$PROJECT_REF" 2>/dev/null \
-  | jq -r '.functions[] | select(.slug=="api") | .version')"
+REAL_VERSION="$(apiVersion)"
 check "api version on disk" "v$REAL_VERSION" "$STAMPED_VERSION"
 
 LIVE_CAPS="$(curl -fsS "$FUNCTIONS_URL/capabilities" | jq -r '.catalogVersion')"
