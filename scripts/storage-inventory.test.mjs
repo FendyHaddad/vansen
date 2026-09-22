@@ -115,7 +115,7 @@ test('a table larger than one page is fully enumerated', async () => {
   const personas = Array.from({ length: 2500 }, (_, i) => ({
     id: `p${String(i).padStart(5, '0')}`,
     user_id: 'u1',
-    photo_paths: [],
+    photos: {},
   }));
   const rows = await pageTable(fakeAdmin({ personas }), 'personas', 'id', { pageSize: 1000 });
   assert.equal(rows.length, 2500);
@@ -231,6 +231,38 @@ test('a row whose object was never registered is named with its source', () => {
   const report = reconcile({ expected: new Map(), sources, actual: [] });
   assert.equal(report.unregisteredSources.length, 1);
   assert.equal(report.unregisteredSources[0].source, 'uploads.path:up1');
+});
+
+test('a persona\'s non-null photo slots become sources; null slots are skipped', () => {
+  const sources = expectedFromSources(
+    {
+      personas: [{
+        id: 'per1',
+        user_id: 'u1',
+        photos: {
+          front: 'u1/front.jpg',
+          left_three_quarter: null,
+          right_three_quarter: 'u1/right.jpg',
+          left_profile: null,
+          right_profile: null,
+        },
+      }],
+    },
+    R2_BUCKET,
+  );
+  const report = reconcile({ expected: new Map(), sources, actual: [] });
+  assert.equal(report.unregisteredSources.length, 2);
+  assert.deepEqual(
+    report.unregisteredSources.map((s) => s.source).sort(),
+    ['personas.photos:per1', 'personas.photos:per1'],
+  );
+  assert.deepEqual(
+    new Set(report.unregisteredSources.map((s) => s.key)),
+    new Set([
+      objectKey({ backend: 'supabase', bucket: 'uploads', path: 'u1/front.jpg' }),
+      objectKey({ backend: 'supabase', bucket: 'uploads', path: 'u1/right.jpg' }),
+    ]),
+  );
 });
 
 test('an R2 generation with no configured bucket is refused, not assumed', () => {

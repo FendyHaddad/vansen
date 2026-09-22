@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { fitWithin } from './photo-prep';
+import { fitWithin, isTooSmall, PERSONA_MAX_EDGE, PERSONA_MIN_EDGE } from './photo-prep';
 
 // prepPhoto itself needs a real canvas (browser-only); the sizing math is the
 // testable core and is covered here.
-describe('fitWithin', () => {
-  it('downscales to at most 1536px on the long edge, keeping aspect', () => {
-    expect(fitWithin(3000, 2000)).toEqual({ width: 1536, height: 1024 });
-    expect(fitWithin(2000, 3000)).toEqual({ width: 1024, height: 1536 });
+describe('persona photo sizing', () => {
+  it('keeps detail up to 2048px on the long edge', () => {
+    expect(PERSONA_MAX_EDGE).toBe(2048);
+    expect(fitWithin(4032, 3024)).toEqual({ width: 2048, height: 1536 });
+    expect(fitWithin(1200, 1600)).toEqual({ width: 1200, height: 1600 });
+  });
+
+  it('rejects a photo under 1024px on its short edge', () => {
+    expect(PERSONA_MIN_EDGE).toBe(1024);
+    expect(isTooSmall(1000, 3000)).toBe(true);
+    expect(isTooSmall(1024, 1024)).toBe(false);
   });
 
   it('never upscales small images', () => {
@@ -14,6 +21,6 @@ describe('fitWithin', () => {
   });
 
   it('never collapses to zero', () => {
-    expect(fitWithin(20000, 1)).toEqual({ width: 1536, height: 1 });
+    expect(fitWithin(20000, 1)).toEqual({ width: 2048, height: 1 });
   });
 });

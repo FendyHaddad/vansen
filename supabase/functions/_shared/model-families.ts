@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-23.1';
+export const CATALOG_VERSION = '2026-09-23.2';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -108,9 +108,17 @@ export interface ModelFamily {
 /** What the customer attached, as far as price is concerned. */
 export interface GenerationInput {
   hasReference: boolean;
+  /** How many reference images ride along. Absent means one when hasReference. */
+  referenceCount?: number;
 }
 
 export const NO_INPUT: GenerationInput = { hasReference: false };
+
+/** Every reference image is billed, so the price must know how many there are. */
+export function referenceCountOf(input: GenerationInput): number {
+  if (!input.hasReference) return 0;
+  return input.referenceCount ?? 1;
+}
 
 /**
  * Prompt length cap, enforced by the composer (maxlength) and the gateway.
@@ -342,26 +350,32 @@ function gptProviderCost(s: GenerationSettings): number {
 
 function gptInputCost(input: GenerationInput): number {
   const prompt = PROMPT_TOKEN_ALLOWANCE * GPT_TEXT_IN_RATE;
-  return input.hasReference ? prompt + GPT_REFERENCE_TOKENS * GPT_IMAGE_IN_RATE : prompt;
+  return prompt + referenceCountOf(input) * GPT_REFERENCE_TOKENS * GPT_IMAGE_IN_RATE;
 }
 
 /**
- * Gemini bills a reference image as input tokens too: 1,120 tokens for an
- * image at its default media resolution, at the model's text-input rate
+ * Gemini bills each input image as 560 tokens at the model's text-input rate
  * ($0.25/1M Lite, $0.50/1M Flash, $2/1M Pro — ai.google.dev pricing,
- * 2026-09-22). Under a quarter of a cent everywhere, but it is a real cost,
- * so it is on the bill.
+ * checked 2026-09-23). Every image is billed, so the count matters.
  */
-const NANO_REFERENCE_TOKENS = 1_120;
+const NANO_REFERENCE_TOKENS = 560;
 const NANO_TEXT_IN_RATE: Record<string, number> = {
   fast: 0.25 / 1_000_000,
   standard: 0.5 / 1_000_000,
   pro: 2 / 1_000_000,
 };
 
+/**
+ * Nano Banana Pro always thinks before it draws, and Google bills the thought
+ * tokens at $12/1M. The real count varies per request; 2,000 is a provisional
+ * allowance until the `google_usage` log lines give a measured figure.
+ */
+export const NANO_PRO_THINKING_TOKENS = 2_000;
+const NANO_THINKING_RATE = 12 / 1_000_000;
+
 function nanoInputCost(input: GenerationInput, s: GenerationSettings): number {
   const rate = NANO_TEXT_IN_RATE[s.version ?? 'standard'] ?? NANO_TEXT_IN_RATE['standard'];
-  const tokens = PROMPT_TOKEN_ALLOWANCE + (input.hasReference ? NANO_REFERENCE_TOKENS : 0);
+  const tokens = PROMPT_TOKEN_ALLOWANCE + referenceCountOf(input) * NANO_REFERENCE_TOKENS;
   return tokens * rate;
 }
 
@@ -487,7 +501,10 @@ export const MODEL_FAMILIES: ModelFamily[] = [
       // tokens. Repointed here on 2026-09-22 — the previous model,
       // gemini-2.5-flash-image, is shut down by Google on 2026-10-02.
       if (s.version === 'fast') return 0.0336;
-      if (s.version === 'pro') return s.resolution === '4K' ? 0.24 : 0.134;
+      if (s.version === 'pro') {
+        const output = s.resolution === '4K' ? 0.24 : 0.134;
+        return output + NANO_PRO_THINKING_TOKENS * NANO_THINKING_RATE;
+      }
       return { '1K': 0.067, '2K': 0.101, '4K': 0.151 }[s.resolution ?? '1K'] ?? 0.067;
     },
     inputCost: nanoInputCost,
@@ -748,22 +765,31 @@ export const UPSCALER = {
   providerCost: 0.04,
 } as const;
 
-/** Hidden persona pipeline — fal flux-lora with the user's trained LoRA weights.
- * Not in the picker; selected implicitly when a persona is active. */
+/**
+ * Hidden persona family — Google Nano Banana Pro at its highest settings,
+ * with the persona's five photos as references. Not in the picker; selected
+ * implicitly when a persona is active. One entry, so the persona model can be
+ * swapped without touching Nano Banana's own prices or kill switch.
+ */
 export const PERSONA_GEN = {
   id: 'persona',
   name: 'Persona',
-  // fal-ai/flux-lora ≈ $0.035 per ~1MP image (verify on first live bill).
-  providerCost: 0.035,
+  providerModel: 'gemini-3-pro-image',
+  resolution: '4K',
+  photoCount: 5,
+  /** Multiplier on the margin price. Raised only if the likeness test earns it. */
+  premium: 1.0,
 } as const;
 
-/** Persona LoRA training — fixed retail like EDIT_TOOLS (~$2 fal trainer cost). */
-export const PERSONA_TRAINING = {
-  creditCost: 350,
-  providerCost: 2.0,
-  minPhotos: 5,
-  maxPhotos: 20,
-} as const;
+/** The five guided capture angles, in the order they are sent to the model. */
+export const PERSONA_SLOT_ORDER = [
+  'front',
+  'left_three_quarter',
+  'right_three_quarter',
+  'left_profile',
+  'right_profile',
+] as const;
+export type PersonaSlot = (typeof PERSONA_SLOT_ORDER)[number];
 
 /** Concurrent persona slots per plan. */
 export const PERSONA_SLOTS: Record<'studio' | 'pro' | 'owner', number> = {
@@ -772,8 +798,27 @@ export const PERSONA_SLOTS: Record<'studio' | 'pro' | 'owner', number> = {
   owner: 5,
 };
 
+/** The fixed settings a persona image is rendered and priced at. */
+export function personaSettings(aspectRatio: string): GenerationSettings {
+  return { version: 'pro', resolution: PERSONA_GEN.resolution, aspectRatio };
+}
+
+function nanoFamily(): ModelFamily {
+  const family = familyById('nano-banana');
+  if (!family) throw new Error('nano-banana family missing from the catalog');
+  return family;
+}
+
+/** Our provider cost for one persona image: output, thinking, five photos, prompt. */
+export function personaProviderCost(): number {
+  const input: GenerationInput = { hasReference: true, referenceCount: PERSONA_GEN.photoCount };
+  return providerCostWithInput(nanoFamily(), personaSettings('1:1'), input);
+}
+
 export function personaGenCreditCost(): number {
-  return Math.ceil((PERSONA_GEN.providerCost / (1 - STUDIO_MARGIN)) * 100);
+  return Math.ceil(
+    (personaProviderCost() / (1 - STUDIO_MARGIN)) * 100 * PERSONA_GEN.premium,
+  );
 }
 
 /**

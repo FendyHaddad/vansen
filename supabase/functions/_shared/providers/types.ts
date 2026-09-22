@@ -22,8 +22,8 @@ export interface SubmitCtx {
   referenceUrl?: string;
   /** Base64 PNG mask for GPT edits. */
   maskPngBase64?: string;
-  /** fal-hosted LoRA weights URL for persona generations (familyId 'persona'). */
-  loraUrl?: string;
+  /** Persona generations: the five photos in slot order, each signed for this run. */
+  personaPhotos?: { slot: string; url: string }[];
   /** sha256(user_id) — provider-side abuse attribution. */
   safetyId: string;
   /** Video only. */

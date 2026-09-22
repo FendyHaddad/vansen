@@ -5,8 +5,8 @@ import {
   FLUX_DIMS,
   MODEL_FAMILIES,
   PERSONA_GEN,
+  PERSONA_SLOT_ORDER,
   PERSONA_SLOTS,
-  PERSONA_TRAINING,
   PLAN_CREDITS,
   STUDIO_MARGIN,
   VIDEO_DAILY_CAP_USD,
@@ -15,12 +15,15 @@ import {
   GPT_REFERENCE_TOKENS,
   PROMPT_TOKEN_ALLOWANCE,
   providerCostWithInput,
+  referenceCountOf,
   seedreamDims,
   editToolById,
   familyById,
   fluxDims,
   packCredits,
   personaGenCreditCost,
+  personaProviderCost,
+  personaSettings,
   qualitiesFor,
   resolutionsFor,
   upscaleCreditCost,
@@ -44,8 +47,9 @@ describe('model families', () => {
     expect(
       nb.providerCost({ version: 'standard', aspectRatio: '1:1', resolution: '4K' }),
     ).toBeCloseTo(0.151);
-    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '2K' })).toBeCloseTo(0.134);
-    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '4K' })).toBeCloseTo(0.24);
+    // Pro always thinks before it draws: output + 2,000 thinking tokens @ $12/1M.
+    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '2K' })).toBeCloseTo(0.158);
+    expect(nb.providerCost({ version: 'pro', aspectRatio: '1:1', resolution: '4K' })).toBeCloseTo(0.264);
   });
 
   it('nano banana defaults to the Standard (Latest) tier', () => {
@@ -362,23 +366,59 @@ describe('credit pricing', () => {
 });
 
 describe('persona pricing', () => {
-  it('prices a persona generation with the margin formula', () => {
-    // ceil(0.035 / 0.6 * 100) = 6 credits
-    expect(personaGenCreditCost()).toBe(6);
+  it('identifies the persona family', () => {
     expect(PERSONA_GEN.id).toBe('persona');
-  });
-
-  it('fixes training at 350 credits with a positive margin over provider cost', () => {
-    expect(PERSONA_TRAINING.creditCost).toBe(350);
-    expect(PERSONA_TRAINING.creditCost / 100).toBeGreaterThan(PERSONA_TRAINING.providerCost);
-    expect(PERSONA_TRAINING.minPhotos).toBe(5);
-    expect(PERSONA_TRAINING.maxPhotos).toBe(20);
   });
 
   it('grants slots per plan', () => {
     expect(PERSONA_SLOTS.studio).toBe(2);
     expect(PERSONA_SLOTS.pro).toBe(5);
     expect(PERSONA_SLOTS.owner).toBe(5);
+  });
+});
+
+describe('persona and reference pricing', () => {
+  const nano = () => familyById('nano-banana')!;
+
+  it('prices each reference image, not just whether one is attached', () => {
+    const s = { version: 'pro', resolution: '1K', aspectRatio: '1:1' };
+    const one = providerCostWithInput(nano(), s, { hasReference: true, referenceCount: 1 });
+    const five = providerCostWithInput(nano(), s, { hasReference: true, referenceCount: 5 });
+    // 560 tokens per image at $2/1M.
+    expect(five - one).toBeCloseTo(4 * 560 * (2 / 1_000_000), 8);
+  });
+
+  it('prices every GPT Image reference too', () => {
+    const gpt = familyById('gpt-image')!;
+    const s = defaultSettings(gpt);
+    const one = providerCostWithInput(gpt, s, { hasReference: true, referenceCount: 1 });
+    const three = providerCostWithInput(gpt, s, { hasReference: true, referenceCount: 3 });
+    expect(three - one).toBeCloseTo(2 * GPT_REFERENCE_TOKENS * (8 / 1_000_000), 8);
+  });
+
+  it('treats hasReference without a count as one image', () => {
+    expect(referenceCountOf({ hasReference: true })).toBe(1);
+    expect(referenceCountOf({ hasReference: false })).toBe(0);
+    expect(referenceCountOf({ hasReference: true, referenceCount: 5 })).toBe(5);
+  });
+
+  it('bills Nano Banana Pro thinking into its price', () => {
+    expect(creditCost(nano(), { version: 'pro', resolution: '1K', aspectRatio: '1:1' })).toBe(27);
+    expect(creditCost(nano(), { version: 'pro', resolution: '2K', aspectRatio: '1:1' })).toBe(27);
+    expect(creditCost(nano(), { version: 'pro', resolution: '4K', aspectRatio: '1:1' })).toBe(45);
+  });
+
+  it('prices a persona image as Nano Banana Pro 4K with its five photos', () => {
+    expect(personaProviderCost()).toBeCloseTo(0.2712, 6);
+    expect(personaGenCreditCost()).toBe(46);
+    expect(personaSettings('3:4')).toEqual({ version: 'pro', resolution: '4K', aspectRatio: '3:4' });
+    expect(PERSONA_GEN.providerModel).toBe('gemini-3-pro-image');
+  });
+
+  it('names the five slots in capture order', () => {
+    expect(PERSONA_SLOT_ORDER).toEqual([
+      'front', 'left_three_quarter', 'right_three_quarter', 'left_profile', 'right_profile',
+    ]);
   });
 });
 

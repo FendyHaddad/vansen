@@ -169,8 +169,8 @@
         <span class="og-label">Model</span>
         <div class="persona-pipeline-chip">
           <ng-icon name="lucideLock" size="13"/>
-          <span>Persona — FLUX likeness</span>
-          <app-hint text="Persona images render on the FLUX LoRA pipeline your persona was trained for. Clear the persona to pick a model.">
+          <span>Persona · Nano Banana Pro · 4K</span>
+          <app-hint text="Persona images always render on Nano Banana Pro at 4K using your five photos. Clear the persona to pick a model.">
             <span class="og-info">ⓘ</span>
           </app-hint>
         </div>
@@ -278,10 +278,14 @@
       } @else {
         <ng-icon name="lucideWandSparkles" size="16"/>
         Generate
-        @if (mode() === 'image' && batch() > 1) {
-          <span class="num">×{{ batch() }}</span>
+        @if (personaActive()) {
+          · <span class="num">{{ unitCredits() }} cr × {{ batch() }} = {{ priceCredits() }} cr</span>
+        } @else {
+          @if (mode() === 'image' && batch() > 1) {
+            <span class="num">×{{ batch() }}</span>
+          }
+          · <span class="num">{{ priceCredits() }} cr</span>
         }
-        · <span class="num">{{ priceCredits() }} cr</span>
       }
     </button>
   </div>

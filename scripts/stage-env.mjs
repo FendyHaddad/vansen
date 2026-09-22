@@ -25,7 +25,7 @@ export const FAMILY_KEY = {
   flux: 'FAL_API_KEY',
   seedream: 'FAL_API_KEY',
   upscaler: 'FAL_API_KEY',
-  persona: 'FAL_API_KEY',
+  persona: 'GOOGLE_AI_API_KEY',
   'edit-remove': 'FAL_API_KEY',
   'edit-fill': 'FAL_API_KEY',
   'edit-expand': 'FAL_API_KEY',

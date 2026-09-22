@@ -261,43 +261,6 @@ begin
   assert (select count(*) from public.personas where user_id = v_user) = 2;
 end $$;
 
--- 11. Training charges the persona and creates exactly one training job with
---     its own expense row, and settling it refunds once.
-do $$
-declare
-  v_user uuid := 'cccccccc-0000-4000-8000-000000000011';
-  v_persona uuid; v_out jsonb; v_job uuid; v_token uuid; v_refunds int;
-begin
-  perform pg_temp.seed_user(v_user, 'reserve11@example.com', 10000);
-  v_persona := (public.fn_reserve_persona(
-    v_user, gen_random_uuid(), 'hash-11', 'Trainee')->>'personaId')::uuid;
-  update public.personas set photo_paths = '["a","b","c","d","e"]'::jsonb where id = v_persona;
-
-  v_out := public.fn_reserve_training(
-    v_user, v_persona, gen_random_uuid(), 'hash-11t',
-    jsonb_build_object('provider', 'fal', 'unitCredits', 350, 'unitProviderCostUsd', 2.0));
-  v_job := (v_out->>'trainingJobId')::uuid;
-  assert (select status from public.personas where id = v_persona) = 'training';
-  assert (select count(*) from public.training_jobs where persona_id = v_persona) = 1;
-  assert (select reserved_usd from public.training_provider_expenses where job_id = v_job) = 2.0;
-
-  -- Only a live lease may settle. Stand in for the worker's claim (Task 3
-  -- adds the RPC that issues these) so the fencing is actually exercised.
-  update public.training_jobs
-     set lease_token = gen_random_uuid(), lease_until = now() + interval '2 minutes'
-   where id = v_job returning lease_token into v_token;
-  assert (public.fn_settle_training(v_job, gen_random_uuid(), 'failed', null, 'stale')
-          ->>'settled')::boolean = false,
-    'a stale token must not settle a training job';
-  assert (select status from public.personas where id = v_persona) = 'training';
-
-  perform public.fn_settle_training(v_job, v_token, 'failed', null, 'provider refused');
-  assert (select status from public.personas where id = v_persona) = 'failed';
-  select coalesce(sum(amount_credits), 0) into v_refunds from public.ledger_entries
-    where user_id = v_user and type = 'refund';
-  assert v_refunds = 350, format('expected one 350 refund, got %s', v_refunds);
-end $$;
-
 -- 12. A replay must still be answered when the account has since run out of
 --     money: the work was already paid for and already exists.
 do $$

@@ -15,7 +15,8 @@ export type RetryRefusal =
   | 'reference_unavailable' // an upload or mask was deleted
   | 'family_disabled' // kill switch is off for this family
   | 'catalog_changed' // the request can no longer be expressed
-  | 'plan_required'; // entitlement lapsed since the original run
+  | 'plan_required' // entitlement lapsed since the original run
+  | 'persona_unavailable'; // the persona was deleted or is no longer ready
 
 export const REFUSAL_MESSAGE: Record<RetryRefusal, string> = {
   not_retryable:
@@ -27,6 +28,12 @@ export const REFUSAL_MESSAGE: Record<RetryRefusal, string> = {
   catalog_changed:
     'This model has changed since that run. Start a new one to see the current price.',
   plan_required: 'Your plan no longer includes this model.',
+  persona_unavailable: 'That persona is missing or unfinished.',
+};
+
+/** HTTP status per refusal. A gone persona is the same 400 a new run gets. */
+export const REFUSAL_STATUS: Partial<Record<RetryRefusal, 400>> = {
+  persona_unavailable: 400,
 };
 
 /** Everything the decision needs, as data. The route does the I/O. */
@@ -47,6 +54,11 @@ export interface RetryContext {
    * has withdrawn (FLUX's 4MP tier at 16:9, say).
    */
   expressible: boolean;
+  /**
+   * The snapshot names a persona that is now deleted, missing or a draft. A
+   * lookup that merely errored is not this: submission re-checks it.
+   */
+  personaUnavailable: boolean;
 }
 
 /** The body to POST back through the normal submission path. */
@@ -77,6 +89,7 @@ function precheck(ctx: RetryContext): RetryRefusal | null {
   if (!ctx.expressible) return 'catalog_changed';
   if (!ctx.familyEnabled) return 'family_disabled';
   if (!ctx.entitled) return 'plan_required';
+  if (ctx.snapshot.personaId && ctx.personaUnavailable) return 'persona_unavailable';
 
   // Every input the request named must still be there. Finding out at the
   // provider costs the customer a failed job and a refund round trip.

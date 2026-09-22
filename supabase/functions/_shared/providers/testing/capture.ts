@@ -51,3 +51,16 @@ export function captureFetch(respond: (call: Captured) => Response): CaptureHand
 /** A 1×1 PNG, base64, for canned provider responses. */
 export const TINY_PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/**
+ * Drop the adapters' `{"event":"google_usage"}` log lines for the rest of this
+ * test module; every other console.log still prints. A test that asserts the
+ * line replaces console.log itself and sees it.
+ */
+export function silenceUsageLog(): void {
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].startsWith('{"event":"google_usage"')) return;
+    original(...args);
+  };
+}

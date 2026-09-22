@@ -10,14 +10,14 @@
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import type { SubmitCtx } from '../providers/types.ts';
 import type { NormalizedRequest } from '../generation-request.ts';
-import type { GenerationSettings, VideoMode } from '../model-families.ts';
+import { type GenerationSettings, PERSONA_SLOT_ORDER, type VideoMode } from '../model-families.ts';
 import type { StorageAdapter, StorageBackend } from '../storage/index.ts';
-import { resolveOwnedUpload } from '../reference-resolver.ts';
+import { resolveOwnedUpload, type UploadPurpose } from '../reference-resolver.ts';
 
 export interface StoredPayload {
   familyId: string;
   op: string;
-  /** The effective prompt — style and persona trigger already applied. */
+  /** The effective prompt — style and persona instruction already applied. */
   prompt: string;
   settings: GenerationSettings;
   providerModel: string;
@@ -77,15 +77,15 @@ export async function resolvePayload(
   const mask = await maskBase64(deps, job.user_id, payload);
   if (mask) ctx.maskPngBase64 = mask;
 
+  const photos = await personaPhotos(deps, job.user_id, payload);
+  if (photos.length > 0) ctx.personaPhotos = photos;
+
   const slots = await slotUrls(deps, job.user_id, payload);
   if (slots.length > 0) ctx.referenceUrls = slots;
 
   const parent = await parentVideo(deps, job.user_id, payload);
   if (parent?.url) ctx.parentVideoUrl = parent.url;
   if (parent?.interactionId) ctx.interactionId = parent.interactionId;
-
-  const lora = await personaLora(deps, job.user_id, payload);
-  if (lora) ctx.loraUrl = lora;
 
   return ctx;
 }
@@ -99,7 +99,7 @@ function normalizedOf(payload: StoredPayload): NormalizedRequest {
     providerModel: payload.providerModel,
     providerSettings: payload.providerSettings as NormalizedRequest['providerSettings'],
     settings: payload.settings,
-    hasReference: !!payload.referenceUploadId || !!payload.parentId,
+    hasReference: !!payload.referenceUploadId || !!payload.parentId || !!payload.personaId,
     hasMask: !!payload.maskUploadId,
   };
 }
@@ -120,6 +120,36 @@ async function referenceUrl(
   const parent = await ownedGeneration(deps, userId, payload.parentId);
   if (parent.kind !== 'image') throw new Error('parent_not_image');
   return await signStored(deps, parent.storage_backend, parent.media_path);
+}
+
+/**
+ * The persona's five photos, signed for this run, in the order the prompt
+ * names them. Re-checked here: the persona may have been deleted, or lost a
+ * photo, while the job queued — that must fail before a provider call.
+ */
+async function personaPhotos(
+  deps: PayloadDeps,
+  userId: string,
+  payload: StoredPayload,
+): Promise<{ slot: string; url: string }[]> {
+  if (!payload.personaId) return [];
+  const { data, error } = await deps.admin
+    .from('personas')
+    .select('status,photos')
+    .eq('id', payload.personaId)
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (error) throw new Error(`persona_lookup_failed: ${error.message}`);
+  if (!data || data.status !== 'ready') throw new Error('persona_unavailable');
+  const photos = (data.photos ?? {}) as Record<string, string | null>;
+  const signed: { slot: string; url: string }[] = [];
+  for (const slot of PERSONA_SLOT_ORDER) {
+    const path = photos[slot];
+    if (!path) throw new Error('persona_unavailable');
+    signed.push({ slot, url: await signUpload(deps, userId, path, 'persona-photo') });
+  }
+  return signed;
 }
 
 async function slotUrls(
@@ -155,25 +185,6 @@ async function parentVideo(
   return { url, interactionId };
 }
 
-async function personaLora(
-  deps: PayloadDeps,
-  userId: string,
-  payload: StoredPayload,
-): Promise<string | null> {
-  if (!payload.personaId) return null;
-  const { data, error } = await deps.admin
-    .from('personas')
-    .select('status,lora_url')
-    .eq('id', payload.personaId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw new Error(`persona_lookup_failed: ${error.message}`);
-  if (!data || data.status !== 'ready' || !data.lora_url) {
-    throw new Error('persona_not_ready');
-  }
-  return String(data.lora_url);
-}
-
 async function maskBase64(
   deps: PayloadDeps,
   userId: string,
@@ -193,8 +204,9 @@ async function signUpload(
   deps: PayloadDeps,
   userId: string,
   path: string,
+  purpose: UploadPurpose = 'reference',
 ): Promise<string> {
-  const owned = await resolveOwnedUpload(deps.admin, userId, path, 'reference');
+  const owned = await resolveOwnedUpload(deps.admin, userId, path, purpose);
   if (typeof owned === 'string') throw new Error(`reference_${owned}`);
   const { data, error } = await deps.admin.storage
     .from('uploads')

@@ -48,6 +48,32 @@ cd /Users/user/IdeaProjects/vansen && supabase migration list --linked | tail -5
 
 Expected: `0025` present on both sides.
 
+**0032 persona references — the one exception to migrations-first.** Run
+`./deploy.sh` (functions) first, then `supabase db push --linked` immediately
+after. Migration-first breaks the currently deployed job-worker tick, which
+calls the `fn_claim_training_jobs` that 0032 drops; functions-first only makes
+the persona routes 503 until 0032 lands. Pre-check, and do not start unless it
+returns 0 (an old fal persona job would be polled by the Google adapter
+forever):
+
+```sql
+select count(*) from public.jobs where family_id = 'persona' and state <> 'done';
+```
+
+0032 ships the persona kill switch off. The gateway's modelGate has no owner
+bypass, so the smoke can only run once the row is enabled. Enable it, run the
+live persona smoke, and if it fails set it back off:
+
+```sql
+update public.models set enabled = true where id = 'persona';
+```
+
+Run the persona smoke. If it fails:
+
+```sql
+update public.models set enabled = false where id = 'persona';
+```
+
 **Rollback.** 0025 is additive — one table, four functions, one cron. Dropping
 them is safe and loses only alert history. Every earlier migration in this
 cycle (0017–0024) is already applied and additive, with one exception worth

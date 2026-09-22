@@ -40,12 +40,15 @@ returns void language sql as $$
           'videos/' || p_user::text || '/' || p_id::text || '.jpg', 'r2');
 $$;
 
-create or replace function pg_temp.seed_persona(p_user uuid, p_id uuid, p_lora text)
+create or replace function pg_temp.seed_persona(p_user uuid, p_id uuid)
 returns void language sql as $$
-  insert into public.personas (id, user_id, name, status, photo_paths, lora_url, trigger_word)
-  values (p_id, p_user, 'Ada', 'ready',
-          jsonb_build_array(p_user::text || '/photo-1.jpg', p_user::text || '/photo-2.jpg'),
-          p_lora, 'VNSNPRSN');
+  insert into public.personas (id, user_id, name, status, photos, consent_attested_at)
+  values (p_id, p_user, 'Ada', 'draft',
+          jsonb_build_object(
+            'front', p_user::text || '/photo-1.jpg',
+            'left_three_quarter', p_user::text || '/photo-2.jpg',
+            'right_three_quarter', null, 'left_profile', null, 'right_profile', null),
+          now());
 $$;
 
 create or replace function pg_temp.locator(p_backend text, p_bucket text, p_path text)
@@ -121,23 +124,21 @@ begin
   ), 'nothing about an R2 video may be queued against Supabase';
 end $$;
 
--- 4. A persona takes its photos and its ZIP, and records the provider-hosted
---    LoRA as a REQUEST — we do not hold those bytes.
+-- 4. A persona's photos are queued, and nothing is held elsewhere.
 do $$
 declare
   v_user uuid := 'eeee0000-0000-4000-8000-000000000004';
   v_persona uuid := 'eeee2222-0000-4000-8000-000000000004';
 begin
   perform pg_temp.seed_user(v_user, 'del4@example.com');
-  perform pg_temp.seed_persona(v_user, v_persona, 'https://fal.example/lora/abc.safetensors');
+  perform pg_temp.seed_persona(v_user, v_persona);
 
   perform public.fn_delete_persona(v_user, v_persona);
 
   assert (select count(*) from public.deletion_outbox
-           where bucket = 'uploads' and reason = 'persona_deleted' and completed_at is null) = 3,
-    'two photos and one ZIP';
-  assert (select status from public.provider_artifact_deletions
-           where artifact_ref = 'https://fal.example/lora/abc.safetensors') = 'requested';
+           where bucket = 'uploads' and reason = 'persona_deleted' and completed_at is null) = 2,
+    'two photos, no ZIP';
+  assert not exists (select 1 from public.provider_artifact_deletions where user_id = v_user);
   assert not exists (
     select 1 from public.deletion_outbox where object_path like 'https://%'
   ), 'a provider URL is not something a local delete may ever receive';
@@ -311,7 +312,9 @@ begin
   perform pg_temp.seed_user(v_user, 'del10@example.com');
   perform pg_temp.seed_image(v_user, v_gen);
   perform pg_temp.seed_video(v_user, v_video);
-  perform pg_temp.seed_persona(v_user, v_persona, 'https://fal.example/lora/ten.safetensors');
+  perform pg_temp.seed_persona(v_user, v_persona);
+  insert into public.provider_artifact_deletions (user_id, provider, artifact_ref, status)
+  values (v_user, 'fal', 'https://fal.example/lora/ten.safetensors', 'requested');
   insert into public.billing_transactions
     (user_id, source, business_txn_id, kind, credits, event_at, result)
   values (v_user, 'stripe', 'pi_test_10', 'pack_grant', 500, now(), '{}'::jsonb);
@@ -329,7 +332,7 @@ begin
   -- customer's own files alive — it blocks completion, not finalisation.
   assert v_out->>'status' = 'processing', format('got %s', v_out);
   assert (v_out->>'providerArtifacts')::int = 1,
-    'a provider-hosted LoRA is unresolved work, not a completed deletion';
+    'a provider-hosted artifact is unresolved work, not a completed deletion';
   assert not exists (select 1 from public.generations where user_id = v_user),
     'content is removed immediately — there is no undo window (D2)';
 

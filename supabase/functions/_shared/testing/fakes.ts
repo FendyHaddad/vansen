@@ -4,6 +4,7 @@
 // — this is a test double, not a Postgres emulator. Filters are applied in
 // insertion order; ordering is a plain string/number compare, which is enough
 // for the ISO timestamps and uuids these functions sort on.
+import { PERSONA_SLOT_ORDER, PERSONA_SLOTS } from "../model-families.ts";
 
 export type Row = Record<string, unknown>;
 export interface FakeError {
@@ -352,6 +353,23 @@ export class FakeStorage {
           error: null,
         };
       },
+      /** Batch form of `createSignedUrl`: one round trip for many paths. */
+      async createSignedUrls(paths: string[], _ttl: number) {
+        const fail = take("createSignedUrls");
+        if (fail) return { data: null, error: fail };
+        const data = paths.map((path) => {
+          observeSign?.(bucket, path);
+          if (!objects.has(`${bucket}/${path}`)) {
+            return { path, signedUrl: null, error: "Object not found" };
+          }
+          return {
+            path,
+            signedUrl: `https://fake.storage/${bucket}/${path}?token=signed`,
+            error: null,
+          };
+        });
+        return { data, error: null };
+      },
       async copy(from: string, to: string) {
         const fail = take("copy");
         if (fail) return { data: null, error: fail };
@@ -579,20 +597,19 @@ export function installRegistryRpcs(db: FakeDb): void {
     id: string,
     reason: string,
   ) => {
+    // Personas have no job of their own any more (0032 dropped training_jobs):
+    // a persona's only work in flight is a generation that references it, and
+    // that generation is not this row, so nothing here blocks a persona reap.
     const jobs = table === "generations"
       ? (self.tables.jobs ?? []).filter((j) =>
         j.generation_id === id && j.state !== "done"
       )
-      : (self.tables.training_jobs ?? []).filter((j) =>
-        j.persona_id === id && j.state !== "done"
-      );
+      : [];
     if (jobs.length > 0) return { status: "pending_job", objects: 0 };
     const row = (self.tables[table] ?? []).find((r) => r.id === id);
     const paths = table === "generations"
       ? [row?.media_path, row?.thumb_path]
-      : ((row?.photo_paths as string[]) ?? []).concat(
-        `persona-zips/${row?.user_id}/${id}.zip`,
-      );
+      : Object.values((row?.photos as Record<string, string | null>) ?? {});
     const ids: string[] = [];
     for (const path of paths) {
       if (!path) continue;
@@ -627,24 +644,115 @@ export function installRegistryRpcs(db: FakeDb): void {
     );
     if (!row) throw new Error("not_found");
     row.deleted_at ??= self.now().toISOString();
-    for (const job of self.tables.training_jobs ?? []) {
-      if (job.persona_id !== row.id || job.state === "done") continue;
-      job.cancel_requested_at ??= self.now().toISOString();
-    }
-    self.tables.provider_artifact_deletions ??= [];
-    const known = self.tables.provider_artifact_deletions.some((a) =>
-      a.artifact_ref === row.lora_url
-    );
-    if (row.lora_url && !known) {
-      self.tables.provider_artifact_deletions.push({
-        id: `art-${self.tables.provider_artifact_deletions.length + 1}`,
-        user_id: row.user_id,
-        provider: "fal",
-        artifact_ref: row.lora_url,
-        status: "requested",
-      });
-    }
+    // Nothing is trained and no provider holds a file for us any more (0032):
+    // a persona's only objects are its own photos, which `reap` queues.
     return reap(self, "personas", String(row.id), "persona_deleted");
+  };
+  const emptyPersonaPhotos = () =>
+    Object.fromEntries(PERSONA_SLOT_ORDER.map((slot) => [slot, null])) as Record<
+      string,
+      string | null
+    >;
+
+  /** The locked slot check `caps_concurrency.sh` proves: idempotent by
+   * (user, key), a hash mismatch on a reused key is a conflict, and the plan's
+   * subscription decides the cap — read the same way `activePlan` does. */
+  db.rpcHandlers.fn_reserve_persona = (args, self) => {
+    self.tables.submissions ??= [];
+    const key = String(args.p_key);
+    const existing = self.tables.submissions.find((r) =>
+      r.user_id === args.p_user && r.idempotency_key === key
+    );
+    if (existing && existing.body_hash !== args.p_hash) {
+      throw new Error("idempotency_conflict");
+    }
+    if (existing) return existing.result;
+
+    // `activePlan`'s rule exactly: anything but expired, and a canceled plan
+    // only until its paid period ends.
+    const sub = (self.tables.subscriptions ?? []).find((s) =>
+      s.user_id === args.p_user && s.status !== "expired" &&
+      !(s.status === "canceled" && s.current_period_end &&
+        new Date(String(s.current_period_end)).getTime() < self.now().getTime())
+    );
+    if (!sub) throw new Error("subscription_required");
+
+    const limit = PERSONA_SLOTS[sub.plan as keyof typeof PERSONA_SLOTS] ?? 0;
+    self.tables.personas ??= [];
+    const live = self.tables.personas.filter((p) =>
+      p.user_id === args.p_user && !p.deleted_at &&
+      (p.status === "draft" || p.status === "ready")
+    ).length;
+    if (live >= limit) throw new Error("slot_limit");
+
+    const id = `pppppppp-0000-4000-8000-${
+      String(self.tables.personas.length + 1).padStart(12, "0")
+    }`;
+    self.tables.personas.push({
+      id,
+      user_id: args.p_user,
+      name: args.p_name,
+      status: "draft",
+      photos: emptyPersonaPhotos(),
+      consent_attested_at: self.now().toISOString(),
+      created_at: self.now().toISOString(),
+      deleted_at: null,
+    });
+    const result = { personaId: id };
+    self.tables.submissions.push({
+      user_id: args.p_user,
+      idempotency_key: key,
+      body_hash: args.p_hash,
+      result,
+    });
+    return result;
+  };
+  /** Mirrors `fn_set_persona_photo` (0032): the slot must be one of the five,
+   * the upload must still be this user's own moderated persona-photo, no
+   * OTHER persona of theirs may already hold it, and a photo it replaces is
+   * queued for deletion exactly like any other object the registry drops. */
+  db.rpcHandlers.fn_set_persona_photo = (args, self) => {
+    const slot = String(args.p_slot);
+    if (!(PERSONA_SLOT_ORDER as readonly string[]).includes(slot)) {
+      throw new Error("invalid_slot");
+    }
+    const path = String(args.p_path);
+    const upload = (self.tables.uploads ?? []).find((u) =>
+      u.path === path && u.user_id === args.p_user
+    );
+    const usable = !!upload && upload.purpose === "persona-photo" &&
+      upload.moderation === "allowed";
+    if (!usable) throw new Error("invalid_photo");
+    const heldByAnother = (self.tables.personas ?? []).some((p) =>
+      p.user_id === args.p_user && p.id !== args.p_persona &&
+      Object.values((p.photos as Record<string, string | null>) ?? {}).includes(path)
+    );
+    if (heldByAnother) throw new Error("invalid_photo");
+
+    const row = (self.tables.personas ?? []).find((r) =>
+      r.id === args.p_persona && r.user_id === args.p_user && !r.deleted_at
+    );
+    if (!row) throw new Error("not_found");
+    const photos = { ...(row.photos as Record<string, string | null>) };
+    const old = photos[slot];
+    photos[slot] = path;
+    row.photos = photos;
+    row.status = Object.values(photos).every((p) => p) ? "ready" : "draft";
+
+    // A photo no other slot still holds is queued for deletion, the same way
+    // `reap` queues a persona's photos when the persona itself is deleted.
+    const replaced = !!old && old !== path;
+    const stillHeld = replaced && Object.values(photos).includes(old as string);
+    if (replaced && !stillHeld) {
+      const object = (self.tables.storage_objects ?? []).find((o) => o.path === old);
+      if (object) {
+        self.rpcHandlers.fn_enqueue_deletions(
+          { p_objects: [String(object.id)], p_reason: "persona_photo_replaced" },
+          self,
+        );
+      }
+    }
+    return { status: row.status, replaced };
   };
 
   // Account closure, as the gateway sees it: one open request per user, work

@@ -1,41 +1,35 @@
 import { TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiService } from '../api/api-service';
-import { LedgerService } from '../ledger/ledger-service';
 import { PersonaDto, PersonasResponse } from '../api/dtos';
+import { PERSONA_SLOT_ORDER } from '../catalog/model-families';
 import { PersonaStore } from './persona-store';
 
-const READY: PersonaDto = {
+const draft: PersonaDto = {
   id: 'p1',
   name: 'Me',
-  status: 'ready',
-  photoCount: 6,
+  status: 'draft',
+  photos: PERSONA_SLOT_ORDER.map((slot) => ({ slot, url: null })),
   thumbUrl: '',
-  error: null,
   createdAt: '2026-07-24T00:00:00Z',
-  trainedAt: '2026-07-24T00:05:00Z',
 };
 
 describe('PersonaStore', () => {
-  const apiMock = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
-  const ledgerMock = { setCredits: vi.fn() };
+  const api = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() };
   let store: PersonaStore;
 
   beforeEach(() => {
     vi.clearAllMocks();
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
-      providers: [
-        { provide: ApiService, useValue: apiMock },
-        { provide: LedgerService, useValue: ledgerMock },
-      ],
+      providers: [{ provide: ApiService, useValue: api }],
     });
     store = TestBed.inject(PersonaStore);
   });
 
   it('loads items and slots', async () => {
-    apiMock.get.mockResolvedValue({
-      items: [READY],
+    api.get.mockResolvedValue({
+      items: [{ ...draft, status: 'ready' }],
       slots: { used: 1, max: 2 },
     } satisfies PersonasResponse);
     await store.load();
@@ -44,8 +38,8 @@ describe('PersonaStore', () => {
   });
 
   it('readyById returns only ready personas', async () => {
-    apiMock.get.mockResolvedValue({
-      items: [READY, { ...READY, id: 'p2', status: 'training' }],
+    api.get.mockResolvedValue({
+      items: [{ ...draft, status: 'ready' }, { ...draft, id: 'p2', status: 'draft' }],
       slots: { used: 2, max: 2 },
     } satisfies PersonasResponse);
     await store.load();
@@ -54,29 +48,20 @@ describe('PersonaStore', () => {
   });
 
   it('remove drops the item locally and frees a slot', async () => {
-    apiMock.get.mockResolvedValue({
-      items: [READY],
-      slots: { used: 1, max: 2 },
-    } satisfies PersonasResponse);
-    apiMock.delete.mockResolvedValue({ ok: true });
+    api.get.mockResolvedValue({ items: [draft], slots: { used: 1, max: 2 } } satisfies PersonasResponse);
+    api.delete.mockResolvedValue({ ok: true });
     await store.load();
     await store.remove('p1');
     expect(store.items().length).toBe(0);
     expect(store.slots().used).toBe(0);
   });
 
-  it('train swaps the item and updates the balance', async () => {
-    apiMock.get.mockResolvedValue({
-      items: [{ ...READY, status: 'draft' }],
-      slots: { used: 1, max: 2 },
-    } satisfies PersonasResponse);
-    apiMock.post.mockResolvedValue({
-      item: { ...READY, status: 'training' },
-      credits: { plan: 1150, pack: 0 },
-    });
+  it('setPhoto PUTs the slot and replaces the persona in the list', async () => {
+    api.get.mockResolvedValue({ items: [draft], slots: { used: 1, max: 2 } });
     await store.load();
-    await store.train('p1', ['u/a.jpg', 'u/b.jpg', 'u/c.jpg', 'u/d.jpg', 'u/e.jpg']);
-    expect(store.items()[0].status).toBe('training');
-    expect(ledgerMock.setCredits).toHaveBeenCalledWith({ plan: 1150, pack: 0 });
+    api.put.mockResolvedValue({ item: { ...draft, status: 'ready' } });
+    await store.setPhoto(draft.id, 'front', 'u/1.jpg');
+    expect(api.put).toHaveBeenCalledWith(`/personas/${draft.id}/photos/front`, { uploadId: 'u/1.jpg' });
+    expect(store.items()[0].status).toBe('ready');
   });
 });

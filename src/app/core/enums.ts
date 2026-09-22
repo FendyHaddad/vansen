@@ -40,9 +40,7 @@ export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 
 export const PersonaStatus = {
   Draft: 'draft',
-  Training: 'training',
   Ready: 'ready',
-  Failed: 'failed',
 } as const;
 export type PersonaStatus = (typeof PersonaStatus)[keyof typeof PersonaStatus];
 

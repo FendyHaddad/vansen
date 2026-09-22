@@ -12,17 +12,10 @@ import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { claimJobs, type ClaimedJob } from './_shared/jobs/lease.ts';
 import { type JobDeps, type ReconcileResult, runJob } from './_shared/jobs/dispatch.ts';
 import { drainNotifications, type NotificationDeps } from './_shared/jobs/notifications.ts';
-import {
-  type ClaimedTrainingJob,
-  claimTrainingJobs,
-  runTrainingJob,
-  type TrainingDeps,
-} from './_shared/jobs/training.ts';
 
 export interface WorkerDeps {
   admin: SupabaseClient;
   jobs: Omit<JobDeps, 'admin'>;
-  training: Omit<TrainingDeps, 'admin'>;
   notifications: Omit<NotificationDeps, 'admin'>;
   /** Shared secret the scheduler presents. Never optional in production. */
   workerSecret: string | null;
@@ -34,7 +27,6 @@ export interface TickSummary {
   claimed: number;
   ran: number;
   failed: number;
-  trainings: number;
   notifications: number;
 }
 
@@ -68,7 +60,6 @@ export async function runTick(deps: WorkerDeps): Promise<TickSummary> {
     claimed: 0,
     ran: 0,
     failed: 0,
-    trainings: 0,
     notifications: 0,
   };
 
@@ -77,15 +68,6 @@ export async function runTick(deps: WorkerDeps): Promise<TickSummary> {
   for (const job of claimed) {
     const ok = await runOne(deps, job);
     if (ok) summary.ran += 1;
-    if (!ok) summary.failed += 1;
-  }
-
-  // Training advances on the same tick and with the same rules. It used to
-  // advance only while a client polled GET /personas.
-  const trainings = await claimTrainingJobs(deps.admin, deps.jobLimit ?? DEFAULT_JOB_LIMIT);
-  for (const job of trainings) {
-    const ok = await runOneTraining(deps, job);
-    if (ok) summary.trainings += 1;
     if (!ok) summary.failed += 1;
   }
 
@@ -117,19 +99,6 @@ async function runOne(deps: WorkerDeps, job: ClaimedJob): Promise<boolean> {
   }
 }
 
-async function runOneTraining(
-  deps: WorkerDeps,
-  job: ClaimedTrainingJob,
-): Promise<boolean> {
-  try {
-    await runTrainingJob({ ...deps.training, admin: deps.admin }, job);
-    return true;
-  } catch (e) {
-    console.error('worker_training_failed', job.id, String(e).slice(0, 300));
-    return false;
-  }
-}
-
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -137,4 +106,4 @@ function json(body: unknown, status: number): Response {
   });
 }
 
-export type { ClaimedJob, ClaimedTrainingJob, JobDeps, ReconcileResult, TrainingDeps };
+export type { ClaimedJob, JobDeps, ReconcileResult };

@@ -77,6 +77,12 @@ async function fetchBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
+/** The model_disabled notice. A persona run has no other model to try. */
+export function modelDisabledNotice(personaRun: boolean): string {
+  if (personaRun) return 'Personas are temporarily unavailable.';
+  return 'That model is temporarily unavailable. Try another.';
+}
+
 /**
  * Plain words for what just happened, for the polite live region.
  *
@@ -378,7 +384,7 @@ export class WorkspacePage {
     }
   }
 
-  private showError(e: unknown, fallback: string): void {
+  private showError(e: unknown, fallback: string, personaRun = false): void {
     if (!(e instanceof ApiError)) {
       this.notice.set(fallback);
       return;
@@ -411,7 +417,7 @@ export class WorkspacePage {
       return;
     }
     if (e.code === 'model_disabled') {
-      this.notice.set('That model is temporarily unavailable. Try another.');
+      this.notice.set(modelDisabledNotice(personaRun));
       return;
     }
     if (e.code === 'daily_cap') {
@@ -449,7 +455,7 @@ export class WorkspacePage {
       this.notice.set('');
       this.poller.watch();
     } catch (e) {
-      this.showError(e, 'Generation failed');
+      this.showError(e, 'Generation failed', !!req.personaId);
     } finally {
       this.generating.set(false);
     }

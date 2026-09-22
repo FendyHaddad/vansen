@@ -14,8 +14,6 @@ FAILED=0
 
 cleanup() {
   psql "$DB" -q -c "
-    delete from public.training_provider_expenses where user_id in ('$U','$P');
-    delete from public.training_jobs where user_id in ('$U','$P');
     delete from public.provider_expenses where user_id in ('$U','$P');
     delete from public.notification_outbox where user_id in ('$U','$P');
     delete from public.submissions where user_id in ('$U','$P');
@@ -117,7 +115,8 @@ check "charged once" "40" "$SPENT"
 cleanup
 seed "$P" 'caps-persona@example.com' 'studio' 100000
 psql "$DB" -q -c "
-  insert into public.personas (user_id, name) values ('$P','Existing 1'),('$P','Existing 2');" >/dev/null
+  insert into public.personas (user_id, name, consent_attested_at)
+  values ('$P','Existing 1',now()),('$P','Existing 2',now());" >/dev/null
 for i in 1 2; do
   psql "$DB" -q -c "select public.fn_reserve_persona(
     '$P', gen_random_uuid(), 'hp$i', 'Racer $i');" >/dev/null 2>&1 &
@@ -128,7 +127,8 @@ check "two concurrent creations at a full slot limit create none" "2" "$PERSONAS
 
 cleanup
 seed "$P" 'caps-persona@example.com' 'studio' 100000
-psql "$DB" -q -c "insert into public.personas (user_id, name) values ('$P','Existing 1');" >/dev/null
+psql "$DB" -q -c "insert into public.personas (user_id, name, consent_attested_at)
+  values ('$P','Existing 1',now());" >/dev/null
 for i in 1 2; do
   psql "$DB" -q -c "select public.fn_reserve_persona(
     '$P', gen_random_uuid(), 'hq$i', 'Racer $i');" >/dev/null 2>&1 &

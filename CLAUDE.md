@@ -37,7 +37,15 @@
   clarity-upscaler, family id `upscaler`. Provider keys ONLY in Edge Function secrets:
   GOOGLE_AI_API_KEY (needs paid tier — free tier has zero image quota), OPENAI_API_KEY
   (also powers moderation), FAL_API_KEY. Redeploying `api` must bundle every `_shared/`
-  file including `providers/`.
+  file including `providers/`. Nano Banana reference images are priced per image
+  (560 tokens); Nano Banana Pro carries a provisional 2,000-token thinking allowance
+  ($12/1M).
+- Personas: five guided photos (front, left/right ¾, left/right profile; ≥1024px short
+  edge), free to create, Studio 2 / Pro 5 slots, consent recorded. Hidden `persona` family
+  = Google Nano Banana Pro (`gemini-3-pro-image`) at 4K with the five photos as labelled
+  references and an identity instruction, 46 credits per image (`PERSONA_GEN.premium` 1.0
+  until the owner's likeness test). No training, no provider-held artifact. Spec:
+  `docs/superpowers/specs/2026-09-23-persona-references-design.md`.
 - Studio editing (Phase 3b, live): workspace edit mode (grid ↔ canvas swap, old
   `/app/edit/:id` absorbed). Local tools = Canvas2D engine `src/app/core/editing/`
   (worker + fallback; heal = MI-GAN inpainting, MIT, via lazy onnxruntime-web —

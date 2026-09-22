@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  output,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, output, signal } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideLoaderCircle,
@@ -16,22 +9,38 @@ import {
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { PersonaStore } from '../../../core/personas/persona-store';
-import { prepPhoto } from '../../../core/personas/photo-prep';
+import { prepPhoto, PhotoTooSmallError } from '../../../core/personas/photo-prep';
 import { ApiService } from '../../../core/api/api-service';
-import { UploadResponse } from '../../../core/api/dtos';
-import { LedgerService } from '../../../core/ledger/ledger-service';
-import { ProfileStore } from '../../../core/profile/profile-store';
-import { PERSONA_TRAINING } from '../../../core/catalog/model-families';
+import { PersonaDto, UploadResponse } from '../../../core/api/dtos';
+import { PERSONA_SLOT_ORDER, PersonaSlot } from '../../../core/catalog/model-families';
 import { PersonaStatus } from '../../../core/enums';
 import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
-interface WizardPhoto {
-  uploadId: string;
-  url: string;
-}
+/** Messages for `POST /personas` failures. Anything not listed here (an
+ * idempotency replay conflict, a create that failed server-side, account
+ * suspension, ...) gets the generic fallback below — the customer cannot act
+ * differently on those, so a specific message would not help them. */
+const CREATE_ERROR_MESSAGES: Record<string, string> = {
+  slot_limit: 'All persona slots are in use.',
+  studio_required: 'Personas need a Studio or Pro plan.',
+};
 
-/** "My personas" dialog: list with status/delete, and the create wizard
- * (name → consent attestation → photo grid → train for 350 credits). */
+/** Messages for a slot upload/PUT failure, by the server's error code.
+ * `invalid_reference` carries its own server message (which photo problem it
+ * was), so it is read off the error rather than looked up here. */
+const SLOT_UPLOAD_MESSAGES: Record<string, string> = {
+  photo_too_small: 'Use a sharper, higher-resolution photo (at least 1024px).',
+  photo_too_large: 'Use a smaller photo — at most 2.5 MB.',
+  account_suspended: 'Your account is suspended — contact support.',
+  photo_unavailable:
+    'That photo is in use by another persona or being removed — upload a new one.',
+  content_policy: 'That photo violates our content policy and was rejected.',
+  moderation_unavailable: 'Safety check is unavailable right now — try again shortly.',
+};
+
+/** "My personas" dialog: list with edit/delete, and a five-slot photo editor
+ * per persona (no wizard, no training — a persona is ready once every slot
+ * has a photo). */
 @Component({
   selector: 'app-persona-manager',
   templateUrl: './persona-manager.html',
@@ -45,40 +54,52 @@ interface WizardPhoto {
 export class PersonaManager {
   private readonly store = inject(PersonaStore);
   private readonly api = inject(ApiService);
-  private readonly ledger = inject(LedgerService);
-  private readonly profile = inject(ProfileStore);
 
   readonly dismissed = output<void>();
 
   readonly personas = this.store.items;
   readonly slots = this.store.slots;
   readonly statuses = PersonaStatus;
-  readonly training = PERSONA_TRAINING;
+
+  readonly slotOrder = PERSONA_SLOT_ORDER;
+  readonly slotLabels: Record<PersonaSlot, string> = {
+    front: 'Front',
+    left_three_quarter: 'Left ¾',
+    right_three_quarter: 'Right ¾',
+    left_profile: 'Left profile',
+    right_profile: 'Right profile',
+  };
 
   readonly creating = signal(false);
   readonly name = signal('');
   readonly attested = signal(false);
-  readonly photos = signal<WizardPhoto[]>([]);
-  readonly uploading = signal(false);
   readonly busy = signal(false);
-  /** Persona id with a retry/delete in flight — its row buttons spin. */
+  /** Persona id with a delete in flight — its row buttons spin. */
   readonly itemBusy = signal<string | null>(null);
   readonly error = signal('');
 
+  /** The persona being built or edited, or null on the list view. */
+  readonly editingId = signal<string | null>(null);
+  readonly editing = computed(() => this.personas().find((p) => p.id === this.editingId()) ?? null);
+  /** Slot with an upload in flight. */
+  readonly uploadingSlot = signal<PersonaSlot | null>(null);
+
   readonly slotsFull = computed(() => this.slots().used >= this.slots().max);
-  readonly canAfford = computed(
-    () => this.profile.isOwner() || this.ledger.totalCredits() >= PERSONA_TRAINING.creditCost,
+  readonly canCreate = computed(
+    () => this.name().trim().length > 0 && this.attested() && !this.busy(),
   );
-  readonly canTrain = computed(
-    () =>
-      this.name().trim().length > 0 &&
-      this.attested() &&
-      this.photos().length >= PERSONA_TRAINING.minPhotos &&
-      this.photos().length <= PERSONA_TRAINING.maxPhotos &&
-      this.canAfford() &&
-      !this.uploading() &&
-      !this.busy(),
-  );
+
+  filledCount(p: PersonaDto): number {
+    return p.photos.filter((x) => !!x.url).length;
+  }
+
+  guideUrl(slot: PersonaSlot): string {
+    return `/personas/guides/${slot}.jpg`;
+  }
+
+  onGuideMissing(event: Event): void {
+    (event.target as HTMLImageElement).src = '/personas/guides/silhouette.svg';
+  }
 
   startCreate(): void {
     this.creating.set(true);
@@ -89,89 +110,92 @@ export class PersonaManager {
     this.creating.set(false);
     this.name.set('');
     this.attested.set(false);
-    this.photos.set([]);
     this.error.set('');
   }
 
-  async onPhotosPicked(event: Event): Promise<void> {
-    const inputEl = event.target as HTMLInputElement;
-    const files = Array.from(inputEl.files ?? []);
-    inputEl.value = '';
-    if (files.length === 0) return;
-    this.error.set('');
-    this.uploading.set(true);
-    try {
-      const room = PERSONA_TRAINING.maxPhotos - this.photos().length;
-      for (const file of files.slice(0, room)) {
-        const prepped = await prepPhoto(file);
-        const form = new FormData();
-        form.append('file', prepped, 'photo.jpg');
-        const res = await this.api.postForm<UploadResponse>('/uploads', form);
-        this.photos.update((list) => [...list, { uploadId: res.uploadId, url: res.url }]);
-      }
-    } catch (e) {
-      this.error.set(
-        (e as { code?: string })?.code === 'content_policy'
-          ? 'A photo violates our content policy and was rejected.'
-          : 'A photo failed to upload — try again.',
-      );
-    } finally {
-      this.uploading.set(false);
-    }
-  }
-
-  removePhoto(uploadId: string): void {
-    this.photos.update((list) => list.filter((p) => p.uploadId !== uploadId));
-  }
-
-  async trainNow(): Promise<void> {
-    if (!this.canTrain()) return;
+  async createPersona(): Promise<void> {
+    if (!this.canCreate()) return;
     this.busy.set(true);
     this.error.set('');
     try {
       const persona = await this.store.create({ name: this.name().trim(), attested: true });
-      await this.store.train(
-        persona.id,
-        this.photos().map((p) => p.uploadId),
-      );
-      this.cancelCreate();
+      this.creating.set(false);
+      this.name.set('');
+      this.attested.set(false);
+      this.editingId.set(persona.id);
     } catch (e) {
-      const code = (e as { code?: string })?.code;
-      this.error.set(
-        code === 'insufficient_credits'
-          ? 'Not enough credits for training.'
-          : code === 'slot_limit'
-            ? 'All persona slots are in use.'
-            : 'Training could not be started — you were not charged.',
-      );
+      const code = (e as { code?: string })?.code ?? '';
+      this.error.set(CREATE_ERROR_MESSAGES[code] ?? 'Could not create the persona.');
     } finally {
       this.busy.set(false);
     }
   }
 
-  /** Failed personas hold their charge refund already; a retry is a fresh run.
-   * Simplest safe path: free the slot and restart the wizard. */
-  async retry(id: string): Promise<void> {
-    if (this.itemBusy()) return;
-    this.itemBusy.set(id);
+  edit(id: string): void {
+    this.editingId.set(id);
+    this.error.set('');
+  }
+
+  backToList(): void {
+    this.editingId.set(null);
+    this.error.set('');
+  }
+
+  async onSlotPicked(slot: PersonaSlot, event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    const persona = this.editing();
+    if (!file || !persona) return;
+    this.error.set('');
+    this.uploadingSlot.set(slot);
     try {
-      await this.store.remove(id);
-      this.startCreate();
-    } catch {
-      this.error.set('Could not clear the failed persona — try again.');
+      const prepped = await prepPhoto(file);
+      const form = new FormData();
+      form.append('file', prepped, 'photo.jpg');
+      form.append('purpose', 'persona-photo');
+      const res = await this.api.postForm<UploadResponse>('/uploads', form);
+      await this.store.setPhoto(persona.id, slot, res.uploadId);
+    } catch (e) {
+      await this.handleSlotError(e);
     } finally {
-      this.itemBusy.set(null);
+      this.uploadingSlot.set(null);
     }
+  }
+
+  /** `not_found` means the persona was deleted from under us (another tab, an
+   * expired session elsewhere) — the slot editor has nothing left to edit, so
+   * this returns to the list and reloads it rather than showing a dead form. */
+  private async handleSlotError(e: unknown): Promise<void> {
+    const code = (e as { code?: string })?.code ?? '';
+    if (code === 'not_found') {
+      this.backToList();
+      await this.store.load();
+      this.error.set('That persona was deleted.');
+      return;
+    }
+    this.error.set(this.uploadMessage(e));
+  }
+
+  private uploadMessage(e: unknown): string {
+    if (e instanceof PhotoTooSmallError) return SLOT_UPLOAD_MESSAGES['photo_too_small'];
+    const err = e as { code?: string; message?: string };
+    const code = err.code ?? '';
+    if (code === 'invalid_reference') {
+      return err.message || "That photo can't be used — upload it again from this screen.";
+    }
+    return SLOT_UPLOAD_MESSAGES[code] ?? 'The photo failed to upload — try again.';
   }
 
   async remove(id: string): Promise<void> {
     if (this.itemBusy()) return;
-    if (!confirm('Delete this persona? Its trained likeness is removed and the slot freed.')) {
+    if (!confirm('Delete this persona? Its photos are removed and the slot freed.')) {
       return;
     }
     this.itemBusy.set(id);
     try {
       await this.store.remove(id);
+      if (this.editingId() === id) this.editingId.set(null);
     } catch {
       this.error.set('Delete failed — try again.');
     } finally {
@@ -180,7 +204,7 @@ export class PersonaManager {
   }
 
   close(): void {
-    if (this.busy() || this.uploading() || this.itemBusy()) return;
+    if (this.busy() || this.uploadingSlot() !== null || this.itemBusy()) return;
     this.dismissed.emit();
   }
 }

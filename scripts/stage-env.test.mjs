@@ -19,13 +19,17 @@ test('a value containing = keeps everything after the first one', () => {
   assert.equal(parseEnvFile('K=a=b=c').K, 'a=b=c');
 });
 
+test('persona is gated on the same key as nano-banana', () => {
+  assert.equal(FAMILY_KEY.persona, FAMILY_KEY['nano-banana']);
+});
+
 test('familyPlan enables only the families whose key is present', () => {
   const plan = familyPlan({ FAL_API_KEY: 'k' });
   assert.deepEqual(plan.enabled.sort(), [
-    'edit-bg', 'edit-expand', 'edit-fill', 'edit-remove', 'flux', 'persona',
+    'edit-bg', 'edit-expand', 'edit-fill', 'edit-remove', 'flux',
     'seedream', 'upscaler',
   ]);
-  assert.deepEqual(plan.disabled.sort(), ['gpt-image', 'nano-banana']);
+  assert.deepEqual(plan.disabled.sort(), ['gpt-image', 'nano-banana', 'persona']);
   assert.equal(plan.moderation, false);
 });
 

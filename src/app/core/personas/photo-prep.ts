@@ -1,11 +1,18 @@
-const MAX_EDGE = 1536;
+export const PERSONA_MAX_EDGE = 2048;
+export const PERSONA_MIN_EDGE = 1024;
 const JPEG_QUALITY = 0.92;
 
-/** Target dimensions fitting inside MAX_EDGE, never upscaling. */
+export class PhotoTooSmallError extends Error {
+  constructor() {
+    super('photo_too_small');
+  }
+}
+
+/** Target dimensions fitting inside maxEdge, never upscaling. */
 export function fitWithin(
   width: number,
   height: number,
-  maxEdge = MAX_EDGE,
+  maxEdge = PERSONA_MAX_EDGE,
 ): { width: number; height: number } {
   const scale = Math.min(1, maxEdge / Math.max(width, height));
   return {
@@ -14,10 +21,17 @@ export function fitWithin(
   };
 }
 
-/** Downscale a persona photo before upload: the trainer needs ≤1MP faces, and
- * small JPEGs keep the training zip within edge-function memory limits. */
+export function isTooSmall(width: number, height: number): boolean {
+  return Math.min(width, height) < PERSONA_MIN_EDGE;
+}
+
+/** Keep a sharp photo sharp: refuse small ones, cap big ones at 2048px, JPEG 0.92. */
 export async function prepPhoto(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
+  if (isTooSmall(bitmap.width, bitmap.height)) {
+    bitmap.close();
+    throw new PhotoTooSmallError();
+  }
   const { width, height } = fitWithin(bitmap.width, bitmap.height);
   const canvas = document.createElement('canvas');
   canvas.width = width;

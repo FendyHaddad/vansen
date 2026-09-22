@@ -215,23 +215,82 @@ Deno.test('a parent that is no longer finished fails before dispatch', async () 
   );
 });
 
-Deno.test('a persona that is no longer ready fails before dispatch', async () => {
+
+// ------------------------------------------------------------------ personas
+
+const PERSONA_ID = 'pppppppp-0000-4000-8000-000000000001';
+const PERSONA_SLOTS = [
+  'front', 'left_three_quarter', 'right_three_quarter', 'left_profile', 'right_profile',
+];
+
+/** A ready persona whose five photos are registered persona-photo uploads. */
+function seedPersona(h: Harness, over: Record<string, unknown> = {}): string[] {
+  const photos: Record<string, string> = {};
+  const paths = PERSONA_SLOTS.map((slot, i) => {
+    const path = `${TEST_USER}/eeeeeeee-eeee-4eee-8eee-00000000000${i}.jpg`;
+    photos[slot] = path;
+    h.db.tables.uploads.push(upload(path, 'persona-photo'));
+    h.db.storage.objects.set(`uploads/${path}`, { bytes: MASK_BYTES, contentType: 'image/jpeg' });
+    return path;
+  });
+  h.db.tables.personas = [{
+    id: PERSONA_ID, user_id: TEST_USER, status: 'ready', photos, deleted_at: null, ...over,
+  }];
+  return paths;
+}
+
+Deno.test('a persona run signs its five photos fresh, in slot order', async () => {
   const h = harness();
-  h.db.tables.personas = [
-    { id: 'per0', user_id: TEST_USER, status: 'failed', lora_url: null },
-  ];
+  const paths = seedPersona(h);
+  const ctx = await resolvePayload(h.deps, job({ familyId: 'persona', personaId: PERSONA_ID }));
+  assertEquals(ctx.personaPhotos!.map((p) => p.slot), PERSONA_SLOTS);
+  ctx.personaPhotos!.forEach((p, i) => {
+    assertEquals(p.url.startsWith(`https://fake.storage/uploads/${paths[i]}?exp=`), true);
+  });
+});
+
+Deno.test('a run with no persona carries no persona photos', async () => {
+  const h = harness();
+  const ctx = await resolvePayload(h.deps, job({}));
+  assertEquals(ctx.personaPhotos, undefined);
+});
+
+Deno.test('a persona deleted after submission fails before any provider call', async () => {
+  const h = harness();
+  seedPersona(h, { deleted_at: '2026-09-23T01:00:00Z' });
   await assertRejects(
-    () => resolvePayload(h.deps, job({ personaId: 'per0' })),
+    () => resolvePayload(h.deps, job({ familyId: 'persona', personaId: PERSONA_ID })),
     Error,
-    'persona_not_ready',
+    'persona_unavailable',
   );
 });
 
-Deno.test('a ready persona contributes its provider-hosted LoRA', async () => {
+Deno.test('a persona that is no longer ready, or lost a photo, is unavailable', async () => {
   const h = harness();
-  h.db.tables.personas = [
-    { id: 'per1', user_id: TEST_USER, status: 'ready', lora_url: 'https://fal.run/lora/1' },
-  ];
-  const ctx = await resolvePayload(h.deps, job({ personaId: 'per1' }));
-  assertEquals(ctx.loraUrl, 'https://fal.run/lora/1');
+  seedPersona(h, { status: 'draft' });
+  await assertRejects(
+    () => resolvePayload(h.deps, job({ familyId: 'persona', personaId: PERSONA_ID })),
+    Error,
+    'persona_unavailable',
+  );
+  const gap = harness();
+  seedPersona(gap);
+  (gap.db.tables.personas[0].photos as Record<string, string | null>).left_profile = null;
+  await assertRejects(
+    () => resolvePayload(gap.deps, job({ familyId: 'persona', personaId: PERSONA_ID })),
+    Error,
+    'persona_unavailable',
+  );
+});
+
+Deno.test('a persona photo registered for another purpose is never signed', async () => {
+  const h = harness();
+  seedPersona(h);
+  h.db.tables.uploads.find((u) => String(u.path).endsWith('000000000002.jpg'))!.purpose =
+    'reference';
+  await assertRejects(
+    () => resolvePayload(h.deps, job({ familyId: 'persona', personaId: PERSONA_ID })),
+    Error,
+    'reference_wrong_purpose',
+  );
 });

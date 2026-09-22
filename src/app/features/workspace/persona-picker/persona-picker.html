@@ -2,7 +2,7 @@
   <span class="og-label">
     Persona
     <app-hint
-      text="Your trained likeness. Generations run on the FLUX likeness pipeline — model choice is fixed while a persona is active."
+      text="Your saved likeness. Persona images render on Nano Banana Pro at 4K from your five photos — model choice is fixed while a persona is active."
     >
       <span class="og-info">ⓘ</span>
     </app-hint>
@@ -50,11 +50,7 @@
               <span class="persona-row-blank"><ng-icon name="lucideUserRound" size="16"/></span>
             }
             <span class="persona-row-name">{{ persona.name }}</span>
-            @if (persona.status === statuses.Training) {
-              <span class="persona-row-status">Training…</span>
-            } @else if (persona.status === statuses.Failed) {
-              <span class="persona-row-status persona-row-failed">Failed</span>
-            } @else if (persona.status === statuses.Draft) {
+            @if (persona.status === statuses.Draft) {
               <span class="persona-row-status">Draft</span>
             }
           </button>

@@ -24,9 +24,7 @@ describe('domain enums', () => {
         'upscale',
       ].sort(),
     );
-    expect(Object.values(PersonaStatus).sort()).toEqual(
-      ['draft', 'failed', 'ready', 'training'].sort(),
-    );
+    expect(Object.values(PersonaStatus).sort()).toEqual(['draft', 'ready'].sort());
     expect(Object.values(GenerationOp).sort()).toEqual(
       ['edit', 'generate', 'upscale', 'variation'].sort(),
     );

@@ -12,7 +12,7 @@ const BY_FAMILY: Record<string, ProviderAdapter> = {
   flux: falAdapter,
   seedream: falAdapter,
   upscaler: falAdapter,
-  persona: falAdapter,
+  persona: googleAdapter,
   // Studio panel AI edit tools — all fal (FLUX fill + BiRefNet)
   'edit-remove': falAdapter,
   'edit-fill': falAdapter,

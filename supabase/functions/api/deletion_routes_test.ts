@@ -222,15 +222,20 @@ Deno.test('another customer\'s generation is not deletable', async () => {
 
 // ---------------------------------------------------------------- personas
 
-Deno.test('deleting a persona queues its photos and records the model fal holds', async () => {
+Deno.test('deleting a persona queues its photos and records no provider artifact', async () => {
   const { app: api, db } = app();
   db.tables.personas = [{
     id: PERSONA,
     user_id: TEST_USER,
     name: 'Ada',
     status: 'ready',
-    photo_paths: [`${TEST_USER}/photo-1.png`],
-    lora_url: 'https://fal.example/lora/ada.safetensors',
+    photos: {
+      front: `${TEST_USER}/photo-1.png`,
+      left_three_quarter: null,
+      right_three_quarter: null,
+      left_profile: null,
+      right_profile: null,
+    },
     deleted_at: null,
   }];
   db.tables.storage_objects.push({
@@ -251,12 +256,7 @@ Deno.test('deleting a persona queues its photos and records the model fal holds'
 
   assertEquals(res.status, 202);
   assertEquals(db.tables.deletion_outbox[0].bucket, 'uploads');
-  assertEquals(db.tables.provider_artifact_deletions[0].status, 'requested');
-  assertEquals(
-    db.tables.provider_artifact_deletions[0].artifact_ref,
-    'https://fal.example/lora/ada.safetensors',
-    'a model we cannot delete is tracked, not reported gone',
-  );
+  assertEquals((db.tables.provider_artifact_deletions ?? []).length, 0);
 });
 
 // ---------------------------------------------------------------- closure

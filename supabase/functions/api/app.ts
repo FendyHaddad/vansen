@@ -16,13 +16,15 @@ import {
   PROMPT_MAX_CHARS,
   editToolById,
   familyById,
+  type GenerationInput,
   type GenerationSettings,
   type ModelFamily,
   packCredits,
   PERSONA_GEN,
   PERSONA_SLOTS,
-  PERSONA_TRAINING,
   personaGenCreditCost,
+  personaProviderCost,
+  personaSettings,
   STUDIO_MARGIN,
   upscaleCreditCost,
   UPSCALER,
@@ -31,8 +33,14 @@ import {
 } from "./_shared/model-families.ts";
 import { applyStyle, styleById } from "./_shared/style-presets.ts";
 import { GenerationOp, LedgerType, MediaKind } from "./_shared/enums.ts";
-import { PERSONA_TRIGGER } from "./_shared/providers/fal.ts";
-import { zipSync } from "npm:fflate@0.8.2";
+import {
+  isPersonaSlot,
+  PERSONA_MIN_EDGE,
+  personaPhotoFailure,
+  personaPrompt,
+  readyPersona,
+  toPersonaDto,
+} from "./personas.ts";
 import type {
   CheckResult,
   ProviderAdapter,
@@ -58,6 +66,7 @@ import {
   planRetry,
   planVariation,
   REFUSAL_MESSAGE,
+  REFUSAL_STATUS,
   type RetryContext,
   type RetryDecision,
 } from "./services/retry.ts";
@@ -147,6 +156,7 @@ export interface ApiDeps {
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const PERSONA_MAX_BYTES = 2.5 * 1024 * 1024;
 
 /** D2: quarantined evidence is kept for 12 months after the enforcement
  * action, for appeals and legal defence. See the retention policy spec. */
@@ -2034,7 +2044,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     family: ModelFamily,
     op: string,
     settings: GenerationSettings,
-    ctx: { hasReference: boolean; hasMask: boolean },
+    ctx: GenerationInput & { hasMask: boolean },
   ): { normalized: NormalizedRequest; credits: number } | Response {
     try {
       const normalized = normalizeGenerationRequest(family, op, settings, ctx);
@@ -2074,6 +2084,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       familyEnabled: false,
       entitled: false,
       expressible: false,
+      personaUnavailable: false,
     };
     if (!snapshotId) return empty;
 
@@ -2091,8 +2102,12 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       for (const upload of uploads ?? []) live.add(upload.path as string);
     }
 
-    const gate = await modelGate(snapshot.familyId);
+    // A persona run is gated by the persona kill switch, not its render family's.
+    const gate = await modelGate(snapshot.personaId ? PERSONA_GEN.id : snapshot.familyId);
     const plan = await activePlan(userId);
+    const persona = snapshot.personaId
+      ? await readyPersona(admin, userId, snapshot.personaId)
+      : null;
     const family = familyById(snapshot.familyId);
     // A fixed-price edit tool or the upscaler has no catalog family to
     // validate against; its options are the tool itself.
@@ -2107,6 +2122,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       familyEnabled: gate.enabled,
       entitled: !(gate.minPlan === "pro" && plan === "studio"),
       expressible,
+      personaUnavailable: persona === "unavailable",
     };
   }
 
@@ -2125,7 +2141,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   function refuse(c: Context, decision: Extract<RetryDecision, { ok: false }>): Response {
-    return fail(c, 409, decision.refusal, REFUSAL_MESSAGE[decision.refusal]);
+    const status = REFUSAL_STATUS[decision.refusal] ?? 409;
+    return fail(c, status, decision.refusal, REFUSAL_MESSAGE[decision.refusal]);
   }
 
   // Re-run what the customer actually asked for. The body is rebuilt here and
@@ -2184,7 +2201,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const op = body.op as string;
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     let batch = Number.isInteger(body.batch) ? (body.batch as number) : 1;
-    const settings = sanitizeSettings(body.settings);
+    let settings = sanitizeSettings(body.settings);
     const parentId = typeof body.parentId === "string" && body.parentId
       ? body.parentId
       : null;
@@ -2247,38 +2264,48 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       );
     }
 
-    // Persona: owned + ready, generate-op only. Routes to the hidden flux-lora family.
-    let persona: { lora_url: string; trigger_word: string } | null = null;
-    if (personaId) {
-      if (op !== GenerationOp.Generate) {
-        return fail(c, 400, "invalid_op", "Personas support generate only");
-      }
-      const { data } = await admin
-        .from("personas")
-        .select("status, lora_url, trigger_word")
-        .eq("id", personaId)
-        .eq("user_id", userId)
-        .is("deleted_at", null)
-        .maybeSingle();
-      if (!data || data.status !== "ready" || !data.lora_url) {
-        return fail(
-          c,
-          400,
-          "persona_not_ready",
-          "Persona not found or not ready",
-        );
-      }
-      persona = {
-        lora_url: data.lora_url,
-        trigger_word: data.trigger_word ?? "",
-      };
+    // Persona: owned + ready, generate-op only. Rendered as Nano Banana Pro 4K
+    // with the persona's five photos; the server resolves them, never the client.
+    if (personaId && op !== GenerationOp.Generate) {
+      return fail(c, 400, "invalid_op", "Personas support generate only");
+    }
+    // A persona run's references are its five photos; any other image would
+    // be a sixth likeness nobody labelled.
+    if (personaId && (parentId || body.referenceUploadId)) {
+      return fail(
+        c,
+        400,
+        "invalid_reference",
+        "A persona uses its own photos. Remove the other reference image.",
+      );
+    }
+    const found = personaId ? await readyPersona(admin, userId, personaId) : null;
+    if (found instanceof Error) {
+      logError(c, "persona_lookup_failed", found);
+      return fail(c, 503, "persona_lookup_failed", "Could not read your persona. Try again.");
+    }
+    if (found === "unavailable") {
+      return fail(c, 400, "persona_unavailable", "That persona is missing or unfinished.");
+    }
+    const persona = found;
+    // The persona fixes version and size; only the ratio is the customer's,
+    // and it must be one Nano Banana renders.
+    if (persona) settings = personaSettings(String(settings.aspectRatio ?? "1:1"));
+    const personaFamily = persona ? familyById("nano-banana") : undefined;
+    const personaInvalid = personaFamily ? validateSettings(personaFamily, settings) : null;
+    if (personaInvalid) {
+      return fail(
+        c,
+        400,
+        "invalid_settings",
+        `Personas do not offer ${personaInvalid.field} ${personaInvalid.value}.`,
+      );
     }
 
-    // Boosted prompt is what moderation and the provider see; the stored prompt
-    // stays the user's text. Persona trigger word leads so the LoRA locks on.
-    const effectivePrompt = persona
-      ? `${persona.trigger_word}, ${styled}`
-      : styled;
+    // The provider sees the persona instruction wrapped around the styled
+    // prompt; moderation sees the customer's styled prompt (the wrapper is
+    // ours) and the stored prompt stays the customer's own text.
+    const effectivePrompt = persona ? personaPrompt(styled) : styled;
 
     let familyId: string;
     let familyName: string;
@@ -2296,6 +2323,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       familyId = PERSONA_GEN.id;
       familyName = PERSONA_GEN.name;
       kind = MediaKind.Image;
+      // Priced as a persona, rendered as Nano Banana Pro: the quote family
+      // builds the provider request, the persona price is the charge.
+      quoteFamily = personaFamily;
       unitCredits = personaGenCreditCost();
     } else {
       const editTool = editToolById(String(body.familyId ?? ""));
@@ -2382,7 +2412,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
 
     // Moderation gate — BEFORE charge and BEFORE any provider call. An outage
     // refuses the request; it never silently lets an unchecked prompt through.
-    const promptDecision = await moderate({ text: effectivePrompt });
+    const promptDecision = await moderate({ text: styled });
     if (promptDecision.state === "unavailable") {
       return moderationFailure(c, promptDecision);
     }
@@ -2502,14 +2532,15 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
 
     const priced = quoteFamily
       ? priceRequest(c, quoteFamily, op, settings, {
-        hasReference: !!referenceUrl,
+        hasReference: !!referenceUrl || !!persona,
+        referenceCount: persona ? persona.paths.length : (referenceUrl ? 1 : 0),
         hasMask: typeof body.maskPngBase64 === "string" ||
           (typeof body.maskUploadId === "string" && !!body.maskUploadId),
       })
       : null;
     if (priced instanceof Response) return priced;
     const normalized = priced?.normalized;
-    if (priced) unitCredits = priced.credits;
+    if (priced && !persona) unitCredits = priced.credits;
 
     const ledgerType = op === GenerationOp.Variation
       ? LedgerType.Generate
@@ -2564,11 +2595,11 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // retry weeks from now has to work from, so it is built from the resolved
     // identities rather than from the client's body.
     // A persona run is stored and priced under the pseudo-family 'persona',
-    // which is not a model. The snapshot keeps the family the customer chose,
-    // because that is what a retry has to send.
-    const snapshotFamilyId = persona && typeof body.familyId === "string" && body.familyId
-      ? body.familyId
-      : familyId;
+    // which is not a model. The snapshot records the family it renders on —
+    // the one whose settings it stores, so /retryable validates against the
+    // right catalog entry — and the persona id, which is what sends a retry
+    // back through the persona branch.
+    const snapshotFamilyId = persona && quoteFamily ? quoteFamily.id : familyId;
 
     const snapshot = captureSnapshot({
       // Checked against GenerationOp at the top of this route.
@@ -2755,9 +2786,11 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     family: ModelFamily | undefined,
     settings: GenerationSettings,
   ): number {
+    // Before the catalog family: a persona run carries Nano Banana as its
+    // quote family, but its cost includes the five photos and the premium settings.
+    if (familyId === PERSONA_GEN.id) return personaProviderCost();
     if (family) return family.providerCost(settings);
     if (familyId === UPSCALER.id) return UPSCALER.providerCost;
-    if (familyId === PERSONA_GEN.id) return PERSONA_GEN.providerCost;
     const tool = editToolById(familyId);
     if (tool) return (tool.creditCost / 100) * (1 - STUDIO_MARGIN);
     return 0;
@@ -3457,6 +3490,16 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         "Image is too large — keep it under 50 megapixels",
       );
     }
+    // The web client sends a 2048px JPEG at 0.92, typically 0.5–2 MB.
+    if (form?.get("purpose") === "persona-photo" && file.size > PERSONA_MAX_BYTES) {
+      return fail(c, 400, "photo_too_large", "Use a smaller photo — at most 2.5 MB.");
+    }
+    const tooSmallForPersona = form?.get("purpose") === "persona-photo" &&
+      Math.min(dims.width, dims.height) < PERSONA_MIN_EDGE;
+    if (tooSmallForPersona) {
+      return fail(c, 400, "photo_too_small",
+        `Use a sharper photo — at least ${PERSONA_MIN_EDGE}px on its short edge.`);
+    }
 
     const purpose = form?.get("purpose") === "persona-photo"
       ? "persona-photo"
@@ -3604,31 +3647,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     return c.json({ thumbUrl: await signStored(backend, path) });
   });
 
-  async function toPersonaDto(row: Record<string, unknown>) {
-    const photos = (row.photo_paths as string[]) ?? [];
-    let thumbUrl = "";
-    if (photos[0]) {
-      const { data } = await admin.storage.from("uploads").createSignedUrl(
-        photos[0],
-        3600,
-      );
-      thumbUrl = browserUrl(data?.signedUrl ?? "");
-    }
-    return {
-      id: row.id,
-      name: row.name,
-      status: row.status,
-      photoCount: photos.length,
-      thumbUrl,
-      error: row.error,
-      createdAt: row.created_at,
-      trainedAt: row.trained_at,
-    };
-  }
-
   /**
-   * List personas. Read-only: training is advanced by the job worker, so a
-   * persona finishes whether or not anyone has this screen open.
+   * List personas. Read-only: a persona is only ever changed by its own
+   * routes, so there is nothing here for a background worker to advance.
    */
   app.get("/personas", async (c) => {
     const userId = c.get("userId");
@@ -3641,10 +3662,16 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
 
     const plan = await activePlan(userId);
     const max = plan ? PERSONA_SLOTS[plan] : 0;
-    const items = await Promise.all((fresh ?? []).map(toPersonaDto));
+    const items = await Promise.all(
+      (fresh ?? []).map((row) => toPersonaDto(admin, browserUrl, row)),
+    );
+    // Every row this query returns is already draft or ready: deleted_at is
+    // filtered above, and those are the only two statuses a persona has (0032).
     return c.json({ items, slots: { used: items.length, max } });
   });
 
+  /** Create a draft persona. The slot check is the locked reservation, not a
+   * count query here: two concurrent creates must not both slip under the cap. */
   app.post("/personas", async (c) => {
     const userId = c.get("userId");
     if (await isSuspended(userId)) {
@@ -3674,37 +3701,40 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     if (body?.attested !== true) {
       return fail(c, 400, "invalid_payload", "Consent attestation is required");
     }
-    const { count } = await admin
-      .from("personas")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      // A persona awaiting cleanup must not keep occupying a slot.
-      .is("deleted_at", null);
-    if ((count ?? 0) >= PERSONA_SLOTS[plan]) {
-      return fail(
-        c,
-        403,
-        "slot_limit",
-        `Your plan allows ${PERSONA_SLOTS[plan]} personas`,
-      );
+    const { data: reserved, error: reserveErr } = await admin.rpc("fn_reserve_persona", {
+      p_user: userId,
+      p_key: readIdempotencyKey(c) ?? crypto.randomUUID(),
+      p_hash: await bodyHash({ name }),
+      p_name: name,
+    });
+    if (reserveErr?.message?.includes("slot_limit")) {
+      return fail(c, 403, "slot_limit", `Your plan allows ${PERSONA_SLOTS[plan]} personas`);
     }
-    const { data: row, error } = await admin
-      .from("personas")
-      .insert({ user_id: userId, name, client: clientOf(c) })
-      .select("*")
-      .single();
-    if (error || !row) {
-      return fail(c, 400, "create_failed", "Could not create the persona");
+    if (reserveErr?.message?.includes("idempotency_conflict")) {
+      return fail(c, 409, "idempotency_conflict",
+        "That request id was already used for a different request.");
     }
-    return c.json({ item: await toPersonaDto(row) });
+    if (reserveErr?.message?.includes("subscription_required")) {
+      return fail(c, 403, "studio_required", "Personas require an active subscription.");
+    }
+    if (reserveErr || !reserved?.personaId) {
+      logError(c, "persona_create_failed", reserveErr ?? new Error("no persona"));
+      return fail(c, 503, "create_failed", "Could not create the persona");
+    }
+    const { data: row } = await admin.from("personas").select("*")
+      .eq("id", reserved.personaId).single();
+    // A replayed idempotency key can outlive the persona it made: the row may
+    // since have been deleted. That is a 404, not a crash on a null row.
+    if (!row) return fail(c, 404, "not_found", "Persona not found");
+    const { error: clientErr } = await admin.from("personas")
+      .update({ client: clientOf(c) }).eq("id", reserved.personaId);
+    if (clientErr) logError(c, "persona_client_update_failed", clientErr);
+    return c.json({ item: await toPersonaDto(admin, browserUrl, row) });
   });
 
   /**
-   * Same lifecycle as a generation, plus the model fal holds.
-   *
-   * The photos and the training ZIP are queued from the registry. The LoRA is
-   * recorded as a deletion REQUEST against the provider: those bytes are not
-   * ours to remove, and pretending otherwise was the previous behaviour.
+   * Delete a persona. Its photos are queued for deletion from the registry;
+   * nothing is trained and no provider holds a file for us any more (0032).
    */
   app.delete("/personas/:id", async (c) => {
     const { data, error } = await admin.rpc("fn_delete_persona", {
@@ -3721,147 +3751,51 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     return c.json(deletionStatus(data), 202);
   });
 
-  /** Charge 350 credits, zip the moderated photos, submit fal LoRA training. */
-  app.post("/personas/:id/train", async (c) => {
+  /** Put one moderated photo in one slot; the replaced photo is queued for deletion. */
+  app.put("/personas/:id/photos/:slot", async (c) => {
     const userId = c.get("userId");
     const personaId = c.req.param("id");
-    if (await isSuspended(userId)) {
-      return fail(
-        c,
-        429,
-        "account_suspended",
-        "Account suspended — contact support to appeal.",
-      );
+    const slot = c.req.param("slot");
+    if (!isPersonaSlot(slot)) {
+      return fail(c, 400, "invalid_slot", "Unknown photo slot");
     }
-    if (!(await activePlan(userId))) {
-      return fail(
-        c,
-        403,
-        "studio_required",
-        "Personas require an active subscription.",
-      );
+    if (await isSuspended(userId)) {
+      return fail(c, 429, "account_suspended", "Account suspended — contact support to appeal.");
     }
     const body = await c.req.json().catch(() => null);
-    const photoIds = Array.isArray(body?.photoUploadIds)
-      ? (body.photoUploadIds as unknown[]).filter(
-        (p): p is string => typeof p === "string",
-      )
-      : [];
-    if (
-      photoIds.length < PERSONA_TRAINING.minPhotos ||
-      photoIds.length > PERSONA_TRAINING.maxPhotos ||
-      new Set(photoIds).size !== photoIds.length
-    ) {
-      return fail(
-        c,
-        400,
-        "invalid_payload",
-        `Between ${PERSONA_TRAINING.minPhotos} and ${PERSONA_TRAINING.maxPhotos} unique photos required`,
-      );
+    const uploadId = typeof body?.uploadId === "string" ? body.uploadId : "";
+    const owned = await resolveOwnedUpload(admin, userId, uploadId, "persona-photo");
+    if (typeof owned === "string") {
+      const refused = personaPhotoFailure(owned);
+      return fail(c, refused.status, "invalid_reference", refused.message);
     }
-
-    for (const photoId of photoIds) {
-      const owned = await resolveOwnedUpload(
-        admin,
-        userId,
-        photoId,
-        "persona-photo",
-      );
-      // Legacy 'reference' uploads, pre-P8: the clients do not send a purpose
-      // yet, so every persona photo is still registered as a reference.
-      if (owned === "wrong_purpose") continue;
-      if (typeof owned === "string") return referenceFailure(c, owned);
+    if (Math.min(owned.width, owned.height) < PERSONA_MIN_EDGE) {
+      return fail(c, 400, "photo_too_small",
+        `Use a sharper photo — at least ${PERSONA_MIN_EDGE}px on its short edge.`);
     }
-
-    // Fetch every photo BEFORE charging — a bad reference must not cost credits.
-    const files: Record<string, Uint8Array> = {};
-    for (let i = 0; i < photoIds.length; i++) {
-      const { data: blob, error } = await admin.storage.from("uploads")
-        .download(photoIds[i]);
-      if (error || !blob) {
-        return fail(c, 400, "invalid_payload", "A photo could not be read");
-      }
-      files[`photo_${String(i + 1).padStart(2, "0")}.jpg`] = new Uint8Array(
-        await blob.arrayBuffer(),
-      );
-    }
-
-    // The zip is built and stored BEFORE the charge: the worker signs it fresh
-    // at dispatch time, so an hour-old signed URL never reaches the provider.
-    const zipPath = `persona-zips/${userId}/${personaId}.zip`;
-    const zipObjectId = await registerObject(admin, {
-      userId,
-      backend: "supabase",
-      bucket: SUPABASE_BUCKETS["persona-zip"],
-      path: zipPath,
-      purpose: "persona-zip",
-    }).catch((e) => {
-      logError(c, "persona_zip_register_failed", e);
-      return null;
+    const { error } = await admin.rpc("fn_set_persona_photo", {
+      p_user: userId, p_persona: personaId, p_slot: slot, p_path: owned.path,
     });
-    if (!zipObjectId) {
-      return fail(c, 503, "train_failed", "Training could not be prepared");
+    if (error?.message?.includes("not_found")) {
+      return fail(c, 404, "not_found", "Persona not found");
     }
-    const { error: upErr } = await admin.storage.from("uploads").upload(
-      zipPath,
-      zipSync(files, { level: 0 }), // JPEGs don't compress
-      { contentType: "application/zip", upsert: true },
-    );
-    if (!upErr) await markObjectLive(admin, zipObjectId);
-    if (upErr) {
-      logError(c, "persona_zip_failed", new Error(upErr.message));
-      return fail(c, 503, "train_failed", "Training could not be prepared");
+    if (error?.message?.includes("invalid_slot")) {
+      return fail(c, 400, "invalid_slot", "Unknown photo slot");
     }
-
-    // fn_reserve_training re-reads the photo count from the persona, so the
-    // selection has to be recorded before the reservation validates it.
-    await admin
-      .from("personas")
-      .update({ photo_paths: photoIds, trigger_word: PERSONA_TRIGGER })
-      .eq("id", personaId)
-      .eq("user_id", userId)
-      .is("deleted_at", null);
-
-    const { error: reserveErr } = await admin.rpc("fn_reserve_training", {
-      p_user: userId,
-      p_persona: personaId,
-      p_key: readIdempotencyKey(c) ?? crypto.randomUUID(),
-      p_hash: await bodyHash({ personaId, photoIds }),
-      p_payload: { provider: "fal", zipPath },
-    });
-    if (reserveErr) {
-      if (reserveErr.message.includes("invalid_persona_status")) {
-        return fail(
-          c,
-          400,
-          "train_failed",
-          "Persona not found or already training",
-        );
-      }
-      if (reserveErr.message.includes("bad_photo_count")) {
-        return fail(
-          c,
-          400,
-          "invalid_payload",
-          `Between ${PERSONA_TRAINING.minPhotos} and ${PERSONA_TRAINING.maxPhotos} unique photos required`,
-        );
-      }
-      if (reserveErr.message.includes("not_found")) {
-        return fail(c, 404, "not_found", "Persona not found");
-      }
-      return await reservationFailure(c, userId, reserveErr.message);
+    if (error?.message?.includes("invalid_photo")) {
+      return fail(c, 409, "photo_unavailable",
+        "That photo can't be used here — it's in use by another persona or being removed. " +
+          "Upload it again.");
     }
-
-    const { data: row } = await admin.from("personas").select("*").eq(
-      "id",
-      personaId,
-    ).single();
-    // 202: the worker submits and polls this training; the customer may close
-    // the tab and the persona still finishes.
-    return c.json({
-      item: await toPersonaDto(row!),
-      credits: await creditsOf(userId),
-    }, 202);
+    if (error) {
+      logError(c, "persona_photo_failed", error);
+      return fail(c, 503, "persona_photo_failed", "Could not save the photo — try again.");
+    }
+    const { data: row } = await admin.from("personas").select("*").eq("id", personaId)
+      .maybeSingle();
+    // Deleted between the write and this read: the persona is gone, say so.
+    if (!row) return fail(c, 404, "not_found", "Persona not found");
+    return c.json({ item: await toPersonaDto(admin, browserUrl, row) });
   });
 
   /** Persist a locally-edited canvas as a new $0 generation version. */

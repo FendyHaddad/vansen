@@ -24,7 +24,6 @@ function ready(db: FakeDb) {
   db.tables.models = [{ id: 'flux', enabled: true, min_plan: 'studio' }];
   db.tables.notification_outbox = [];
   installDispatchRpcs(db);
-  db.rpcHandlers.fn_claim_training_jobs = () => [];
   db.rpcHandlers.fn_claim_notifications = () => [];
   db.rpcHandlers.fn_settle_job = (args, self) => {
     const job = (self.tables.jobs ?? []).find((j) => j.id === args.p_job);
@@ -68,11 +67,6 @@ function worker(db: FakeDb, adapter: ProviderAdapter) {
           lease_token: job.lease_token,
         }, result),
       reconcile: () => Promise.resolve('pending' as const),
-    },
-    training: {
-      signZip: () => Promise.resolve('https://fal.example/zip'),
-      submit: () => Promise.resolve('ref'),
-      check: () => Promise.resolve({ state: 'running' as const }),
     },
     notifications: { account: null, sendPush: () => Promise.resolve([]) },
   });

@@ -114,7 +114,7 @@ describe('SessionLifecycle with real stores', () => {
       if (path.startsWith('/jobs')) return new Promise((r) => (resolveJobs = r));
       if (path.startsWith('/personas')) {
         return Promise.resolve({
-          items: [{ id: 'p1', name: 'Ada', status: 'training', photoCount: 12 }],
+          items: [{ id: 'p1', name: 'Ada', status: 'draft', photos: [] }],
           slots: { used: 1, max: 3 },
         });
       }
@@ -192,18 +192,14 @@ describe('SessionLifecycle with real stores', () => {
     expect(store.items()).toEqual([]);
   });
 
-  it('stops the persona training timer when the account changes', async () => {
+  it('clears personas when the account changes — nothing trains, so nothing polls', async () => {
     const { lifecycle, personas } = setup();
     await lifecycle.onIdentityChange('user-1');
     await personas.load();
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(personas.items().length).toBe(1);
 
     await lifecycle.onIdentityChange('user-2');
-    api.get.mockClear();
 
-    expect(vi.getTimerCount()).toBe(0);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(api.get).not.toHaveBeenCalled();
     expect(personas.items()).toEqual([]);
   });
 });

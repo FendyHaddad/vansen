@@ -140,15 +140,9 @@ export function expectedFromSources({ generations = [], uploads = [], personas =
     add('supabase', 'uploads', row.path, `uploads.path:${row.id}`);
   }
   for (const row of personas) {
-    for (const path of row.photo_paths ?? []) {
-      add('supabase', 'uploads', path, `personas.photo_paths:${row.id}`);
+    for (const path of Object.values(row.photos ?? {})) {
+      add('supabase', 'uploads', path, `personas.photos:${row.id}`);
     }
-    add(
-      'supabase',
-      'uploads',
-      `persona-zips/${row.user_id}/${row.id}.zip`,
-      `personas.zip:${row.id}`,
-    );
   }
   return keys;
 }
@@ -204,7 +198,7 @@ export async function runInventory(deps) {
   const outbox = await pageTable(admin, 'deletion_outbox', 'id,backend,bucket,object_path,completed_at,attempts,last_error');
   const generations = await pageTable(admin, 'generations', 'id,media_path,thumb_path,storage_backend');
   const uploads = await pageTable(admin, 'uploads', 'id,path');
-  const personas = await pageTable(admin, 'personas', 'id,user_id,photo_paths');
+  const personas = await pageTable(admin, 'personas', 'id,user_id,photos');
   const artifacts = await pageTable(admin, 'provider_artifact_deletions', 'id,provider,status,evidence_ref');
 
   const expected = expectedFromRegistry(registry);

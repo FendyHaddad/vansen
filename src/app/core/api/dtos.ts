@@ -7,7 +7,7 @@ import {
   SubscriptionPlan,
   SubscriptionStatus,
 } from '../enums';
-import { GenerationSettings } from '../catalog/model-families';
+import { GenerationSettings, PersonaSlot } from '../catalog/model-families';
 
 /** JSON contract with the api gateway — Java-swap boundary. */
 
@@ -193,16 +193,21 @@ export interface SaveEditResponse {
   item: GenerationDto;
 }
 
+export interface PersonaPhotoDto {
+  slot: PersonaSlot;
+  /** Signed URL (1h), or null for an empty slot. */
+  url: string | null;
+}
+
 export interface PersonaDto {
   id: string;
   name: string;
   status: PersonaStatus;
-  photoCount: number;
-  /** Signed URL of the first photo (1h) — picker/manager thumbnail. */
+  /** Five slots, in PERSONA_SLOT_ORDER. */
+  photos: PersonaPhotoDto[];
+  /** The front photo's signed URL, or ''. */
   thumbUrl: string;
-  error: string | null;
   createdAt: string;
-  trainedAt: string | null;
 }
 
 export interface PersonasResponse {
@@ -214,15 +219,6 @@ export interface CreatePersonaRequest {
   name: string;
   /** "This is me, or someone who gave me permission." Required true. */
   attested: boolean;
-}
-
-export interface TrainPersonaRequest {
-  photoUploadIds: string[];
-}
-
-export interface TrainPersonaResponse {
-  item: PersonaDto;
-  credits: CreditsDto;
 }
 
 export interface SubscribeRequest {

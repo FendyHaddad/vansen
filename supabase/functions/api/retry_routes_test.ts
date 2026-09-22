@@ -126,11 +126,32 @@ Deno.test('R15: retrying a video i2v carries its REFERENCES', async () => {
   assertEquals(res.status, 202, await res.text());
 });
 
+const PERSONA_SLOTS = [
+  'front', 'left_three_quarter', 'right_three_quarter', 'left_profile', 'right_profile',
+];
+
+/** A ready persona: five photos, each a registered persona-photo upload. */
+function seedPersona(db: FakeDb, over: Record<string, unknown> = {}) {
+  const photos: Record<string, string> = {};
+  PERSONA_SLOTS.forEach((slot, i) => {
+    const path = `${TEST_USER}/eeeeeeee-eeee-4eee-8eee-00000000000${i}.jpg`;
+    photos[slot] = path;
+    db.tables.uploads.push({
+      id: path, user_id: TEST_USER, path, purpose: 'persona-photo', mime: 'image/jpeg',
+      bytes: 100, width: 1536, height: 2048, moderation: 'allowed',
+    });
+    db.storage.from('uploads').upload(path, new Uint8Array([1]), { contentType: 'image/jpeg' });
+  });
+  db.tables.personas = [{
+    id: 'p-1', user_id: TEST_USER, name: 'Me', status: 'ready', photos, deleted_at: null, ...over,
+  }];
+}
+
 Deno.test('R15: retrying a persona generation keeps the persona and the real family', async () => {
   const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
   const db = deps.admin as unknown as FakeDb;
-  db.tables.personas = [{ id: 'p-1', user_id: TEST_USER, status: 'ready', lora_url: 'https://x/l.safetensors' }];
-  seed(db, { family_id: 'persona' }, { familyId: 'flux', personaId: 'p-1' });
+  seed(db, { family_id: 'persona' }, { familyId: 'nano-banana', personaId: 'p-1' });
+  seedPersona(db);
   const app = createApp(deps);
 
   const res = await app.request('/api/generations/g1/retry', { method: 'POST', headers: AUTH });
@@ -139,7 +160,7 @@ Deno.test('R15: retrying a persona generation keeps the persona and the real fam
   // The reserved row is stored under the pseudo-family 'persona' — that is the
   // server's own convention for display and pricing, and it is unchanged. What
   // matters is that the RETRY did not send 'persona' as a model family: it sent
-  // flux plus a persona id, and the server did its own mapping. Proof that the
+  // nano-banana plus a persona id, and the server did its own mapping. Proof that the
   // rebuilt body carries the real family is in `services/retry_test.ts`; proof
   // it worked is that this reached the reservation at all, which the old
   // client-side retry never did (invalid_family).
@@ -148,8 +169,35 @@ Deno.test('R15: retrying a persona generation keeps the persona and the real fam
   assertEquals(item.familyId, 'persona');
   const snapshot = (db.rpcCalls.find((r) => r.name === 'fn_reserve_generation')!
     .args.p_payload as Record<string, unknown>).snapshot as Record<string, unknown>;
-  assertEquals(snapshot.familyId, 'flux', 'never re-send the pseudo-family "persona"');
+  assertEquals(snapshot.familyId, 'nano-banana', 'never re-send the pseudo-family "persona"');
   assertEquals(snapshot.personaId, 'p-1');
+});
+
+Deno.test('R15: retrying a persona generation whose persona was deleted is persona_unavailable', async () => {
+  const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
+  const db = deps.admin as unknown as FakeDb;
+  seed(db, { family_id: 'persona' }, { familyId: 'nano-banana', personaId: 'p-1' });
+  seedPersona(db, { deleted_at: '2026-09-23T01:00:00Z' });
+  const app = createApp(deps);
+
+  const res = await app.request('/api/generations/g1/retry', { method: 'POST', headers: AUTH });
+
+  assertEquals(res.status, 400);
+  assertEquals((await res.json()).error.code, 'persona_unavailable');
+  assertEquals(db.rpcCalls.some((r) => r.name === 'fn_reserve_generation'), false);
+});
+
+Deno.test('R15: retrying a persona generation whose persona row is gone is persona_unavailable', async () => {
+  const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
+  const db = deps.admin as unknown as FakeDb;
+  seed(db, { family_id: 'persona' }, { familyId: 'nano-banana', personaId: 'p-1' });
+  db.tables.personas = [];
+  const app = createApp(deps);
+
+  const res = await app.request('/api/generations/g1/retry', { method: 'POST', headers: AUTH });
+
+  assertEquals(res.status, 400);
+  assertEquals((await res.json()).error.code, 'persona_unavailable');
 });
 
 Deno.test('R15: a retry gets a FRESH quote, not the old price', async () => {
@@ -247,4 +295,37 @@ Deno.test('R15: a stranger cannot retry someone else\'s generation', async () =>
   const app = createApp(deps);
   const res = await app.request('/api/generations/g1/retry', { method: 'POST', headers: AUTH });
   assertEquals(res.status, 404);
+});
+
+Deno.test('R15: the retryable probe reads the persona kill switch, not its render family', async () => {
+  const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
+  const db = deps.admin as unknown as FakeDb;
+  seed(db, { family_id: 'persona' }, {
+    familyId: 'nano-banana', personaId: 'p-1',
+    settings: { aspectRatio: '3:4', version: 'pro', resolution: '4K' },
+  });
+  seedPersona(db);
+  const app = createApp(deps);
+  const on = await (await app.request('/api/generations/g1/retryable', { headers: AUTH })).json();
+  assertEquals(on.retry, true, 'a persona run with both switches on is retryable');
+
+  db.tables.models = db.tables.models.map((m) => m.id === 'persona' ? { ...m, enabled: false } : m);
+  const off = await (await app.request('/api/generations/g1/retryable', { headers: AUTH })).json();
+  assertEquals(off.retry, false, 'the persona switch alone must disable retry');
+});
+
+Deno.test('the retryable probe reports false when the persona is deleted or a draft', async () => {
+  for (const over of [{ deleted_at: '2026-09-23T01:00:00Z' }, { status: 'draft' }]) {
+    const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
+    const db = deps.admin as unknown as FakeDb;
+    seed(db, { family_id: 'persona' }, {
+      familyId: 'nano-banana', personaId: 'p-1',
+      settings: { aspectRatio: '3:4', version: 'pro', resolution: '4K' },
+    });
+    seedPersona(db, over);
+    const app = createApp(deps);
+    const body = await (await app.request('/api/generations/g1/retryable', { headers: AUTH })).json();
+    assertEquals(body.retry, false, JSON.stringify(over));
+    assertEquals(body.reason, 'That persona is missing or unfinished.');
+  }
 });

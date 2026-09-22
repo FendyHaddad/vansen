@@ -1,28 +1,19 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
-import {
-  CreatePersonaRequest,
-  PersonaDto,
-  PersonasResponse,
-  TrainPersonaResponse,
-} from '../api/dtos';
+import { CreatePersonaRequest, PersonaDto, PersonasResponse } from '../api/dtos';
 import { PersonaStatus } from '../enums';
-import { LedgerService } from '../ledger/ledger-service';
+import { PersonaSlot } from '../catalog/model-families';
 
-const POLL_MS = 10_000;
-
-/** API-backed persona list. GET /personas settles in-flight trainings server-side,
- * so polling is just re-loading while anything is 'training'. */
+/** API-backed persona list. A persona is ready as soon as its five slots are
+ * filled; nothing trains, so nothing polls. */
 @Injectable({ providedIn: 'root' })
 export class PersonaStore {
   private readonly api = inject(ApiService);
-  private readonly ledger = inject(LedgerService);
 
   private readonly itemsSig = signal<PersonaDto[]>([]);
   private readonly slotsSig = signal<{ used: number; max: number }>({ used: 0, max: 0 });
   private readonly loadedSig = signal(false);
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly items = this.itemsSig.asReadonly();
   readonly slots = this.slotsSig.asReadonly();
@@ -41,7 +32,6 @@ export class PersonaStore {
     this.itemsSig.set(res.items);
     this.slotsSig.set(res.slots);
     this.loadedSig.set(true);
-    this.syncPolling();
   }
 
   async create(request: CreatePersonaRequest): Promise<PersonaDto> {
@@ -51,13 +41,11 @@ export class PersonaStore {
     return res.item;
   }
 
-  async train(id: string, photoUploadIds: string[]): Promise<PersonaDto> {
-    const res = await this.api.post<TrainPersonaResponse>(`/personas/${id}/train`, {
-      photoUploadIds,
+  async setPhoto(id: string, slot: PersonaSlot, uploadId: string): Promise<PersonaDto> {
+    const res = await this.api.put<{ item: PersonaDto }>(`/personas/${id}/photos/${slot}`, {
+      uploadId,
     });
     this.itemsSig.update((list) => list.map((p) => (p.id === id ? res.item : p)));
-    this.ledger.setCredits(res.credits);
-    this.syncPolling();
     return res.item;
   }
 
@@ -71,17 +59,5 @@ export class PersonaStore {
     this.itemsSig.set([]);
     this.slotsSig.set({ used: 0, max: 0 });
     this.loadedSig.set(false);
-    this.syncPolling();
-  }
-
-  /** Poll while any persona is training; stop when none are. */
-  private syncPolling(): void {
-    const training = this.itemsSig().some((p) => p.status === PersonaStatus.Training);
-    if (training && !this.pollTimer) {
-      this.pollTimer = setInterval(() => void this.load(), POLL_MS);
-    } else if (!training && this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
   }
 }

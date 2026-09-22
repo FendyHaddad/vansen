@@ -61,7 +61,7 @@ export interface GenerateRequest {
   prompt: string;
   /** Style preset id, null = none. Server appends the modifier. */
   style: string | null;
-  /** Persona id, null = none. Server injects the trigger + locks to flux-lora. */
+  /** Persona id, null = none. The server renders it on Nano Banana Pro 4K with the persona's photos. */
   personaId: string | null;
   /** Trend the prompt was prefilled from, null = hand-written. */
   trendId: string | null;
@@ -402,8 +402,8 @@ export class LeftPanel {
 
   setPersona(id: string | null): void {
     this.persona.set(id);
-    // The likeness pipeline is text-to-image only — a lingering reference would
-    // silently flip the request to an edit op the server rejects.
+    // A persona supplies its own five references; a lingering composer
+    // reference would be dropped.
     if (id) this.reference.set(null);
     void this.prefsService.update({ defaultPersona: id ?? '' });
   }

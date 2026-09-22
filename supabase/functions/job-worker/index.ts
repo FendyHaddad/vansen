@@ -10,7 +10,6 @@ import { adapterFor } from './_shared/providers/index.ts';
 import { storageFor } from './_shared/storage/index.ts';
 import { parseServiceAccount, sendGenerationPush } from './_shared/push.ts';
 import { finishJob } from './_shared/jobs/store.ts';
-import { checkPersonaTraining, submitPersonaTraining } from './_shared/providers/fal.ts';
 import { resolvePayload } from './_shared/jobs/payload.ts';
 import type { ClaimedJob } from './_shared/jobs/lease.ts';
 import type { CheckResult } from './_shared/providers/types.ts';
@@ -39,15 +38,6 @@ const worker = createWorker({
     // submit stays unknown: it is held, backed off and alerted on, never
     // resubmitted and never refunded on a guess.
     reconcile: () => Promise.resolve('pending' as const),
-  },
-  training: {
-    signZip: async (path: string) => {
-      const { data, error } = await admin.storage.from('uploads').createSignedUrl(path, 3600);
-      if (error || !data?.signedUrl) throw new Error(`zip sign failed: ${error?.message}`);
-      return data.signedUrl;
-    },
-    submit: submitPersonaTraining,
-    check: checkPersonaTraining,
   },
   notifications: {
     account: parseServiceAccount(Deno.env.get('FCM_SERVICE_ACCOUNT')),

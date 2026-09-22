@@ -9,6 +9,8 @@ import { ApiService } from '../../../core/api/api-service';
 import { ModelAvailability } from '../../../core/models/model-availability';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { TREND_PRESETS } from '../../../core/catalog/trend-presets';
+import { PERSONA_SLOT_ORDER, personaGenCreditCost } from '../../../core/catalog/model-families';
+import { PersonaDto } from '../../../core/api/dtos';
 
 const PREFS = {
   defaultMode: 'image' as const,
@@ -45,6 +47,48 @@ function makeFixture(): { fixture: ComponentFixture<LeftPanel>; component: LeftP
 
 function makeComponent(): LeftPanel {
   return makeFixture().component;
+}
+
+const READY_PERSONA: PersonaDto = {
+  id: 'p1',
+  name: 'Me',
+  status: 'ready',
+  photos: PERSONA_SLOT_ORDER.map((slot) => ({ slot, url: 'https://x/p1.jpg' })),
+  thumbUrl: 'https://x/p1.jpg',
+  createdAt: '2026-07-24T00:00:00Z',
+};
+
+function makePersonaFixture(): { fixture: ComponentFixture<LeftPanel>; component: LeftPanel } {
+  TestBed.resetTestingModule();
+  TestBed.configureTestingModule({
+    imports: [LeftPanel],
+    providers: [
+      {
+        provide: LedgerService,
+        useValue: { totalCredits: () => 1000 },
+      },
+      {
+        provide: ProfileStore,
+        useValue: { isOwner: signal(true), proActive: signal(true), studioActive: signal(true) },
+      },
+      {
+        provide: PreferencesService,
+        useValue: { prefs: () => PREFS, update: () => Promise.resolve() },
+      },
+      { provide: ApiService, useValue: {} },
+      { provide: ModelAvailability, useValue: { disabled: () => false } },
+      {
+        provide: PersonaStore,
+        useValue: {
+          items: signal([READY_PERSONA]),
+          load: () => Promise.resolve(),
+          readyById: (id: string) => (id === READY_PERSONA.id ? READY_PERSONA : undefined),
+        },
+      },
+    ],
+  });
+  const fixture = TestBed.createComponent(LeftPanel);
+  return { fixture, component: fixture.componentInstance };
 }
 
 describe('LeftPanel trend tracking', () => {
@@ -334,5 +378,39 @@ describe('LeftPanel video reference slots', () => {
     const component = videoPanel('i2v');
     component.refSlots.set([]);
     expect(component.canGenerate()).toBe(false);
+  });
+});
+
+/**
+ * A persona supplies its own fixed pipeline: Nano Banana Pro at 4K. The
+ * Resolution control (and Quality, gated the same way) has nothing to offer
+ * there, and the price is the flat persona rate times the batch size.
+ */
+describe('LeftPanel persona pipeline', () => {
+  it('shows the persona chip, hides Resolution, and prices per-batch at the persona rate', () => {
+    const { fixture, component } = makePersonaFixture();
+    component.setPersona(READY_PERSONA.id);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Persona · Nano Banana Pro · 4K');
+    const labels = Array.from(fixture.nativeElement.querySelectorAll('.og-label')) as HTMLElement[];
+    expect(labels.some((el) => el.textContent?.trim().startsWith('Resolution'))).toBe(false);
+
+    component.setBatch('4');
+    expect(component.unitCredits()).toBe(personaGenCreditCost());
+    expect(component.priceCredits()).toBe(4 * personaGenCreditCost());
+  });
+
+  it('shows the per-image × batch price form on the Generate button', () => {
+    const { fixture, component } = makePersonaFixture();
+    component.setPersona(READY_PERSONA.id);
+    component.prompt.set('a portrait');
+    component.setBatch('4');
+    fixture.detectChanges();
+
+    const unit = personaGenCreditCost();
+    expect(fixture.nativeElement.querySelector('.gen-btn').textContent).toContain(
+      `${unit} cr × 4 = ${unit * 4} cr`,
+    );
   });
 });

@@ -38,6 +38,7 @@ function ctx(over: Partial<RetryContext> = {}, snapshot: Partial<typeof base> = 
     familyEnabled: true,
     entitled: true,
     expressible: true,
+    personaUnavailable: false,
     ...over,
   };
 }
@@ -170,4 +171,11 @@ Deno.test('a variation whose source is gone refuses on the reference, not the op
   );
   assert(!decision.ok);
   assertEquals(decision.refusal, 'reference_unavailable');
+});
+
+Deno.test('a persona run whose persona is gone refuses as persona_unavailable', () => {
+  const decision = planRetry(ctx({ personaUnavailable: true }, { personaId: 'p-1' }));
+  assert(!decision.ok);
+  assertEquals(decision.refusal, 'persona_unavailable');
+  assert(REFUSAL_MESSAGE[decision.refusal].length > 20);
 });

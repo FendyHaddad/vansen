@@ -346,10 +346,14 @@ on-device, no credits.
 migrations 0013–0015): 20 style presets (`src/app/core/catalog/style-presets.ts` →
 `_shared/style-presets.ts` via `sync-shared`, drift-guarded); server appends the style
 modifier before moderation, stored prompt stays clean, thumbs in `public/styles`.
-Personas = trained FLUX LoRA on fal (5–20 photos, fixed 350 cr, Studio 2 / Pro 5 slots,
-self-attested consent); `GET/POST/DELETE /personas`, `POST /personas/:id/train`,
-hidden `persona` family routes generation through fal flux-lora with trigger word
-injected server-side. 12 curated trends (`trend-presets.ts`) prefill the prompt box.
+Personas = five guided photos (front, left/right ¾, left/right profile; ≥1024px short
+edge), free to create, Studio 2 / Pro 5 slots, consent recorded; `GET/POST/DELETE
+/personas`, `PUT /personas/:id/photos/:slot`; hidden `persona` family = Google Nano
+Banana Pro (`gemini-3-pro-image`) at 4K with the five photos as labelled references and
+an identity instruction, 46 credits per image (`PERSONA_GEN.premium` 1.0 until the
+owner's likeness test). No training, no provider-held artifact. Spec:
+`docs/superpowers/specs/2026-09-23-persona-references-design.md`. 12 curated trends
+(`trend-presets.ts`) prefill the prompt box.
 Analytics: `x-vansen-client` header → `client` column on generations / personas /
 app_errors, `POST /errors` logs client errors, `backoffice_feature_usage(p_days)` RPC
 feeds the backoffice feature page.

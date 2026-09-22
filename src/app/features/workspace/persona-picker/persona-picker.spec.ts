@@ -5,21 +5,26 @@ import { PersonaPicker } from './persona-picker';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { PersonaDto } from '../../../core/api/dtos';
+import { PERSONA_SLOT_ORDER } from '../../../core/catalog/model-families';
 
 const READY: PersonaDto = {
   id: 'p1',
   name: 'Me',
   status: 'ready',
-  photoCount: 6,
+  photos: PERSONA_SLOT_ORDER.map((slot) => ({ slot, url: 'https://x/p1.jpg' })),
   thumbUrl: '',
-  error: null,
   createdAt: '2026-07-24T00:00:00Z',
-  trainedAt: '2026-07-24T00:05:00Z',
 };
-const TRAINING: PersonaDto = { ...READY, id: 'p2', name: 'Wife', status: 'training' };
+const DRAFT: PersonaDto = {
+  ...READY,
+  id: 'p2',
+  name: 'Wife',
+  status: 'draft',
+  photos: PERSONA_SLOT_ORDER.map((slot, i) => ({ slot, url: i === 0 ? 'https://x/p2.jpg' : null })),
+};
 
 describe('PersonaPicker', () => {
-  const items = signal<PersonaDto[]>([READY, TRAINING]);
+  const items = signal<PersonaDto[]>([READY, DRAFT]);
   const studioActive = signal(true);
   const storeMock = {
     items: items.asReadonly(),
