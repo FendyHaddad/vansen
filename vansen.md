@@ -316,7 +316,8 @@ anywhere until each family has passed the per-family checklist in the runbook.
 
 **Open items (carry-forward):**
 - Stripe still TEST mode; live keys flip once bank authorization clears.
-- `flux` has no agreed retail price (deferred 2026-09-22). Decide before enabling it.
+- `flux` [dev] withdrawn 2026-09-23 (it was priced above [pro]); Pro is the FLUX default,
+  and Pro/Flex/Max are priced by the margin formula like every other family.
 - Alert **delivery** is deferred: `0025` writes rows to `public.alerts` and
   nothing sends them anywhere. A person must run the query. Nothing pages anyone.
 - Production carries two objects no migration creates and no code reads —

@@ -112,7 +112,7 @@ export function normalizeGenerationRequest(
     // any image endpoint; the ratio rides inside `image_size`.
     return {
       ...base,
-      providerModel: lookup(verified.fluxModels, String(settings.version ?? 'dev'), 'version'),
+      providerModel: lookup(verified.fluxModels, String(settings.version ?? 'pro'), 'version'),
       providerSettings: { image_size: fluxDims(settings) },
     };
   }

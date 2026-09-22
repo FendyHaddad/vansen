@@ -110,18 +110,24 @@ The temporary harness and logs above are local review artifacts, not committed r
 
 ## Closeout checklist
 
-- [ ] Retain permanent failing regressions for the money and crash-recovery gaps, then fix and verify them.
-- [ ] Verify stuck-work escalation against repeated retries, not only untouched old rows.
-- [ ] Deploy and attest every changed backend component and its shared dependencies.
-- [ ] Resolve the FLUX pricing/enabled-state mismatch and D4 launch-locale decision.
-- [ ] Implement and verify dispatch/request-rate controls appropriate for public paid access.
-- [ ] Run all automated gates, including SQL/concurrency checks against the current disposable schema.
-- [ ] Record enabled-image-provider, paid-edit/persona, offline-completion and test-mode billing rehearsals.
-- [ ] Complete authenticated account-state, recovery, accessibility and browser/device qualification.
-- [ ] Qualify real editor model outputs and set resource limits from measured device results.
-- [ ] Record backup restoration, rollback, policy review and the operating procedure for accepted monitoring/staging reductions.
+Remaining work only, in the order to do it. Everything else from this review is
+fixed, committed and deployed (`c16b7fd`, attested 2026-09-22 — see
+`2026-09-20-release-evidence.md` §10).
 
-Video enablement and Stripe live activation remain outside this checklist by the owner's requested scope. This document authorizes neither implementation nor deployment.
+- [ ] **Recovery email.** Supabase dashboard: redirect allowlist for `/reset` and `/confirm`, templates, sender, recovery/resend rate limits, link lifetime ≤ 30 min. Then send one real email. See `2026-09-20-recovery-verification-log.md`.
+- [ ] **Persona artifact deletion.** Record fal's real capability or mark it `unsupported`, so account closure with a trained persona can finish.
+- [ ] **Schema drift.** Keep or drop `public.admins` and `profiles.monthly_budget`.
+- [ ] **Smokes.** Each enabled image provider, paid edits, persona (~$2.30), analytics, offline completion, and Stripe test-mode checkout/renewal/upgrade/downgrade/cancel/replay.
+- [ ] **Manual qualification.** Six account states, recovery links, cross-account teardown, keyboard and screen-reader flows, Safari, a low-memory device, and real editor model outputs with measured memory and FPS. Set the 40 MP / 80 MP / 192 MB limits from those numbers.
+- [ ] **Rehearsals and records.** Backup restore, rollback, legal/policy review, and the monitoring operating procedure for the accepted no-paging reduction.
+- [ ] **Leaked-password protection.** Enable after the Supabase Pro upgrade.
+- [ ] **Mobile catalog fixture.** Hand the Dart fixture in `contracts/catalog/` to the mobile repo.
+- [ ] **Clean-code revamp.** A maintainer without AI assistance can read and change the code. Hot spots: `supabase/functions/api/app.ts` (~4,100 lines), `workspace-page.ts`, `canvas-viewport.ts`, `tool-options.ts`, `model-families.ts`, `edit-session.ts`. Split by route group and feature, guard clauses over nesting, a short "how this module works" header per file. Behaviour must not change. Goes before MCP so the MCP tools land on a split `api`.
+- [ ] **MCP connection.** Let a signed-in user connect the AI assistant of their choice (Claude, ChatGPT, other MCP clients) to their Vansen account and generate through it. Likely shape: a remote MCP server with OAuth sign-in whose tools call the existing `api`, so pricing, moderation, rate limits and the ledger stay in one place. Design spec first.
+- [ ] **Website revamp.** Visual redesign of `features/landing`, `features/plans`, `features/legal`, `features/auth`; keep the capability-driven copy from P8.
+- [ ] **Left toolbar glow-up.** Redesign `features/workspace/left-panel` around the sectioned-rail language: uppercase micro-titles, muted labels, grouped controls, less visible state at once.
+
+Video enablement and Stripe live activation remain out of scope. This document authorizes neither implementation nor deployment.
 
 ---
 
@@ -143,73 +149,3 @@ Re-checked the same day against `main` at `ebdcbe2`. Every finding above still m
 10. **`docs/superpowers/punchlist.md` is stale.** It says `api` v44 and `0025` unapplied; production is v59 with schema `0025`. Update or delete so two documents do not disagree.
 11. **Mobile catalog fixture.** The Dart fixture in `contracts/catalog/` has not been handed to the mobile repo, so mobile is one catalog version behind. Mobile is out of scope for this release, but the handoff is pending.
 12. **Leaked-password protection** is off and gated to the Supabase Pro plan. Enable after the upgrade.
-
-## Consolidated pending list
-
-Ordered for fixing. Items 1–6 are the release blockers and required hardening from the body above; 7–20 are the remaining gaps; 21–24 are owner-requested and come last.
-
-1. Late Stripe invoice refills the current bucket (gap 1). Derive period from the paid invoice; keep the old-invoice-after-new-cycle regression.
-2. Saved provider reference does not recover a submitting job (gap 2). Poll known refs; give unknown submissions an operator resolution path.
-3. Crashed save claim blocks completion under a new lease (gap 3). Fence by lease ownership; make abandoned claims reclaimable.
-4. Apple refunds miss `iap:` grants and return 200 on lookup failure (gap 4).
-5. `billing_deliveries` has no runtime writer (gap 5). Persist the verified receipt before fulfillment, with retry and resolution state.
-6. Stuck-work escalation evades both mechanisms (gap 6). Track progress age and reconciliation attempts separately from `updated_at`. Add `moderation_unavailable` as an alert kind (omission 3).
-7. Commit the seven review regressions to the permanent suite (`/tmp/vansen-review-regressions_test.ts` may already be gone; rebuild from the table above).
-8. `deploy.sh` must deploy and attest `job-worker`, `cleanup-worker`, `stripe-webhook` and `appstore-webhook` whenever they or `_shared/` change. Stamp the worker's own version. Redeploy `job-worker` now; its bundle carries catalog `2026-09-21.1`.
-9. Price GPT reference images (omission 1) and drop `gpt-image` 1.5/2 (omission 2).
-10. Resolve FLUX: decide the retail price or set `flux.enabled = false`.
-11. Dispatch/request-rate limiting on the generation and upload routes.
-12. D4 launch locale: English-only decision or finish en/ms.
-13. Persona artifact deletion decision (omission 4) so account closure can finish.
-14. Recovery email configuration and first real send (omission 5).
-15. Drop dead RPCs (omission 6); decide on `public.admins` and `profiles.monthly_budget` (omission 7).
-16. CI `deno cache` step (omission 8). Refresh or delete the stale punchlist (omission 10).
-17. Run all gates with `VANSEN_LOCAL_DB` set against a fresh 0001→0025 reset.
-18. Smokes: each enabled image provider, paid edits, persona (~$2.30), analytics manual smoke, offline completion, Stripe test-mode checkout/renewal/upgrade/downgrade/cancel/replay.
-19. Manual qualification: six account states, recovery links, cross-account teardown, keyboard and screen-reader flows, Safari and a low-memory device, real editor model outputs with measured memory and FPS. Set the 40 MP / 80 MP / 192 MB limits from those numbers.
-20. Record backup restore and rollback rehearsals, the legal review, leaked-password protection after the Supabase Pro upgrade, and the monitoring operating procedure for the accepted no-paging reduction.
-21. ~~**Staging environment (owner request).**~~ **BUILT 2026-09-22** as a local stack, scoped by the owner to schema + API + UI — `npm run stage`, plan `2026-09-22-staging-environment.md`. Original ask, for the record: Supabase Cloud cannot host it: the org's projects are already used by production and by another project, `algawth`. Build staging on the open-source self-hosted Supabase stack (Docker: Postgres, GoTrue, Storage, Edge Runtime, Inbucket) so it mirrors production. The existing `npm run db:test:start` stack is Postgres-only and is not a substitute. Staging needs: the full 0001→0025 migration set, all Edge Functions deployed to the local runtime, Stripe test-mode webhook reaching it through a tunnel, an R2 or S3-compatible bucket stand-in, and seeded accounts in the six states. Once it exists, Gate A rows marked BLOCKED in the release evidence can run.
-22. **Clean-code revamp (owner request).** Goal: a maintainer without AI assistance can read and change the code. Known hot spots: `supabase/functions/api/app.ts` at ~4,100 lines, `workspace-page.ts` ~970, `canvas-viewport.ts` ~800, `tool-options.ts` ~790, `model-families.ts` ~790, `edit-session.ts` ~540. Split by route group and feature, name things for what they do, keep guard clauses over nesting, and add a short "how this module works" header per file. Behaviour must not change; the test suites are the safety net.
-23. **Website revamp (owner request).** The public site (`features/landing`, `features/plans`, `features/legal`, `features/auth`) needs a visual redesign. Keep the capability-driven copy from P8 so nothing promises an unshipped feature.
-24. **Left toolbar glow-up (owner request).** `features/workspace/left-panel` (500-line component, 282-line template, 392-line stylesheet) is too dense. Redesign around the sectioned-rail language already used elsewhere: uppercase micro-titles, muted labels, grouped controls, and less simultaneous visible state.
-
-Video enablement and Stripe live activation stay out of scope throughout.
-
----
-
-## Status 2026-09-23: fixes committed and deployed
-
-Everything below is committed on `main` (`5b5ddca` fixes, `a2a968a` staging,
-`c4ba8e4` cleanup) and live. Checked 2026-09-23: `supabase migration list --linked`
-shows 0001–0031 applied remotely; the live manifest reports `gitRevision c4ba8e4`,
-schema `0031`, catalog `2026-09-22.4`, `workerVersion v17`, deployed
-2026-09-22T11:14:01Z.
-
-| # | Item | State |
-|---|---|---|
-| 1 | Late Stripe invoice refill | **Fixed.** `invoicedEntitlement` reads plan and period from the paid invoice lines; the mirror is refreshed separately. Regressions in `stripe-webhook/handler_test.ts`. |
-| 2 | Saved provider reference not recovered | **Fixed.** `reconcileJob` polls a real `provider_ref`; `0029` adds the audited operator path `fn_resolve_uncertain_job` + `job_resolution_audit`. |
-| 3 | Crashed save claim | **Fixed.** `0026` `fn_claim_job_save` fences saving by the current lease and lets a replacement lease reclaim; `store.ts` uses it. |
-| 4 | Apple refunds | **Fixed.** Looks up `apple:` and `iap:` grants scoped to the user; lookup failures throw so Apple retries. `iap-grants_test.ts`. |
-| 5 | Receipt inbox writer | **Fixed.** `0027` + `deliverVerified` in `billing-fulfillment.ts`: both webhooks open the receipt right after signature verification, before any lookup that can fail; `user_id` is filled in on settle; unfulfillable deliveries stay open for `fn_paid_unfulfilled`. |
-| 6 | Escalation blind spots | **Fixed.** `0026` adds `progress_at` (trigger-maintained) and `reconcile_attempts`; `fn_check_alerts` uses them; dispatcher raises `jobs_stuck` after the threshold; `moderation_unavailable` is a critical alert kind that only an operator probe closes. |
-| 7 | Permanent regressions | **Done.** Deno tests plus `review_recovery.sql`, `billing_receipts.sql`, `job_resolution.sql`, `request_rate.sql`, `request_rate_concurrency.sh`. |
-| 8 | Deploy coverage | **Done, deployed 2026-09-22 (`c4ba8e4`).** `scripts/deploy-backend.mjs` deploys all five functions and writes a per-component receipt; `deploy.sh` attests each version. |
-| 9 | GPT reference pricing, drop 1.5/2 | **Done in `8189bac`.** Reference images priced at the documented worst case (`GPT_REFERENCE_TOKENS`); `openai_usage` log lines exist to replace it with a measured number. Default is `2.5-flare`; 1.5 and 2 removed. |
-| 10 | FLUX price/enabled mismatch | **Deferred by owner** (next decision). |
-| 11 | Request-rate limiting | **Fixed.** `0028` `fn_take_request_slot`, 20 generation + 30 upload requests per user per minute, enforced before parsing, moderation or reservation; fails closed on DB outage. |
-| 12 | D4 launch locale | **Decided: English-only.** `LOCALE_ID` = `en-US` in `app.config.ts`; spec, `vansen.md`, evidence and punchlist updated. |
-| 13 | Persona artifact deletion | **Deferred by owner** (next decision). |
-| 14 | Recovery email configuration | **Pending, owner-run** (Supabase dashboard: redirect allowlist, templates, sender, link lifetime). |
-| 15 | Dead RPCs / schema drift | **RPCs dropped in `0030`.** `public.admins` and `profiles.monthly_budget` still need the owner's keep-or-drop call. |
-| 16 | CI cache, stale punchlist | **Done.** `deno cache --frozen` step added; punchlist refreshed. |
-| 17 | All gates against fresh schema | **Green.** `npm run verify` exit 0 with `VANSEN_LOCAL_DB` after `supabase db reset --local` (0001→0030): 568 Deno, 579 web, script tests, 16 SQL gates, production build. |
-| 18–20 | Smokes, manual qualification, rehearsals | **Pending, owner-run.** Unchanged. |
-| 21 | Staging | **Built 2026-09-22**, local only, committed in `a2a968a` — `npm run stage`. Adds `0031_service_role_table_grants.sql`. |
-| 22–24 | Clean-code, website, toolbar | **Deferred by owner** (next decision). |
-
-### Remaining
-
-- **Record the deploy** in `2026-09-20-release-evidence.md` (a deploy is not a release).
-- **Owner decisions:** FLUX price or disable (#10); persona artifact deletion (#13); keep or drop `public.admins` and `profiles.monthly_budget` (#15); clean-code, website and toolbar revamps (#22–24).
-- **Owner-run:** recovery email configuration and first real send (#14); smokes (#18); manual qualification (#19); rehearsals, legal review, leaked-password protection, monitoring procedure (#20).

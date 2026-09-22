@@ -30,18 +30,12 @@
     "9:16:4K": "2160x3840"
   },
   "fluxModels": {
-    "dev": "fal-ai/flux-2",
     "pro": "fal-ai/flux-2-pro",
     "flex": "fal-ai/flux-2-flex",
     "max": "fal-ai/flux-2-max"
   },
-  "_fluxSizeRule": "Every FLUX.2 endpoint takes image_size as {width,height} and NO aspect_ratio. [dev] clamps both edges to 512-2048. [pro], [flex] and [max] (fal OpenAPI schemas, 2026-09-22) take 256-2560 per edge, both divisible by 16, max area 4,194,304 px; none documents an image input. FLUX_DIMS in the catalog satisfies all four; the 4MP tier is WITHHELD off-square via resolutionExclusions because no ratio but 1:1 reaches 4MP inside the edge limits.",
-  "_fluxProviderRate": "fal quotes: dev $0.012 per megapixel (retail does NOT track it - the flat fluxTierUsd below is the deliberate 2.5x price, owner decision); pro $0.03 first MP + $0.015 per extra MP; flex $0.05 per MP; max $0.07 first MP + $0.03 per extra MP, each 'rounded up to the nearest megapixel'. fal's own 1024x1024 example prices as ONE megapixel, so 1 MP = 1,048,576 px; every FLUX_DIMS size is at or under its tier in those units. pro/flex/max retail = published rate through the margin formula.",
-  "fluxTierUsd": {
-    "1MP": 0.03,
-    "2MP": 0.06,
-    "4MP": 0.12
-  },
+  "_fluxSizeRule": "Every FLUX.2 endpoint takes image_size as {width,height} and NO aspect_ratio. [pro], [flex] and [max] (fal OpenAPI schemas, 2026-09-22) take 256-2560 per edge, both divisible by 16, max area 4,194,304 px; none documents an image input. FLUX_DIMS in the catalog satisfies all three; the 4MP tier is WITHHELD off-square via resolutionExclusions because no ratio but 1:1 reaches 4MP inside the edge limits.",
+  "_fluxProviderRate": "fal quotes: pro $0.03 first MP + $0.015 per extra MP; flex $0.05 per MP; max $0.07 first MP + $0.03 per extra MP, each 'rounded up to the nearest megapixel'. fal's own 1024x1024 example prices as ONE megapixel, so 1 MP = 1,048,576 px; every FLUX_DIMS size is at or under its tier in those units. Retail = published rate through the margin formula. [dev] (fal-ai/flux-2) withdrawn 2026-09-23.",
   "seedreamModels": {
     "4": {
       "generate": "fal-ai/bytedance/seedream/v4/text-to-image",

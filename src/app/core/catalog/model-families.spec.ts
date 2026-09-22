@@ -121,9 +121,6 @@ describe('model families', () => {
   it('flux tiers follow fal’s published rate per version', () => {
     const flux = familyById('flux')!;
     const at = (version: string, resolution: string) => flux.providerCost({ version, aspectRatio: '1:1', resolution });
-    // dev keeps the deliberate flat tiers (owner decision, 2.5x fal's $0.012/MP).
-    expect(at('dev', '1MP')).toBeCloseTo(0.03);
-    expect(at('dev', '4MP')).toBeCloseTo(0.12);
     // pro: $0.03 first MP + $0.015 per extra; flex $0.05/MP; max $0.07 + $0.03.
     expect(at('pro', '1MP')).toBeCloseTo(0.03);
     expect(at('pro', '2MP')).toBeCloseTo(0.045);
@@ -131,7 +128,8 @@ describe('model families', () => {
     expect(at('flex', '2MP')).toBeCloseTo(0.1);
     expect(at('max', '1MP')).toBeCloseTo(0.07);
     expect(at('max', '4MP')).toBeCloseTo(0.16);
-    expect(defaultSettings(flux).version).toBe('dev');
+    expect(defaultSettings(flux).version).toBe('pro');
+    expect(flux.capabilities.versions!.map((v) => v.value)).toEqual(['pro', 'flex', 'max']);
   });
 
   it('every flux size fits its megapixel tier in fal units and is divisible by 16', () => {
@@ -392,13 +390,13 @@ describe('persona pricing', () => {
 describe('FLUX resolution tiers match what the endpoint can produce', () => {
   const flux = () => familyById('flux')!;
 
-  it('prices each tier flat, the same at every aspect ratio', () => {
+  it('prices each tier the same at every aspect ratio', () => {
     for (const aspectRatio of ['1:1', '16:9', '9:16', '4:3', '3:4']) {
       expect(flux().providerCost({ aspectRatio, resolution: '1MP' })).toBeCloseTo(0.03);
-      expect(flux().providerCost({ aspectRatio, resolution: '2MP' })).toBeCloseTo(0.06);
+      expect(flux().providerCost({ aspectRatio, resolution: '2MP' })).toBeCloseTo(0.045);
     }
-    expect(flux().providerCost({ aspectRatio: '1:1', resolution: '4MP' })).toBeCloseTo(0.12);
-    expect(creditCost(flux(), { aspectRatio: '1:1', resolution: '4MP' })).toBe(20);
+    expect(flux().providerCost({ aspectRatio: '1:1', resolution: '4MP' })).toBeCloseTo(0.075);
+    expect(creditCost(flux(), { aspectRatio: '1:1', resolution: '4MP' })).toBe(13);
   });
 
   it('offers 4MP at 1:1, where 2048x2048 really is 4 megapixels', () => {

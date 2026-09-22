@@ -61,7 +61,7 @@ Deno.test('flux: calls the endpoint the catalog actually sells', async () => {
   await falAdapter.submit(ctx('flux', { aspectRatio: '1:1', resolution: '1MP' }));
   await falAdapter.submit(ctx('flux', { aspectRatio: '1:1', resolution: '1MP', version: 'max' }));
   cap.restore();
-  assertEquals(cap.calls[0].url.endsWith('fal-ai/flux-2'), true);
+  assertEquals(cap.calls[0].url.endsWith('fal-ai/flux-2-pro'), true);
   assertEquals(cap.calls[1].url.endsWith('fal-ai/flux-2-max'), true);
 });
 

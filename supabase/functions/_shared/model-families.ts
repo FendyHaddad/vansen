@@ -5,7 +5,7 @@
  * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
  * hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-22.4';
+export const CATALOG_VERSION = '2026-09-23.1';
 
 export type ModelKind = 'image' | 'video';
 export type AxisId = 'version' | 'aspectRatio' | 'resolution' | 'quality' | 'duration' | 'audio';
@@ -132,10 +132,9 @@ export const PROMPT_TOKEN_ALLOWANCE = 800;
 const AR_IMAGE = ['1:1', '3:4', '4:3', '16:9', '9:16'];
 
 /**
- * FLUX.2 takes `image_size` as `{width, height}`. [dev] clamps both edges to
- * 512–2048; [pro], [flex] and [max] take 256–2560 with a 4,194,304 px area
- * cap and want both edges divisible by 16. Every size below satisfies all four
- * endpoints, and every tier's pixel count is at or under its megapixel label
+ * FLUX.2 takes `image_size` as `{width, height}`. [pro], [flex] and [max]
+ * take 256–2560 per edge with a 4,194,304 px area cap and want both edges
+ * divisible by 16. Every size below satisfies all three endpoints, and every tier's pixel count is at or under its megapixel label
  * in fal's units (1 MP = 1,048,576 px, which is how fal's own 1024×1024
  * example prices as one megapixel), so "rounded up to the nearest megapixel"
  * bills exactly the tier. Only 1:1 reaches 4MP inside the edge limits, which
@@ -164,35 +163,21 @@ export const FLUX_DIMS: Record<string, { width: number; height: number }> = {
 const FLUX_MP: Record<string, number> = { '1MP': 1, '2MP': 2, '4MP': 4 };
 
 /**
- * Flat price per tier for FLUX.2 [dev]. fal bills it at $0.012 per megapixel,
- * but a per-megapixel charge makes the credit ladder non-monotonic once it is
- * rounded to whole credits — two adjacent sizes can cost the same, and a wide
- * 4MP can cost less than a square 2MP. These tiers are the deliberate retail
- * shape (a 2.5× markup, owner decision); the edge clamp is handled by not
- * offering a tier we cannot fill (see `resolutionExclusions`).
- */
-export const FLUX_TIER_USD: Record<string, number> = {
-  '1MP': 0.03,
-  '2MP': 0.06,
-  '4MP': 0.12,
-};
-
-/**
- * The three dearer FLUX.2 endpoints are priced at fal's published rate, read
- * off each model page on 2026-09-22, and carried through the margin formula
- * like every other family:
+ * FLUX.2 is priced at fal's published rate, read off each model page on
+ * 2026-09-22, and carried through the margin formula like every other family:
  *   pro   $0.03 for the first megapixel, $0.015 per extra
  *   flex  $0.05 per megapixel
  *   max   $0.07 for the first megapixel, $0.03 per extra
  * Text-to-image only, so the "input side" fal mentions is zero for us.
+ * [dev] was withdrawn 2026-09-23: it cost more than [pro] under its flat
+ * retail tiers, and its open weights carry a non-commercial licence.
  */
 function fluxProviderCost(s: GenerationSettings): number {
   const mp = FLUX_MP[s.resolution ?? '1MP'] ?? 1;
-  const version = s.version ?? 'dev';
-  if (version === 'pro') return 0.03 + 0.015 * (mp - 1);
+  const version = s.version ?? 'pro';
   if (version === 'flex') return 0.05 * mp;
   if (version === 'max') return 0.07 + 0.03 * (mp - 1);
-  return FLUX_TIER_USD[s.resolution ?? '1MP'] ?? FLUX_TIER_USD['1MP'];
+  return 0.03 + 0.015 * (mp - 1);
 }
 
 export function fluxDims(s: GenerationSettings): { width: number; height: number } {
@@ -554,16 +539,15 @@ export const MODEL_FAMILIES: ModelFamily[] = [
     provider: 'Black Forest Labs',
     logo: '/logos/bfl.svg',
     kind: 'image',
-    blurb: 'FLUX.2 — photoreal detail; Dev, Pro, Flex and Max tiers.',
+    blurb: 'FLUX.2 — photoreal detail; Pro, Flex and Max tiers.',
     capabilities: {
       versions: [
         {
-          value: 'dev',
-          label: 'Dev',
+          value: 'pro',
+          label: 'Pro',
           isDefault: true,
-          tooltip: 'FLUX.2 [dev] — the open-weights model. Cheapest FLUX.',
+          tooltip: 'FLUX.2 [pro] — production quality, fast. Cheapest FLUX.',
         },
-        { value: 'pro', label: 'Pro', tooltip: 'FLUX.2 [pro] — production quality, fast.' },
         {
           value: 'flex',
           label: 'Flex',

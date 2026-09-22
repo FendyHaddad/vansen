@@ -39,12 +39,22 @@ Deno.test('a withdrawn gpt-image version is refused, not silently remapped', () 
   }
 });
 
-Deno.test('flux versions reach the wire as distinct endpoints, dev by default', () => {
-  const slugs = ['dev', 'pro', 'flex', 'max'].map(
+Deno.test('flux versions reach the wire as distinct endpoints, pro by default', () => {
+  const slugs = ['pro', 'flex', 'max'].map(
     (version) => norm('flux', { aspectRatio: '1:1', resolution: '1MP', version }).providerModel,
   );
-  assertEquals(slugs, ['fal-ai/flux-2', 'fal-ai/flux-2-pro', 'fal-ai/flux-2-flex', 'fal-ai/flux-2-max']);
-  assertEquals(norm('flux', { aspectRatio: '1:1', resolution: '1MP' }).providerModel, 'fal-ai/flux-2');
+  assertEquals(slugs, ['fal-ai/flux-2-pro', 'fal-ai/flux-2-flex', 'fal-ai/flux-2-max']);
+  assertEquals(norm('flux', { aspectRatio: '1:1', resolution: '1MP' }).providerModel, 'fal-ai/flux-2-pro');
+});
+
+Deno.test('the withdrawn flux dev version is refused, not silently remapped', () => {
+  let threw = '';
+  try {
+    norm('flux', { aspectRatio: '1:1', resolution: '1MP', version: 'dev' });
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  assertEquals(threw.startsWith('unsupported_version'), true, `dev: "${threw}"`);
 });
 
 Deno.test('seedream versions reach the wire as distinct endpoints, edit when a reference rides along', () => {

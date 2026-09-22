@@ -117,13 +117,15 @@ Deno.test('rejects a version on a family that has none', () => {
   assertEquals(result?.allowed, []);
 });
 
-Deno.test('flux accepts its four versions and refuses an unknown one', () => {
+Deno.test('flux accepts its three versions and refuses withdrawn or unknown ones', () => {
   const family = familyById('flux')!;
-  for (const version of ['dev', 'pro', 'flex', 'max']) {
+  for (const version of ['pro', 'flex', 'max']) {
     assertEquals(validateSettings(family, { aspectRatio: '1:1', resolution: '1MP', version }), null);
   }
-  const result = validateSettings(family, { aspectRatio: '1:1', resolution: '1MP', version: 'schnell' });
-  assertEquals(result?.field, 'version');
+  for (const version of ['dev', 'schnell']) {
+    const result = validateSettings(family, { aspectRatio: '1:1', resolution: '1MP', version });
+    assertEquals(result?.field, 'version', version);
+  }
 });
 
 Deno.test('rejects an unsupported aspect ratio', () => {
