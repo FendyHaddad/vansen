@@ -184,6 +184,16 @@ function harness(
   db.tables.jobs = [
     { id: 'j0', user_id: 'u0', generation_id: 'g0', claimed_at: null, attempts: 0, error: null },
   ];
+  db.rpcHandlers.fn_claim_job_save = (args) => {
+    const row = db.tables.jobs[0];
+    const token = args.p_token;
+    if (token != null) {
+      if (row.lease_token !== token || String(row.lease_until) <= new Date().toISOString() || row.save_lease_token === token) return false;
+    } else if (row.lease_token != null || row.claimed_at != null) return false;
+    row.claimed_at = new Date().toISOString();
+    row.save_lease_token = token;
+    return true;
+  };
   const settles: Row[] = [];
   db.rpcHandlers.fn_settle_job = (args, self) => {
     settles.push(args);
@@ -332,7 +342,7 @@ Deno.test('a stale lease loses the race and its object is queued for cleanup', a
   // best-effort delete that failed used to take the locator with it.
   assertEquals(h.db.tables.deletion_outbox.length, 1);
   assertEquals(h.db.tables.deletion_outbox[0].reason, 'orphaned_output');
-  assertEquals(h.db.tables.deletion_outbox[0].object_path, 'u0/g0-0.png');
+  assertEquals(h.db.tables.deletion_outbox[0].object_path, 'u0/g0-expired.png');
 });
 
 Deno.test('the lease token is handed to the settlement', async () => {
@@ -492,4 +502,19 @@ Deno.test('a video object is registered against the configured R2 bucket', async
   assertEquals(object.backend, 'r2');
   assertEquals(object.bucket, 'vansen-test');
   assertEquals(object.state, 'live');
+});
+
+Deno.test('replacement lease reclaims abandoned saving work', async () => {
+  const h = harness({ kind: 'video', fetchImpl: respond(new Uint8Array([1, 2, 3]), { type: 'video/mp4', length: '3' }) });
+  Object.assign(h.db.tables.jobs[0], { claimed_at: '2020-01-01T00:00:00Z', lease_token: 'new-lease', lease_until: '2099-01-01T00:00:00Z', save_lease_token: 'old-lease' });
+  await finishJob(h.deps, { ...JOB, lease_token: 'new-lease' }, { state: 'done', url: 'https://provider/video', contentType: 'video/mp4' });
+  assertEquals(h.r2.puts.length, 1);
+  assertEquals(h.db.tables.generations[0].status, 'done');
+});
+Deno.test('a stale save lease cannot download or clear a replacement claim', async () => {
+  let downloads = 0;
+  const h = harness({ kind: 'video', fetchImpl: () => { downloads++; return Promise.resolve(new Response()); } });
+  Object.assign(h.db.tables.jobs[0], { lease_token: 'new-lease', lease_until: '2099-01-01T00:00:00Z' });
+  await finishJob(h.deps, { ...JOB, lease_token: 'old-lease' }, { state: 'done', url: 'https://provider/video', contentType: 'video/mp4' });
+  assertEquals(downloads, 0);
 });

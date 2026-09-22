@@ -1,6 +1,6 @@
 {
   "cliVersion": "2.114.0",
-  "recordedAt": "2026-09-21",
+  "recordedAt": "2026-09-22",
   "note": "Regenerate with: node scripts/supabase-test-stack.mjs write-manifest",
   "migrations": [
     {
@@ -106,6 +106,26 @@
     {
       "file": "0025_release_telemetry.sql",
       "sha256": "4b40e52e01c4"
+    },
+    {
+      "file": "0026_review_recovery.sql",
+      "sha256": "b229028ad3e2"
+    },
+    {
+      "file": "0027_billing_receipts.sql",
+      "sha256": "c9aebb8fc223"
+    },
+    {
+      "file": "0028_request_rate_limits.sql",
+      "sha256": "0ce954d28f0b"
+    },
+    {
+      "file": "0029_job_resolution.sql",
+      "sha256": "53b6bdf8e4c0"
+    },
+    {
+      "file": "0030_drop_legacy_grant_rpcs.sql",
+      "sha256": "ff070bcf143f"
     }
   ]
 }

@@ -42,6 +42,12 @@ export function installDispatchRpcs(db: FakeDb): void {
     job.provider_ref = args.p_ref;
     return true;
   };
+  db.rpcHandlers.fn_count_reconciliation = (args) => {
+    const job = leased(args);
+    if (!job) return null;
+    job.reconcile_attempts = Number(job.reconcile_attempts ?? 0) + 1;
+    return job.reconcile_attempts;
+  };
   db.rpcHandlers.fn_count_poll = (args) => {
     const job = leased(args);
     if (!job) return false;

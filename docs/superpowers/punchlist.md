@@ -7,9 +7,11 @@ the deployment procedure is
 [`plans/2026-09-20-release-runbook.md`](plans/2026-09-20-release-runbook.md).
 Where this file and those disagree, those win.
 
-Automated gates at 2026-09-22: 574 vitest, 535 deno, 72 script tests, SQL and
-concurrency gates against a database reset from empty (0001→0025), production
-build clean. **`npm run verify` exits 0** with `VANSEN_LOCAL_DB` set.
+Automated gates at 2026-09-22 (evening): 579 vitest, 568 deno, script tests, 16 SQL
+and concurrency gates against a database reset from empty (0001→0030), production
+build clean. **`npm run verify` exits 0** with `VANSEN_LOCAL_DB` set. Migrations
+0026–0030 and the review fixes are local and uncommitted; see the status table at
+the end of `plans/post-implementation-review.md`.
 
 Production at 2026-09-22 (read from `/manifest` and the function inventory):
 `api` v59 at revision `ebdcbe2`, schema `0025`, catalog `2026-09-22.3`;
@@ -73,9 +75,9 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 - **Abuse controls from spec, not built** — concurrent-session cap / account-sharing
   heuristics and a dispatch/request-rate limit on the generation and upload routes.
   The daily provider-spend alarm now exists (`provider_burn` in `0025`).
-- **i18n / D4** — spec calls for en + ms; nothing started. Needs an explicit
-  English-only launch decision or the translation funded
-  (`specs/2026-09-20-launch-locales.md`).
+- **i18n / D4** — DECIDED 2026-09-22: English-only at launch (`LOCALE_ID` =
+  `en-US`). Malay is a post-launch item; scope brief in
+  `specs/2026-09-20-launch-locales.md` Option B.
 - **Catalog follow-ups** — price GPT reference images (input tokens at $8/1M are
   not charged today); drop `gpt-image` 1.5 and 2 per owner direction (`isDefault`
   still `'2'`); decide FLUX retail price or disable `flux`

@@ -136,13 +136,13 @@ export async function pollJob(deps: JobDeps, job: ClaimedJob): Promise<void> {
     });
     return;
   }
+  if (!await countPoll(deps.admin, job.id, job.lease_token)) return;
   const adapter = deps.adapterFor(job.family_id);
   if (job.cancel_requested_at) {
     const stopped = await cancelWithProvider(deps, job, adapter, ref);
     if (stopped) return;
   }
 
-  await countPoll(deps.admin, job.id, job.lease_token);
   let result: CheckResult;
   try {
     result = await adapter.check(ref);
@@ -217,6 +217,13 @@ async function cancelWithProvider(
 // -------------------------------------------------------------- reconciling
 
 export async function reconcileJob(deps: JobDeps, job: ClaimedJob): Promise<void> {
+  // Inline bytes cannot be fetched again. A real remote reference can.
+  if (job.provider_ref && job.provider_ref !== 'inline') return await pollJob(deps, job);
+  const { data: attempts, error } = await deps.admin.rpc('fn_count_reconciliation', {
+    p_job: job.id, p_token: job.lease_token,
+  });
+  if (error) throw new Error(`reconciliation_count_failed ${error.message}`);
+  if (attempts == null) return; // Lost lease: do not act on stale ownership.
   const found = await deps.reconcile(job).catch((e) => {
     console.error('dispatch_reconcile_failed', job.id, String(e).slice(0, 200));
     return 'pending' as const;
@@ -241,9 +248,12 @@ export async function reconcileJob(deps: JobDeps, job: ClaimedJob): Promise<void
 
   // Still unknown. Back off and keep it — a retry count is not evidence that a
   // paid remote job failed, so this never becomes a refund on its own.
-  const attempts = job.submit_attempts + job.poll_attempts;
   if (attempts >= RECONCILE_ALERT_AFTER) {
-    console.error('dispatch_reconcile_stuck', job.id, job.dispatch_key, attempts);
+    const { error } = await deps.admin.rpc('fn_raise_alert', {
+      p_kind: 'jobs_stuck', p_severity: 'warn',
+      p_detail: { jobId: job.id, dispatchKey: job.dispatch_key, attempts },
+    });
+    if (error) throw new Error(`reconciliation_alert_failed ${error.message}`);
   }
   await releaseJob(deps.admin, job.id, job.lease_token, {
     state: 'reconciling',

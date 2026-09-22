@@ -551,6 +551,30 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     await next();
   });
 
+  // Shared database budgets survive cold starts and concurrent API instances.
+  // Run before parsing uploads, moderation, or reserving provider spend.
+  app.use("*", async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    const bucket = c.req.method !== "POST" ? null
+      : path === "/api/generations" || /^\/api\/generations\/[^/]+\/retry$/.test(path)
+      ? "generation"
+      : path === "/api/uploads" || path === "/api/edits/save" ? "upload" : null;
+    if (bucket) {
+      const { data, error } = await admin.rpc("fn_take_request_slot", {
+        p_user: c.get("userId"), p_bucket: bucket,
+      });
+      if (error || !data) {
+        return fail(c, 503, "request_limit_unavailable", "Requests are temporarily unavailable. Please try again shortly.");
+      }
+      if (!data.allowed) {
+        const res = fail(c, 429, "rate_limited", "Too many requests. Please wait a moment and try again.");
+        res.headers.set("retry-after", String(data.retryAfterSeconds));
+        return res;
+      }
+    }
+    await next();
+  });
+
   /** Warm-isolate memo so list reloads don't re-sign every media path, and the
    * URL stays stable across requests (lets browser HTTP caching work too). */
   const signedUrlMemo = new Map<string, { url: string; expiresAt: number }>();
@@ -858,10 +882,10 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   /** One response for a moderation outage: readable, retryable, never charged. */
-  function moderationFailure(
+  async function moderationFailure(
     c: Context,
     decision: Extract<ModerationDecision, { state: "unavailable" }>,
-  ): Response {
+  ): Promise<Response> {
     const res = fail(
       c,
       503,
@@ -870,6 +894,11 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     );
     res.headers.set("retry-after", String(decision.retryAfterSeconds));
     console.error("moderation_unavailable", decision.reason);
+    const { error } = await admin.rpc("fn_raise_alert", {
+      p_kind: "moderation_unavailable", p_severity: "critical",
+      p_detail: { reason: decision.reason },
+    });
+    if (error) console.error("moderation_alert_failed", error.message);
     return res;
   }
 
@@ -1019,7 +1048,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     if (!kept) {
       return {
         ok: false,
-        response: moderationFailure(c, {
+        response: await moderationFailure(c, {
           state: "unavailable",
           reason: "quarantine_copy_failed",
           retryAfterSeconds: 10,
@@ -1061,7 +1090,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       );
       return {
         ok: false,
-        response: moderationFailure(c, {
+        response: await moderationFailure(c, {
           state: "unavailable",
           reason: "moderation_sign_failed",
           retryAfterSeconds: 10,
@@ -1071,7 +1100,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const decision = await moderate({ imageUrl: signed.signedUrl });
     if (decision.state === "unavailable") {
       await admin.storage.from("uploads").remove([path]);
-      return { ok: false, response: moderationFailure(c, decision) };
+      return { ok: false, response: await moderationFailure(c, decision) };
     }
     if (decision.state === "blocked") {
       return refuseBlockedImage(c, userId, path, ext, decision.categories);

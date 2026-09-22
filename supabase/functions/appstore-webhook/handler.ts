@@ -8,9 +8,12 @@ import {
   applyIapTransaction,
   clawBackIap,
   findUserByOriginalTransaction,
+  type IapResult,
   type IapTransaction,
+  type OpenDelivery,
   setIapSubscriptionStatus,
 } from './_shared/iap-grants.ts';
+import { deliverVerified, type Settlement } from './_shared/billing-fulfillment.ts';
 
 // deno-lint-ignore no-explicit-any
 type Decoded = any;
@@ -25,6 +28,13 @@ function statusFor(action: string): 'active' | 'canceled' | 'expired' {
   if (action === 'set_active') return 'active';
   if (action === 'set_canceled') return 'canceled';
   return 'expired';
+}
+
+/** A revoked or expired transaction owes nothing; an unknown product does. */
+function settlementOf(result: IapResult): Settlement {
+  if (result.outcome !== 'rejected') return 'granted';
+  if (result.rejection === 'unknown_product') return 'unfulfillable:unknown_product';
+  return 'nothing_owed';
 }
 
 export function createAppstoreWebhook(
@@ -61,18 +71,29 @@ export function createAppstoreWebhook(
       return;
     }
 
-    const userId = tx.appAccountToken ??
-      await findUserByOriginalTransaction(admin, tx.originalTransactionId);
-    if (!userId) {
-      console.error('no user for iap transaction', tx.originalTransactionId);
-      return;
-    }
-
-    if (action === 'refund') {
-      await clawBackIap(admin, userId, tx, eventAt);
-      return;
-    }
-    await applyIapTransaction(admin, userId, tx, eventAt);
+    // Money from here on. The receipt is written before the account lookup,
+    // so a verified refund or purchase we then fail to place stays visible.
+    const delivery: OpenDelivery = { eventId: payload.notificationUUID, receiptOpen: true };
+    const businessTxnId = action === 'refund' ? `refund:${tx.transactionId}` : tx.transactionId;
+    await deliverVerified(admin, {
+      source: 'apple',
+      eventId: delivery.eventId,
+      businessTxnId,
+      userId: tx.appAccountToken ?? null,
+      request: { notificationType: payload.notificationType, subtype: payload.subtype, productId: tx.productId },
+    }, async () => {
+      const userId = tx.appAccountToken ??
+        await findUserByOriginalTransaction(admin, tx.originalTransactionId);
+      if (!userId) {
+        console.error('no user for iap transaction', tx.originalTransactionId);
+        return 'unfulfillable:no_user';
+      }
+      if (action === 'refund') {
+        const clawedBack = await clawBackIap(admin, userId, tx, eventAt, delivery);
+        return clawedBack ? 'granted' : 'unfulfillable:unknown_iap_grant';
+      }
+      return settlementOf(await applyIapTransaction(admin, userId, tx, eventAt, Date.now(), delivery));
+    });
   }
 
   return async function serve(req: Request): Promise<Response> {

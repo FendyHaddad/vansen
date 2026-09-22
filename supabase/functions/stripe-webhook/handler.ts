@@ -8,7 +8,12 @@
 import type Stripe from 'npm:stripe@17';
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { CREDIT_PACKS, packCredits, PLAN_CREDITS } from './_shared/model-families.ts';
-import { applyFulfillment } from './_shared/billing-fulfillment.ts';
+import {
+  applyFulfillment,
+  deliverVerified,
+  type Settlement,
+  type VerifiedReceipt,
+} from './_shared/billing-fulfillment.ts';
 
 /** What the server recorded when it created the pack checkout. The grant is
  * recomputed from this through the catalog — never read off the session. */
@@ -49,6 +54,37 @@ export function periodEndIso(sub: Stripe.Subscription): string {
   const epoch = top ?? item?.current_period_end;
   if (!epoch) throw new Error(`no current_period_end on subscription ${sub.id}`);
   return new Date(epoch * 1000).toISOString();
+}
+
+/** Entitlements belong to the paid line, never to today's mutable subscription. */
+function invoicedEntitlement(
+  invoice: Stripe.Invoice,
+  subscriptionId: string,
+  priceIds: StripeWebhookDeps['priceIds'],
+): { plan: 'studio' | 'pro'; periodEnd: string } {
+  if (!invoice.lines || invoice.lines.has_more) throw new Error('incomplete_invoice_lines');
+  const entitlements = new Map<string, { plan: 'studio' | 'pro'; periodEnd: string }>();
+  for (const raw of invoice.lines.data) {
+    const line = raw as unknown as {
+      type?: string; subscription?: string | { id: string }; amount: number;
+      price?: { id: string }; period?: { end?: number };
+      parent?: { subscription_item_details?: { subscription?: string } };
+      pricing?: { price_details?: { price?: string | { id: string } } };
+    };
+    const linked = line.parent?.subscription_item_details?.subscription ?? line.subscription;
+    const linkedId = typeof linked === 'string' ? linked : linked?.id;
+    if (linkedId !== subscriptionId || line.amount < 0) continue;
+    const price = line.pricing?.price_details?.price ?? line.price;
+    const id = typeof price === 'string' ? price : price?.id;
+    const plan = id && id === priceIds.pro ? 'pro' : id && id === priceIds.studio ? 'studio' : null;
+    if (!plan) throw new Error('unrecognized_invoice_price');
+    const epoch = line.period?.end;
+    if (!epoch || !Number.isFinite(epoch)) throw new Error('missing_invoice_period');
+    const periodEnd = new Date(epoch * 1000).toISOString();
+    entitlements.set(`${plan}:${periodEnd}`, { plan, periodEnd });
+  }
+  if (entitlements.size !== 1) throw new Error('ambiguous_invoice_entitlement');
+  return [...entitlements.values()][0];
 }
 
 const GRANTING_REASONS = [
@@ -119,25 +155,37 @@ export function createStripeWebhook(
     return data?.pending_plan != null && data.pending_plan === plan;
   }
 
-  async function handleInvoicePaid(event: Stripe.Event): Promise<void> {
+  async function handleInvoicePaid(event: Stripe.Event): Promise<Settlement> {
     const invoice = event.data.object as Stripe.Invoice;
     const subId = invoiceSubscriptionId(invoice);
-    if (!subId) return;
+    if (!subId) return 'nothing_owed';
+    if (!GRANTING_REASONS.includes(invoice.billing_reason ?? '')) return 'nothing_owed';
     const sub = await retrieveSubscription(subId);
     const userId = sub.metadata?.user_id;
-    if (!userId) return;
+    if (!userId) return 'unfulfillable:no_user_id';
     const alive = sub.status === 'active' || sub.status === 'trialing' ||
       sub.status === 'past_due';
-    if (!alive) return;
-    const plan = planFor(sub);
-    const periodEnd = periodEndIso(sub);
+    if (!alive) return `unfulfillable:subscription_${sub.status}`;
+    const { plan, periodEnd } = invoicedEntitlement(invoice, subId, priceIds);
     const grant = cycleGrant(plan, invoice.billing_reason ?? null, invoice.amount_paid ?? 0);
     if (!grant) {
       console.info('non_cycle_invoice_not_granted', invoice.id);
-      return;
+      return 'nothing_owed';
     }
+    // Refresh the current mirror independently. A late invoice then reaches the
+    // SQL stale-period guard with its ORIGINAL period and cannot refill it.
+    const currentPlan = planFor(sub);
+    const { error } = await admin.from('subscriptions').upsert({
+      user_id: userId,
+      ...stripeEntitlement(sub, currentPlan, periodEndIso(sub)),
+      ...(await pendingDone(userId, currentPlan) ? { pending_plan: null, pending_at: null } : {}),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+    if (error) throw new Error(`subscription_mirror_failed ${error.message}`);
     await applyFulfillment(admin, {
       source: 'stripe',
+      eventId: event.id,
+      receiptOpen: true,
       businessTxnId: String(invoice.id),
       userId,
       kind: 'subscription_grant',
@@ -145,17 +193,17 @@ export function createStripeWebhook(
       credits: grant.credits,
       periodEnd,
       eventAt: new Date(event.created * 1000).toISOString(),
-      entitlement: stripeEntitlement(sub, plan, periodEnd),
       neverLower: grant.neverLower,
-      clearPending: await pendingDone(userId, plan),
     });
+    return 'granted';
   }
 
-  async function handleCheckout(event: Stripe.Event): Promise<void> {
+  async function handleCheckout(event: Stripe.Event): Promise<Settlement> {
     const session = event.data.object as Stripe.Checkout.Session;
-    if (session.payment_status !== 'paid') return;
+    // An unpaid completion is followed by async_payment_succeeded, its own event.
+    if (session.payment_status !== 'paid') return 'nothing_owed';
     const userId = session.metadata?.user_id;
-    if (!userId) return;
+    if (!userId) return 'unfulfillable:no_user_id';
 
     if (session.mode === 'subscription' && session.subscription) {
       const sub = await retrieveSubscription(String(session.subscription));
@@ -172,10 +220,10 @@ export function createStripeWebhook(
         { onConflict: 'user_id' },
       );
       if (error) throw new Error(`subscription_mirror_failed ${error.message}`);
-      return;
+      return 'nothing_owed';
     }
 
-    if (session.mode !== 'payment') return;
+    if (session.mode !== 'payment') return 'nothing_owed';
     // The grant is the CATALOG's answer for the purchased pack, never a number
     // carried on the session. Tampered pack_credits cannot move it.
     const { usd, plan } = await retrievePackPurchase(String(session.id));
@@ -194,12 +242,39 @@ export function createStripeWebhook(
     }
     await applyFulfillment(admin, {
       source: 'stripe',
+      eventId: event.id,
+      receiptOpen: true,
       businessTxnId: String(session.id),
       userId,
       kind: 'pack_grant',
       credits,
       eventAt: new Date(event.created * 1000).toISOString(),
     });
+    return 'granted';
+  }
+
+  const MONEY_EVENTS = new Set([
+    'invoice.paid',
+    'checkout.session.completed',
+    'checkout.session.async_payment_succeeded',
+  ]);
+
+  /** The receipt for a verified payment event, knowable from the payload alone. */
+  function receiptFor(event: Stripe.Event): VerifiedReceipt | null {
+    if (!MONEY_EVENTS.has(event.type)) return null;
+    const object = event.data.object as { id: string; metadata?: { user_id?: string } };
+    return {
+      source: 'stripe',
+      eventId: event.id,
+      businessTxnId: String(object.id),
+      userId: object.metadata?.user_id ?? null,
+      request: { type: event.type },
+    };
+  }
+
+  function settleMoneyEvent(event: Stripe.Event): Promise<Settlement> {
+    if (event.type === 'invoice.paid') return handleInvoicePaid(event);
+    return handleCheckout(event);
   }
 
   async function handleSubscriptionChanged(event: Stripe.Event): Promise<void> {
@@ -238,11 +313,8 @@ export function createStripeWebhook(
     }
 
     try {
-      if (event.type === 'invoice.paid') await handleInvoicePaid(event);
-      if (event.type === 'checkout.session.completed') await handleCheckout(event);
-      if (event.type === 'checkout.session.async_payment_succeeded') {
-        await handleCheckout(event);
-      }
+      const receipt = receiptFor(event);
+      if (receipt) await deliverVerified(admin, receipt, () => settleMoneyEvent(event));
       if (event.type === 'customer.subscription.updated') {
         await handleSubscriptionChanged(event);
       }

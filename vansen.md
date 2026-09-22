@@ -256,7 +256,8 @@ partial self-limiting), but Studio is flat $5/mo, so enforce:
 - Single-responsibility functions. Max three-word function names.
 - No inline comments.
 - Clean Architecture, feature-first folder structure.
-- i18n dot-notation keys, max three words. Localization: en and ms.
+- i18n dot-notation keys, max three words. Localization: English only at launch
+  (D4, 2026-09-22); Malay deferred post-launch.
 - Typed everything (Angular + Edge Function TypeScript).
 - Angular 22 idioms only: signals, @if/@for, standalone, Signal Forms, zoneless.
 - UI built from spartan/ui Helm components (shadcn look). Don't hand-roll primitives
@@ -308,7 +309,7 @@ anywhere until each family has passed the per-family checklist in the runbook.
 | D1 launch grant | Full plan credits on launch-coupon invoices | P2 Task 4; `stripe-webhook` tests |
 | D2 retention | No lapse grace — purge the day the paid period ends. 7 years for financial records, 12 months for moderation evidence, 30 days for `app_errors` | `0021`; `supabase/tests/deletion.sql`; `docs/superpowers/specs/2026-09-20-retention-policy.md` |
 | D3 background-completion promise | Allowed only once offline completion is proven **on a deployment**. It is not | P5 Task 5; `job-worker`; release evidence §4 |
-| D4 launch locales | **OPEN.** This document still promises en + ms below and still lists i18n as not started. One of those has to change | `docs/superpowers/specs/2026-09-20-launch-locales.md` |
+| D4 launch locales | **DECIDED 2026-09-22: English-only.** `LOCALE_ID` = `en-US` in `app.config.ts`; Malay is post-launch | `docs/superpowers/specs/2026-09-20-launch-locales.md` |
 | D5 library video references | Uploads only for the first release | P8 Task 3; composer copy |
 | D6 completion notifications | **UNRESOLVED.** Needs P4's outbox, P5's lifecycle *and* mobile MT-04 client receipt. "We'll notify you" stays hidden; "You can leave this page and return to check the result" is permitted | P4 Task 6 + P5 Task 5 + mobile MT-04 |
 | D7 video live state | **NOT LIVE.** Schema and storage exist; every family is disabled | Release evidence §8; re-confirmed from `/manifest` at each deploy |
@@ -323,8 +324,9 @@ anywhere until each family has passed the per-family checklist in the runbook.
 - Persona live smoke never run (~$2.30 fal); analytics manual smoke pending
   (`docs/superpowers/punchlist.md`).
 - Leaked-password protection waits on Supabase Pro upgrade.
-- Not started: i18n (en + ms, pending D4), session cap / account-sharing
-  heuristics, dispatch rate limit. Denoise / Colorize need offline ONNX export + self-host.
+- Deferred post-launch: Malay localization (D4 decided English-only 2026-09-22).
+  Not started: session cap / account-sharing heuristics. Dispatch rate limit shipped
+  in `0028` (20 generation + 30 upload requests per user per minute). Denoise / Colorize need offline ONNX export + self-host.
 - Legal pages are AI-drafted; attorney review (Malaysia + EU/US) outstanding.
 - Known scope reductions in Video: "From library" picker for video reference slots was
   removed (needs gateway `referenceIds` support, see `reference-drop.ts`); the

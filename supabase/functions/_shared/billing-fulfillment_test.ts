@@ -29,8 +29,8 @@ Deno.test('maps the request onto the rpc argument names', async () => {
     neverLower: true,
     clearPending: true,
   });
-  assertEquals(d.rpcCalls[0].name, 'fn_apply_fulfillment');
-  assertEquals(d.rpcCalls[0].args, {
+  assertEquals(d.rpcCalls[1].name, 'fn_apply_fulfillment');
+  assertEquals(d.rpcCalls[1].args, {
     p_source: 'stripe',
     p_txn_id: 'in_1',
     p_user: TEST_USER,
@@ -98,4 +98,34 @@ Deno.test('isDuplicateKey distinguishes 23505 from operational errors', () => {
   assertEquals(isDuplicateKey({ code: '08006' }), false);
   assertEquals(isDuplicateKey({}), false);
   assertEquals(isDuplicateKey(null), false);
+});
+
+const receiptRequest = {
+  source: 'stripe' as const, businessTxnId: 'in_receipt', userId: TEST_USER,
+  kind: 'pack_grant' as const, credits: 100, eventAt: '2026-09-22T00:00:00.000Z',
+};
+Deno.test('verified failed fulfillment retains an unresolved receipt before the money call', async () => {
+  const d = db();
+  d.rpcHandlers.fn_record_billing_delivery = (args) => {
+    d.tables.billing_deliveries = [{ ...args, resolved_at: null }];
+    return null;
+  };
+  d.failNext('rpc.fn_apply_fulfillment', 'connection reset');
+  await assertRejects(() => applyFulfillment(d as never, receiptRequest), Error, 'connection reset');
+  assertEquals(d.tables.billing_deliveries?.length, 1);
+  assertEquals(d.tables.billing_deliveries[0].resolved_at, null);
+  assertEquals(d.rpcCalls.map(c => c.name), ['fn_record_billing_delivery', 'fn_apply_fulfillment', 'fn_finish_billing_delivery']);
+  assertEquals(d.rpcCalls[2].args.p_error, 'connection reset');
+});
+Deno.test('receipt persistence failure prevents any credit transaction', async () => {
+  const d = db();
+  d.failNext('rpc.fn_record_billing_delivery', 'inbox unavailable');
+  await assertRejects(() => applyFulfillment(d as never, receiptRequest), Error, 'inbox unavailable');
+  assertEquals(d.rpcCalls.some(c => c.name === 'fn_apply_fulfillment'), false);
+});
+Deno.test('successful replay resolves its receipt only after fulfillment', async () => {
+  const d = db();
+  await applyFulfillment(d as never, receiptRequest);
+  assertEquals(d.rpcCalls.map(c => c.name), ['fn_record_billing_delivery', 'fn_apply_fulfillment', 'fn_finish_billing_delivery']);
+  assertEquals(d.rpcCalls[2].args.p_error, null);
 });

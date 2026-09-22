@@ -70,6 +70,7 @@ function invoicePaid(id: string, over: Record<string, unknown> = {}): Stripe.Eve
         billing_reason: 'subscription_cycle',
         total_discount_amounts: [{ amount: 500 }],
         subscription: 'sub_1',
+        lines: { has_more: false, data: [{ type: 'subscription', subscription: 'sub_1', amount: 1500, price: { id: 'price_studio' }, period: { start: 1787408000, end: 1790000000 } }] },
         ...over,
       },
     },
@@ -220,4 +221,51 @@ Deno.test('an unrecognized subscription price halts the grant instead of guessin
   const res = await createStripeWebhook(deps(db, invoicePaid('in_47'), sub))(post());
   assertEquals(res.status, 500);
   assertEquals(db.tables.applied ?? [], []);
+});
+
+Deno.test('late distinct invoice retains invoiced plan and period after a newer cycle', async () => {
+  const db = fakeDb();
+  const current = subscription({ items: { data: [{ price: { id: 'price_pro' }, current_period_end: 1797948800 }] } });
+  const newer = invoicePaid('in_new', { lines: { has_more: false, data: [{ type: 'subscription', subscription: 'sub_1', amount: 3750, price: { id: 'price_pro' }, period: { start: 1795356800, end: 1797948800 } }] } });
+  assertEquals((await createStripeWebhook(deps(db, newer, current))(post())).status, 200);
+  assertEquals((await createStripeWebhook(deps(db, invoicePaid('in_old'), current))(post())).status, 200);
+  assertEquals(db.tables.applied[1].p_period_end, '2026-09-21T14:13:20.000Z');
+  assertEquals(db.tables.applied[1].p_plan, 'studio');
+  assertEquals(db.tables.applied[1].p_credits, 1500);
+  assertEquals(db.tables.applied[1].p_entitlement, null);
+  assertEquals(db.tables.subscriptions[0].plan, 'pro');
+});
+
+Deno.test('modern invoice upgrade selects the positive new-plan line, not the credit', async () => {
+  const db = fakeDb();
+  const event = invoicePaid('in_upgrade', { billing_reason: 'subscription_update', lines: { has_more: false, data: [
+    { amount: -500, parent: { subscription_item_details: { subscription: 'sub_1' } }, pricing: { price_details: { price: 'price_studio' } }, period: { end: 1790000000 } },
+    { amount: 1250, parent: { subscription_item_details: { subscription: 'sub_1' } }, pricing: { price_details: { price: 'price_pro' } }, period: { end: 1790000000 } },
+  ] } });
+  assertEquals((await createStripeWebhook(deps(db, event))(post())).status, 200);
+  assertEquals(db.tables.applied[0].p_plan, 'pro');
+  assertEquals(db.tables.applied[0].p_never_lower, true);
+});
+
+Deno.test('missing or incomplete invoice lines retry instead of guessing from current subscription', async () => {
+  for (const lines of [undefined, { data: [], has_more: false }, { data: [], has_more: true }]) {
+    const db = fakeDb();
+    assertEquals((await createStripeWebhook(deps(db, invoicePaid('in_missing', { lines })))(post())).status, 500);
+    assertEquals(db.tables.applied ?? [], []);
+  }
+});
+
+Deno.test('verified invoice survives subscription retrieval failure in the receipt inbox', async () => {
+  const db = fakeDb();
+  const res = await createStripeWebhook({ ...deps(db, invoicePaid('in_prepare')), retrieveSubscription: () => Promise.reject(new Error('stripe unavailable')) })(post());
+  assertEquals(res.status, 500);
+  assertEquals(db.rpcCalls.filter(c => c.name === 'fn_record_billing_delivery').length, 1);
+  assertEquals(db.rpcCalls.find(c => c.name === 'fn_record_billing_delivery')?.args.p_txn_id, 'in_prepare');
+});
+Deno.test('verified invoice survives mirror failure in the receipt inbox', async () => {
+  const db = fakeDb();
+  db.failNext('subscriptions.upsert', 'database unavailable');
+  assertEquals((await createStripeWebhook(deps(db, invoicePaid('in_mirror')))(post())).status, 500);
+  assertEquals(db.rpcCalls.some(c => c.name === 'fn_record_billing_delivery'), true);
+  assertEquals(db.rpcCalls.some(c => c.name === 'fn_apply_fulfillment'), false);
 });

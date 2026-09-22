@@ -151,3 +151,13 @@ Deno.test('thumb: poster is moderated before it is stored', async () => {
   assertEquals(res.status, 422);
   assertEquals(db.tables.generations[0].thumb_path, null);
 });
+
+Deno.test('moderation outage persists an alert before replying without charging', async () => {
+  const moderation = fakeModeration();
+  moderation.next({ state: 'unavailable', reason: 'moderation_http_503', retryAfterSeconds: 30 });
+  const deps = testDeps({ moderate: moderation.moderate });
+  const db = deps.admin as unknown as FakeDb;
+  const res = await createApp(deps).request('/api/uploads', { method: 'POST', headers: AUTH, body: uploadForm() });
+  assertEquals(res.status, 503);
+  assertEquals(db.rpcCalls.filter(c => c.name === 'fn_raise_alert').map(c => c.args.p_kind), ['moderation_unavailable']);
+});

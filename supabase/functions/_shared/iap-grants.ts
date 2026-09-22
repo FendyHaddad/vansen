@@ -10,6 +10,12 @@ import { PLAN_CREDITS } from './model-families.ts';
 import { IAP_PRODUCTS, iapGrant, iapPlanFor } from './iap-products.ts';
 import { applyFulfillment } from './billing-fulfillment.ts';
 
+/** Set by the webhook when deliverVerified already opened the receipt. */
+export interface OpenDelivery {
+  eventId: string;
+  receiptOpen: true;
+}
+
 export interface IapTransaction {
   productId: string;
   transactionId: string;
@@ -27,9 +33,13 @@ function iapOutcome(result: { replay: boolean; applied: boolean }): IapOutcome {
   return 'applied';
 }
 
+export type IapRejection = 'unknown_product' | 'revoked' | 'expired';
+
 export interface IapResult {
   outcome: IapOutcome;
   credits: { plan: number; pack: number } | null;
+  /** Why a 'rejected' outcome granted nothing. */
+  rejection?: IapRejection;
 }
 
 /** Throws on any operational failure so the caller answers 5xx and Apple retries. */
@@ -39,24 +49,26 @@ export async function applyIapTransaction(
   tx: IapTransaction,
   eventAt = new Date().toISOString(),
   nowMs = Date.now(),
+  delivery: OpenDelivery | Record<never, never> = {},
 ): Promise<IapResult> {
   const product = IAP_PRODUCTS[tx.productId];
   if (!product) {
     console.error('unknown iap product', tx.productId, tx.transactionId);
-    return { outcome: 'rejected', credits: null };
+    return { outcome: 'rejected', credits: null, rejection: 'unknown_product' };
   }
 
-  if (tx.revocationDate) return { outcome: 'rejected', credits: null };
+  if (tx.revocationDate) return { outcome: 'rejected', credits: null, rejection: 'revoked' };
   // Expiry is judged against the CURRENT clock, never the notification's own
   // historical timestamp, and a subscription with no expiry is refused rather
   // than given a fabricated 30-day period.
   const subscriptionExpired = product.kind === 'subscription' &&
     (!tx.expiresDate || tx.expiresDate <= nowMs);
-  if (subscriptionExpired) return { outcome: 'rejected', credits: null };
+  if (subscriptionExpired) return { outcome: 'rejected', credits: null, rejection: 'expired' };
 
   if (product.kind === 'subscription') {
     const periodEnd = new Date(tx.expiresDate!).toISOString();
     const result = await applyFulfillment(admin, {
+      ...delivery,
       source: 'apple',
       businessTxnId: tx.transactionId,
       userId,
@@ -77,6 +89,7 @@ export async function applyIapTransaction(
 
   const plan = await currentPlan(admin, userId);
   const result = await applyFulfillment(admin, {
+    ...delivery,
     source: 'apple',
     businessTxnId: tx.transactionId,
     userId,
@@ -87,15 +100,18 @@ export async function applyIapTransaction(
   return { outcome: iapOutcome(result), credits: result.credits };
 }
 
+/** Resolves true when a clawback (or entitlement expiry) was written. */
 export async function clawBackIap(
   admin: SupabaseClient,
   userId: string,
   tx: IapTransaction,
   eventAt = new Date().toISOString(),
-): Promise<void> {
+  delivery: OpenDelivery | Record<never, never> = {},
+): Promise<boolean> {
   const refundedPlan = iapPlanFor(tx.productId);
   if (refundedPlan) {
     await applyFulfillment(admin, {
+      ...delivery,
       source: 'apple',
       businessTxnId: `refund:${tx.transactionId}`,
       userId,
@@ -109,19 +125,22 @@ export async function clawBackIap(
         current_period_end: eventAt,
       },
     });
-    return;
+    return true;
   }
   // Claw back exactly what the original grant wrote (rates may have changed).
-  const { data: grant } = await admin
+  const { data: grant, error } = await admin
     .from('ledger_entries')
     .select('amount_credits')
-    .eq('stripe_ref', `apple:${tx.transactionId}`)
+    .eq('user_id', userId)
+    .in('stripe_ref', [`apple:${tx.transactionId}`, `iap:${tx.transactionId}`])
     .maybeSingle();
+  if (error) throw new Error(`iap_refund_lookup_failed ${error.message}`);
   if (!grant) {
     console.error('refund for unknown iap grant', tx.transactionId);
-    return;
+    return false;
   }
   await applyFulfillment(admin, {
+    ...delivery,
     source: 'apple',
     businessTxnId: `refund:${tx.transactionId}`,
     userId,
@@ -129,6 +148,7 @@ export async function clawBackIap(
     credits: Number(grant.amount_credits),
     eventAt,
   });
+  return true;
 }
 
 /** Never reactivates a closed account: only a row that already exists for this
@@ -149,11 +169,12 @@ export async function findUserByOriginalTransaction(
   admin: SupabaseClient,
   originalTransactionId: string,
 ): Promise<string | null> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('subscriptions')
     .select('user_id')
     .eq('iap_original_transaction_id', originalTransactionId)
     .maybeSingle();
+  if (error) throw new Error(`iap_account_lookup_failed ${error.message}`);
   return data?.user_id ?? null;
 }
 

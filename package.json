@@ -13,7 +13,7 @@
     "check:catalog": "tsx scripts/export-catalog.mjs --check",
     "check:assets": "tsx scripts/check-assets.mjs",
     "check:shared": "node scripts/sync-shared.mjs --check",
-    "test:scripts": "node --test scripts/catalog-check.test.mjs scripts/run-sql-tests.test.mjs scripts/verify-all.test.mjs scripts/migration-inventory.test.mjs scripts/storage-inventory.test.mjs scripts/supabase-test-stack.test.mjs",
+    "test:scripts": "node --test scripts/deploy-backend.test.mjs scripts/catalog-check.test.mjs scripts/run-sql-tests.test.mjs scripts/verify-all.test.mjs scripts/migration-inventory.test.mjs scripts/storage-inventory.test.mjs scripts/supabase-test-stack.test.mjs",
     "verify": "node scripts/verify-all.mjs",
     "test:deno": "cd supabase/functions && deno test --allow-all _shared api job-worker cleanup-worker stripe-webhook appstore-webhook",
     "test:sql": "node scripts/run-sql-tests.mjs",

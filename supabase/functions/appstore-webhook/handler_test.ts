@@ -234,3 +234,36 @@ Deno.test('a stale legacy iaptx: marker no longer suppresses the grant', async (
   assertEquals(db.tables.applied.length, 1);
   assertEquals(db.tables.applied[0].p_txn_id, 'tx_1');
 });
+
+function refundDeps(db: FakeDb, token: string | undefined = TEST_USER) {
+  return deps(db, {
+    verifyNotification: () => Promise.resolve({ ...NOTIFICATION, notificationType: 'REFUND' }),
+    verifyTransaction: () => Promise.resolve({ productId: 'vansen.pack.s', transactionId: 'old_tx', originalTransactionId: 'old_tx', appAccountToken: token }),
+  });
+}
+Deno.test('historical pack refund reaches clawback through the signed notification handler', async () => {
+  const db = fakeDb();
+  db.tables.ledger_entries = [{ user_id: TEST_USER, stripe_ref: 'iap:old_tx', amount_credits: 1234 }];
+  assertEquals((await createAppstoreWebhook(refundDeps(db))(post())).status, 200);
+  assertEquals(db.tables.applied[0].p_kind, 'clawback');
+  assertEquals(db.tables.applied[0].p_credits, 1234);
+});
+Deno.test('refund grant lookup failure returns 500, without an acknowledgment marker', async () => {
+  const db = fakeDb();
+  db.failNext('ledger_entries.select', 'database unavailable');
+  assertEquals((await createAppstoreWebhook(refundDeps(db))(post())).status, 500);
+  assertEquals(db.tables.webhook_events, []);
+});
+Deno.test('refund account lookup failure also returns 500', async () => {
+  const db = fakeDb();
+  db.failNext('subscriptions.select', 'database unavailable');
+  const dep = { ...refundDeps(db), verifyTransaction: () => Promise.resolve({ productId: 'vansen.pack.s', transactionId: 'old_tx', originalTransactionId: 'old_tx' }) };
+  assertEquals((await createAppstoreWebhook(dep)(post())).status, 500);
+});
+Deno.test('verified Apple refund survives account lookup failure in the inbox', async () => {
+  const db = fakeDb();
+  db.failNext('subscriptions.select', 'database unavailable');
+  const dep = { ...refundDeps(db), verifyTransaction: () => Promise.resolve({ productId: 'vansen.pack.s', transactionId: 'old_tx', originalTransactionId: 'old_tx' }) };
+  assertEquals((await createAppstoreWebhook(dep)(post())).status, 500);
+  assertEquals(db.rpcCalls.some(c => c.name === 'fn_record_billing_delivery' && c.args.p_txn_id === 'refund:old_tx'), true);
+});

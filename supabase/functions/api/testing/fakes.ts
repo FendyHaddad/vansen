@@ -87,6 +87,7 @@ export function fakeModeration(): FakeModeration {
 /** A gateway wired to fakes, with TEST_USER signed in and past the age gate. */
 export function testDeps(over: Partial<ApiDeps> = {}): ApiDeps {
   const db = new FakeDb();
+  db.rpcHandlers.fn_take_request_slot = () => ({ allowed: true, retryAfterSeconds: 0 });
   db.primaryKeys.webhook_events = "id";
   db.tokens.set("test-token", {
     id: TEST_USER,

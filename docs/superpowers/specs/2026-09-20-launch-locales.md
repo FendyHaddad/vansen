@@ -1,6 +1,6 @@
 # D4 — Launch locales: English-only, or funded en + ms
 
-**Status: OPEN. This is the user's product decision, not an engineering one.**
+**Status: DECIDED 2026-09-22 — Option A, English-only at launch.** See the Decision section at the bottom.
 Recorded 2026-09-21 during P8 (product truth and recovery). Nothing in the P8
 audit repair chooses it, and no code has been written either way.
 
@@ -72,4 +72,13 @@ nothing about it should be read as having settled D4 either way.
 
 ## Decision
 
-Unanswered. Record the choice here, with the date, when the user makes it.
+**2026-09-22 — Option A. English is the default and only launch language.**
+Decided by the owner. Malay (ms) becomes a post-launch item, funded separately if
+ever, with the Option B scope above as its starting brief.
+
+Enforced by:
+- `src/app/app.config.ts` provides `LOCALE_ID` = `en-US` explicitly, and
+  `src/index.html` carries `lang="en"`.
+- `vansen.md` no longer promises en + ms; i18n is listed as deferred, not "not started".
+- No string extraction, locale preference or format plumbing ships in this release.
+- Store listings, landing and legal pages are reviewed as English-only.

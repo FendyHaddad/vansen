@@ -118,6 +118,7 @@ function wireLeaseRpcs(db: FakeDb): void {
     job.provider_ref = args.p_ref;
     return true;
   };
+  db.rpcHandlers.fn_count_reconciliation = () => 1;
   db.rpcHandlers.fn_count_poll = (args) => {
     const job = held(args);
     if (!job) return false;
@@ -340,4 +341,41 @@ Deno.test('a job already done is left alone', async () => {
   await runJob(h.deps, h.job);
   assertEquals(h.submits.length, 0);
   assertEquals(h.checks.length, 0);
+});
+
+Deno.test('a saved reference recovers a submitting job without resubmitting', async () => {
+  const h = harness({ state: 'submitting', providerRef: 'req_saved' });
+  await runJob(h.deps, h.job);
+  assertEquals(h.checks, ['req_saved']);
+  assertEquals(h.submits.length, 0);
+});
+Deno.test('an inline reference remains uncertain and is never polled or resubmitted', async () => {
+  const h = harness({ state: 'submitting', providerRef: 'inline' });
+  await runJob(h.deps, h.job);
+  assertEquals(h.checks, []);
+  assertEquals(h.submits, []);
+  assertEquals(job(h).state, 'reconciling');
+});
+Deno.test('an expired polling lease makes no provider call', async () => {
+  const h = harness({ state: 'submitted', providerRef: 'req_saved' });
+  job(h).lease_token = 'replacement';
+  await runJob(h.deps, h.job);
+  assertEquals(h.checks, []);
+});
+Deno.test('twelve reconciliation ticks persist attempts and raise an operator alert', async () => {
+  const h = harness({ state: 'reconciling' });
+  h.db.rpcHandlers.fn_count_reconciliation = (args) => {
+    if (job(h).lease_token !== args.p_token) return null;
+    job(h).reconcile_attempts = Number(job(h).reconcile_attempts ?? 0) + 1;
+    return job(h).reconcile_attempts;
+  };
+  for (let n = 0; n < 12; n++) {
+    job(h).lease_token = 'lease-1';
+    job(h).lease_until = '2099-01-01T00:00:00Z';
+    await runJob(h.deps, { ...h.job, ...job(h) } as ClaimedJob);
+  }
+  assertEquals(job(h).reconcile_attempts, 12);
+  assertEquals(h.db.rpcCalls.some(c => c.name === 'fn_raise_alert' && c.args.p_kind === 'jobs_stuck'), true);
+  assertEquals(h.submits, []);
+  assertEquals(h.db.tables.generations[0].status, 'pending');
 });

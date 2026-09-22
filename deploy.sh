@@ -2,7 +2,7 @@
 #
 # Vansen production deployment.
 #
-# Deploys the Supabase `api` Edge Function, then the Cloudflare Worker that
+# Deploys all five Supabase backend functions, then the Cloudflare Worker that
 # serves the Angular bundle, stamps the release manifest, and proves the
 # running system matches what was just sent. `api` goes first because it
 # owns pricing: a stale browser against a new server shows a stale price,
@@ -154,9 +154,10 @@ run() {
 
 # Ask for JSON explicitly: the CLI's default output is a table in a terminal
 # and JSON in a pipe, which is how this read came back empty on a real run.
-apiVersion() {
+functionVersion() {
+  local name="$1"
   supabase functions list --project-ref "$PROJECT_REF" --output json 2>>"$LOG" \
-    | jq -r '(if type == "array" then . else .functions end)[] | select(.slug == "api") | .version'
+    | jq -r --arg name "$name" '(if type == "array" then . else .functions end)[] | select(.slug == $name) | .version'
 }
 
 cd "$REPO_ROOT"
@@ -244,13 +245,13 @@ fi
 # ---------------------------------------------------------------------------
 # 4. api first (it owns pricing)
 # ---------------------------------------------------------------------------
-progress "deploying edge function api"
-# --no-verify-jwt: the gateway authenticates itself and serves public routes.
-run "api deploy failed — the web bundle was NOT deployed" \
-  supabase functions deploy api --no-verify-jwt --project-ref "$PROJECT_REF"
+progress "deploying all backend functions"
+COMPONENT_RECEIPT="${LOG}.components.json"
+run "backend deploy failed — the web bundle was NOT deployed" \
+  node scripts/deploy-backend.mjs "$PROJECT_REF" "$REVISION" "$COMPONENT_RECEIPT"
+API_VERSION="$(jq -r '.components.api.version' "$COMPONENT_RECEIPT")"
+JOB_WORKER_VERSION="$(jq -r '.components["job-worker"].version' "$COMPONENT_RECEIPT")"
 
-API_VERSION="$(apiVersion)"
-[ -n "$API_VERSION" ] || fail "deployed api but could not read its version back"
 tick
 
 # ---------------------------------------------------------------------------
@@ -267,7 +268,8 @@ tick
 progress "stamping manifest"
 # Setting secrets redeploys the function and bumps its version by one, so
 # stamp the predicted version and check the prediction below.
-STAMPED_VERSION="v$((API_VERSION + 1))"
+STAMPED_API_VERSION="v$((API_VERSION + 1))"
+STAMPED_VERSION="v$((JOB_WORKER_VERSION + 1))"
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 run "could not stamp the manifest" \
@@ -297,13 +299,21 @@ check() {
 check "gitRevision"    "$(printf '%s' "$MANIFEST" | jq -r '.gitRevision')"    "$REVISION"
 check "catalogVersion" "$(printf '%s' "$MANIFEST" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "workerVersion"  "$(printf '%s' "$MANIFEST" | jq -r '.workerVersion')"  "$STAMPED_VERSION"
-check "api version"    "v$(apiVersion)"                                       "$STAMPED_VERSION"
+check "api version"    "v$(functionVersion api)"                           "$STAMPED_API_VERSION"
+for component in job-worker cleanup-worker stripe-webhook appstore-webhook; do
+  before="$(jq -r --arg name "$component" '.components[$name].version' "$COMPONENT_RECEIPT")"
+  check "$component version" "v$(functionVersion "$component")" "v$((before + 1))"
+done
 check "capabilities"   "$(curl -fsS "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "web app"        "$(curl -fsS -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
 tick
 
 [ -z "$MISMATCH" ] || fail "deployed, but the running system disagrees with what was sent" "$MISMATCH"
+# All five post-stamp versions were checked above; preserve the final inventory.
+jq '.components |= with_entries(.value.version += 1)' "$COMPONENT_RECEIPT" > "${COMPONENT_RECEIPT}.final"
+mv "${COMPONENT_RECEIPT}.final" "$COMPONENT_RECEIPT"
 
 clearline
-printf '\033[32m✓ DEPLOYED\033[0m %s · catalog %s · api %s · %s\n' "$REVISION" "$CATALOG_VERSION" "$STAMPED_VERSION" "$WEB_URL"
+printf '\033[32m✓ DEPLOYED\033[0m %s · catalog %s · api %s · %s\n' "$REVISION" "$CATALOG_VERSION" "$STAMPED_API_VERSION" "$WEB_URL"
+printf '  Component deployment receipt: %s\n' "$COMPONENT_RECEIPT"
 printf '  A deploy is not a release: record it in docs/superpowers/plans/2026-09-20-release-evidence.md\n'

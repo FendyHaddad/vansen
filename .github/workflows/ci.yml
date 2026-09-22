@@ -48,6 +48,9 @@ jobs:
       - uses: denoland/setup-deno@v1
         with:
           deno-version: "2.9.5"
+      - name: Cache Edge and test dependencies
+        working-directory: supabase/functions
+        run: deno cache --frozen --lock=deno.lock api/index.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts $(find _shared api job-worker cleanup-worker stripe-webhook appstore-webhook -name '*_test.ts' -type f)
       - name: Type check every function
         working-directory: supabase/functions
         run: deno check api/index.ts api/app.ts job-worker/index.ts cleanup-worker/index.ts stripe-webhook/index.ts appstore-webhook/index.ts

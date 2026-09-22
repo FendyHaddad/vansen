@@ -45,6 +45,12 @@ nothing in the repository is waiting to be applied.
 | `0022_thumbnails.sql` | `47a0bdb16345` | 0022 | confirmed applied (2026-09-21) |
 | `0023_request_snapshots.sql` | `d562b0ce2325` | 0023 | confirmed applied (2026-09-21) |
 | `0024_worker_drive_guard.sql` | `31af71f71e5c` | 0024 | confirmed applied (2026-09-22) |
+| `0025_release_telemetry.sql` | `4b40e52e01c4` | 0025 | confirmed applied (2026-09-22) |
+| `0026_review_recovery.sql` | `b229028ad3e2` | 0026 | **local only** — progress_at, reconcile_attempts, lease-fenced save claim, fn_check_alerts rewrite (review gaps 2, 3, 6) |
+| `0027_billing_receipts.sql` | `c9aebb8fc223` | 0027 | **local only** — billing_deliveries runtime writer, receipt opened at the webhook boundary before the customer is known (review gap 5) |
+| `0028_request_rate_limits.sql` | `0ce954d28f0b` | 0028 | **local only** — per-user request budgets (review: rate limiting) |
+| `0029_job_resolution.sql` | `53b6bdf8e4c0` | 0029 | **local only** — audited operator resolution for uncertain jobs (review gap 2) |
+| `0030_drop_legacy_grant_rpcs.sql` | `ff070bcf143f` | 0030 | **local only** — drops fn_cycle_reset / fn_grant_pack (review omission 6) |
 
 ### The `0008` duplicate is gone, and why renaming it was safe
 
@@ -123,7 +129,7 @@ so the deny-all architecture holds.
 
 | Path | Status | Evidence |
 |---|---|---|
-| Empty database → all 26 migrations | **PASS** | `supabase db reset` applies 0001→**0025** with no error on 2026-09-22; all 11 local SQL gates pass against the result |
+| Empty database → all 31 migrations | **PASS** | `supabase db reset` applies 0001→**0030** with no error on 2026-09-22 (evening); all 16 local SQL gates pass against the result. 0026–0030 are not yet applied to production |
 | Upgraded production | **PASS for the ledger, drift noted** | `db push --dry-run` up to date; `db diff` shows only the two orphaned objects in section 2 |
 | Production-shaped synthetic snapshot → 0017–0024 | **BLOCKED** | No staging environment and no synthetic snapshot exists. The plan forbids using real customer data, and there is nowhere else to restore one |
 

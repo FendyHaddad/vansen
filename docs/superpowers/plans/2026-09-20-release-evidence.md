@@ -167,7 +167,7 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | D1 launch grant | Full plan credits on launch-coupon invoices | P2 Task 4; `stripe-webhook` tests |
 | D2 retention | No lapse grace — purge the day the paid period ends; 7-year financial retention; 12-month moderation evidence hold | `0021`; `supabase/tests/deletion.sql`; `docs/superpowers/specs/2026-09-20-retention-policy.md` |
 | D3 background-completion promise | Enabled only after deployed offline-completion proof — **not yet deployed** | P5 Task 5; `job-worker`; this document |
-| D4 locales | **OPEN** — `docs/superpowers/specs/2026-09-20-launch-locales.md`. `vansen.md` still promises en + ms and still lists i18n as not started |
+| D4 locales | **DECIDED 2026-09-22 — English-only.** `LOCALE_ID` = `en-US` in `src/app/app.config.ts`; `vansen.md` no longer promises ms. `docs/superpowers/specs/2026-09-20-launch-locales.md` |
 | D5 library video references | Uploads only for the first release | P8 Task 3; composer copy |
 | D6 completion notifications | **UNRESOLVED** — mobile MT-04 receipt has not passed. Notification claims stay hidden | P4 Task 6 + P5 Task 5 + mobile MT-04 |
 | D7 video live state | **NOT LIVE.** `0016_video.sql` is applied locally and in production, but all five video families are `enabled = false`, `RUNWAY_API_KEY` is unset, R2 CORS and the `storage_config.r2_bucket` row do not exist | Task 2 inventory §4; to be re-confirmed from the manifest at Task 7 Step 10 |

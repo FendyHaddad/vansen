@@ -187,17 +187,14 @@ async function storeUrlResult(
 ): Promise<void> {
   // Claim: only one poller downloads the file. No row back (and no error)
   // means someone else already has it.
-  const { data: claimed, error: claimError } = await deps.admin
-    .from('jobs')
-    .update({ claimed_at: new Date().toISOString(), phase: 'saving' })
-    .eq('id', job.id)
-    .is('claimed_at', null)
-    .select('id');
+  const { data: claimed, error: claimError } = await deps.admin.rpc('fn_claim_job_save', {
+    p_job: job.id, p_token: job.lease_token ?? null,
+  });
   if (claimError) {
     console.error('[finishJob] claim failed', job.id, claimError.message);
     return;
   }
-  if (!claimed || claimed.length === 0) return;
+  if (claimed !== true) return;
 
   const budget = await budgetFor(deps, job);
   if (!budget) return await releaseClaim(deps, job);
@@ -299,17 +296,19 @@ async function retryOrFail(
     await failJob(deps, job, 'store_failed');
     return;
   }
-  await deps.admin
-    .from('jobs')
-    .update({ claimed_at: null, phase: 'rendering', attempts })
-    .eq('id', job.id);
+  await releaseClaim(deps, job, attempts);
 }
 
-async function releaseClaim(deps: FinishDeps, job: FinishJob): Promise<void> {
-  await deps.admin
-    .from('jobs')
-    .update({ claimed_at: null, phase: 'rendering' })
-    .eq('id', job.id);
+async function releaseClaim(deps: FinishDeps, job: FinishJob, attempts?: number): Promise<void> {
+  let query = deps.admin.from('jobs').update({
+    claimed_at: null, save_lease_token: null, phase: 'rendering',
+    ...(attempts == null ? {} : { attempts }),
+  }).eq('id', job.id);
+  query = job.lease_token
+    ? query.eq('lease_token', job.lease_token).gte('lease_until', new Date().toISOString())
+    : query.is('lease_token', null);
+  const { error } = await query;
+  if (error) throw new Error(`save_claim_release_failed ${error.message}`);
 }
 
 type StoreOutcome = 'done' | 'lost' | 'unknown';
@@ -507,7 +506,7 @@ function rejectPayload(
  */
 function mediaKey(job: FinishJob, budget: Budget, contentType: string): string {
   const ext = budget.extensions[contentType] ?? 'bin';
-  const attempt = job.attempts ?? 0;
+  const attempt = job.lease_token ?? job.attempts ?? 0;
   if (budget.kind === 'video') {
     return `videos/${job.user_id}/${job.generation_id}-${attempt}.${ext}`;
   }
