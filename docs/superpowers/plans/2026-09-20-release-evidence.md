@@ -177,9 +177,9 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | Item | State |
 |---|---|
 | `0025_release_telemetry.sql` | **applied to production 2026-09-22.** See §10 |
-| `api` | **v49**, deployed 2026-09-21 — predates the manifest route and the error-id change |
-| `stripe-webhook` v19, `appstore-webhook` v9 | last deployed **2026-07-15** and **2026-07-18** — two months before P2 rewrote them |
-| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | unset, so the manifest would report `unknown` |
+| `api` | **v63**, revision `c4ba8e4`, stamped 2026-09-22T11:14:01Z. See §10 |
+| `stripe-webhook` v29, `appstore-webhook` v19, `job-worker` v17, `cleanup-worker` v15 | deployed with `c4ba8e4`. See §10 |
+| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `c4ba8e4` / `v17` |
 | `RUNWAY_API_KEY` | unset |
 | R2 CORS policy, `storage_config.r2_bucket` row | not created |
 | FLUX retail price | deferred by owner decision 2026-09-22; decide before enabling `flux` |
@@ -427,3 +427,45 @@ manifest catching its own staleness is the mechanism working, not failing.
 
 **Not yet done:** the new Dart fixture in `contracts/catalog/` has not been
 handed to the mobile repo, so mobile is one catalog version behind.
+
+### 2026-09-22 — review fixes, staging grants, cleanup (`c4ba8e4`)
+
+Ships the post-implementation-review fixes (`5b5ddca`), the staging grants
+migration (`a2a968a`) and the cleanup commit. Recorded 2026-09-23 by reading
+the running system back; the deploy itself was run 2026-09-22.
+
+Migrations: `supabase migration list --linked` shows **0026–0031** applied
+remotely (review recovery, billing receipts, request-rate limits, job
+resolution, legacy grant RPCs dropped, service_role table grants).
+
+```
+gitRevision    c4ba8e4      ← matches HEAD
+workerVersion  v17          ← matches job-worker's own version, not api's
+deployedAt     2026-09-22T11:14:01Z
+schemaVersion  0031
+catalogVersion 2026-09-22.4
+```
+
+| Component | Live version | Last updated (UTC) |
+|---|---|---|
+| `api` | v63 | 2026-09-22 07:55 |
+| `job-worker` | v17 | 2026-09-22 11:13 |
+| `stripe-webhook` | v29 | 2026-09-22 11:13 |
+| `appstore-webhook` | v19 | 2026-09-22 11:13 |
+| `cleanup-worker` | v15 | 2026-09-21 15:53 |
+
+`/capabilities` reports catalog `2026-09-22.4`; the web app returns 200. The
+`job-worker` bundle catalog is no longer `2026-09-21.1`, so the review's stale
+bundle finding is closed.
+
+One discrepancy: `updated_at` for `api` and `cleanup-worker` predates the
+11:14 stamp and the 11:06 commit. `supabase secrets set` bumps the version
+without touching `updated_at`, which may explain `api`. Neither `cleanup-worker`
+nor `api` can be proven from this read alone to carry `c4ba8e4`. The
+per-component receipt from that run was not kept. Confirm on the next
+`./deploy.sh`, which attests all five.
+
+Capabilities live: every image family and edit tool, `flux` included (its
+retail price is still an open owner decision), `persona`; all five video
+families `false`. This is a deployed candidate, not a qualified release:
+smokes, Gate B and the rehearsals are still owed.

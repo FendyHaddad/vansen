@@ -177,11 +177,13 @@ Video enablement and Stripe live activation stay out of scope throughout.
 
 ---
 
-## Status 2026-09-22 (evening): fixes applied, not yet deployed
+## Status 2026-09-23: fixes committed and deployed
 
-Everything below is in the working tree on `main`, uncommitted, and verified
-locally. Nothing has been pushed to production: migrations 0026–0030 are applied
-to the local stack only, and no Edge Function has been redeployed since v59.
+Everything below is committed on `main` (`5b5ddca` fixes, `a2a968a` staging,
+`c4ba8e4` cleanup) and live. Checked 2026-09-23: `supabase migration list --linked`
+shows 0001–0031 applied remotely; the live manifest reports `gitRevision c4ba8e4`,
+schema `0031`, catalog `2026-09-22.4`, `workerVersion v17`, deployed
+2026-09-22T11:14:01Z.
 
 | # | Item | State |
 |---|---|---|
@@ -192,7 +194,7 @@ to the local stack only, and no Edge Function has been redeployed since v59.
 | 5 | Receipt inbox writer | **Fixed.** `0027` + `deliverVerified` in `billing-fulfillment.ts`: both webhooks open the receipt right after signature verification, before any lookup that can fail; `user_id` is filled in on settle; unfulfillable deliveries stay open for `fn_paid_unfulfilled`. |
 | 6 | Escalation blind spots | **Fixed.** `0026` adds `progress_at` (trigger-maintained) and `reconcile_attempts`; `fn_check_alerts` uses them; dispatcher raises `jobs_stuck` after the threshold; `moderation_unavailable` is a critical alert kind that only an operator probe closes. |
 | 7 | Permanent regressions | **Done.** Deno tests plus `review_recovery.sql`, `billing_receipts.sql`, `job_resolution.sql`, `request_rate.sql`, `request_rate_concurrency.sh`. |
-| 8 | Deploy coverage | **Script done, deploy pending.** `scripts/deploy-backend.mjs` deploys all five functions and writes a per-component receipt; `deploy.sh` attests each version. Run `./deploy.sh` to ship (also refreshes the stale `job-worker` bundle). |
+| 8 | Deploy coverage | **Done, deployed 2026-09-22 (`c4ba8e4`).** `scripts/deploy-backend.mjs` deploys all five functions and writes a per-component receipt; `deploy.sh` attests each version. |
 | 9 | GPT reference pricing, drop 1.5/2 | **Done in `8189bac`.** Reference images priced at the documented worst case (`GPT_REFERENCE_TOKENS`); `openai_usage` log lines exist to replace it with a measured number. Default is `2.5-flare`; 1.5 and 2 removed. |
 | 10 | FLUX price/enabled mismatch | **Deferred by owner** (next decision). |
 | 11 | Request-rate limiting | **Fixed.** `0028` `fn_take_request_slot`, 20 generation + 30 upload requests per user per minute, enforced before parsing, moderation or reservation; fails closed on DB outage. |
@@ -203,7 +205,11 @@ to the local stack only, and no Edge Function has been redeployed since v59.
 | 16 | CI cache, stale punchlist | **Done.** `deno cache --frozen` step added; punchlist refreshed. |
 | 17 | All gates against fresh schema | **Green.** `npm run verify` exit 0 with `VANSEN_LOCAL_DB` after `supabase db reset --local` (0001→0030): 568 Deno, 579 web, script tests, 16 SQL gates, production build. |
 | 18–20 | Smokes, manual qualification, rehearsals | **Pending, owner-run.** Unchanged. |
-| 21 | Staging | **Built 2026-09-22**, local only, uncommitted — `npm run stage`. |
+| 21 | Staging | **Built 2026-09-22**, local only, committed in `a2a968a` — `npm run stage`. Adds `0031_service_role_table_grants.sql`. |
 | 22–24 | Clean-code, website, toolbar | **Deferred by owner** (next decision). |
 
-To ship this batch: commit, `supabase db push --linked` (0026–0030), then `./deploy.sh`.
+### Remaining
+
+- **Record the deploy** in `2026-09-20-release-evidence.md` (a deploy is not a release).
+- **Owner decisions:** FLUX price or disable (#10); persona artifact deletion (#13); keep or drop `public.admins` and `profiles.monthly_budget` (#15); clean-code, website and toolbar revamps (#22–24).
+- **Owner-run:** recovery email configuration and first real send (#14); smokes (#18); manual qualification (#19); rehearsals, legal review, leaked-password protection, monitoring procedure (#20).
