@@ -59,6 +59,7 @@ const app = createApp({
     launchCouponId: Deno.env.get("STRIPE_LAUNCH_COUPON_ID"), // $5 off, 2 months
     releaseFlags: releaseFlagsFromEnv((k) => Deno.env.get(k)),
     release,
+    mediaPublicOrigin: Deno.env.get("MEDIA_PUBLIC_ORIGIN") || undefined,
   },
   now: () => new Date(),
 });

@@ -91,6 +91,13 @@
 - Local stack: `npm run db:test:start` / `npm run db:test:stop`. Start refuses a
   Supabase CLI other than the pinned 2.114.0, or a migration whose hash is not in
   `supabase/tests/bootstrap-manifest.json`.
+- Staging: `npm run stage` (same local stack + `functions serve` + `ng serve`),
+  seeded by `npm run stage:seed`, keys in gitignored `supabase/.env.staging`.
+  `ng serve` points at localhost, not production. Text-to-image only; no purchase
+  completes; migration 0031 (and the seed, for older databases) grants service_role
+  table access a from-scratch database otherwise lacks.
+  `MEDIA_PUBLIC_ORIGIN` must never be set on the hosted project.
+  Design: `docs/superpowers/specs/2026-09-22-staging-environment-design.md`.
 - CI: `.github/workflows/ci.yml`, three jobs, every push.
 - Emergency kill switch: `update public.models set enabled = false where id = '<family>';`
   New submissions are refused; work already in flight settles and refunds normally.

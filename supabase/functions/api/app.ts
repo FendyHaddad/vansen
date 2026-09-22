@@ -117,6 +117,10 @@ export interface ApiEnv {
   /** Promises the deployment has been verified to keep. Default: none. */
   releaseFlags: ReleaseFlags;
   release: ReleaseIdentity;
+  /** Staging only. Inside the local Edge runtime SUPABASE_URL is
+   * http://kong:8000, which a browser cannot resolve; signed storage URLs for
+   * the browser are rewritten to this origin. Unset in production. */
+  mediaPublicOrigin?: string;
 }
 
 export interface ApiDeps {
@@ -287,6 +291,17 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   } = deps;
   const APP_ORIGINS = deps.env.appOrigins;
   const PLAN_PRICE_IDS = deps.env.planPriceIds;
+
+  /** A signed storage URL the browser can open. Only applied to URLs meant
+   * for the browser: a provider needs the URL as storage signed it, and no
+   * origin makes a laptop reachable from a provider anyway. */
+  function browserUrl(signed: string): string {
+    const origin = deps.env.mediaPublicOrigin?.replace(/\/$/, '');
+    if (!origin) return signed;
+    if (!signed) return signed;
+    const parsed = new URL(signed);
+    return `${origin}${parsed.pathname}${parsed.search}`;
+  }
   const LAUNCH_COUPON_ID = deps.env.launchCouponId;
 
   /** The single source of truth for "is this origin ours?" — used for both CORS
@@ -590,12 +605,13 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       SIGN_TTL_S,
     );
     if (!data?.signedUrl) return "";
+    const url = browserUrl(data.signedUrl);
     if (signedUrlMemo.size > 5000) signedUrlMemo.clear();
     signedUrlMemo.set(path, {
-      url: data.signedUrl,
+      url,
       expiresAt: Date.now() + SIGN_TTL_S * 1000,
     });
-    return data.signedUrl;
+    return url;
   }
 
   const r2SignMemo = new Map<string, { url: string; exp: number }>();
@@ -2469,6 +2485,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       if (parent.status !== "done" || !parent.media_path) {
         return fail(c, 400, "parent_not_ready", "That image is not ready.");
       }
+      // Goes through signMedia, so in staging this is a browser URL. It is only
+      // tested for presence below; a provider gets its own signed URL in payload.ts.
       return signStored(parent.storage_backend, parent.media_path);
     }
 
@@ -3508,7 +3526,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
 
     const { data: signed } = await admin.storage.from("uploads")
       .createSignedUrl(path, 600);
-    return c.json({ uploadId: path, url: signed?.signedUrl ?? "" });
+    return c.json({ uploadId: path, url: browserUrl(signed?.signedUrl ?? "") });
   });
 
   const THUMB_MAX_BYTES = 512 * 1024;
@@ -3594,7 +3612,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         photos[0],
         3600,
       );
-      thumbUrl = data?.signedUrl ?? "";
+      thumbUrl = browserUrl(data?.signedUrl ?? "");
     }
     return {
       id: row.id,

@@ -126,6 +126,10 @@
     {
       "file": "0030_drop_legacy_grant_rpcs.sql",
       "sha256": "ff070bcf143f"
+    },
+    {
+      "file": "0031_service_role_table_grants.sql",
+      "sha256": "3eb9466c0db4"
     }
   ]
 }

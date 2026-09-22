@@ -60,6 +60,8 @@ credentials/
 # Supabase — local state & secrets stay out; config.toml and migrations stay IN
 supabase/.env
 supabase/.env.*
+# ...but the staging template carries no values and must be shared.
+!supabase/.env.staging.example
 supabase/.temp/
 supabase/.branches/
 supabase/functions/**/.env

@@ -85,8 +85,9 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 - **CI** — `.github/workflows/ci.yml` runs web, edge and database jobs on every
   push. Missing a `deno cache` step, so a cold runner can fail three edge test
   files fetching `jsr:@matmen/imagescript`.
-- **Owner-requested revamps (last in order)** — self-hosted Supabase staging (cloud
-  org is taken by production and `algawth`), clean-code revamp for AI-free
+- **Owner-requested revamps (last in order)** — ~~self-hosted Supabase staging~~
+  (BUILT 2026-09-22 as a local stack, `npm run stage`; see
+  `plans/2026-09-22-staging-environment.md`), clean-code revamp for AI-free
   maintenance, public website redesign, left toolbar redesign. Detail in the
   review's consolidated list, items 21–24.
 

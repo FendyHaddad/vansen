@@ -254,6 +254,7 @@ and `deno test` passes for its adapter. After enabling:
 - one paid generation end to end — charge, media, balance and ledger row all agree
 - one deliberate failure — exactly one refund, and a truthful message
 - for video, one cancel — and Veo and Omni must *say* they cannot cancel rather than pretend
+- Staging: R2-signed video URLs are not passed through `browserUrl`; expect broken video posters in staging until that is wired.
 - `node scripts/billing-reconcile.mjs` reports zero discrepancies
 - `select * from public.alerts where resolved_at is null;` is empty
 
@@ -268,6 +269,36 @@ Record each family's result in the evidence document. Do not enable the next
 until the current one has every tick.
 
 ---
+
+## 7b. Staging (local)
+
+The open-source Supabase stack from `supabase/config.toml`, on the developer's
+machine. Design: `specs/2026-09-22-staging-environment-design.md`; plan:
+`plans/2026-09-22-staging-environment.md`.
+
+    cp supabase/.env.staging.example supabase/.env.staging   # once, paste keys
+    npm run stage:seed                                        # build the world
+    npm run stage                                             # functions + ng serve
+    npm run stage:grant studio@staging.vansen 500             # credits, no webhook
+    npm run stage:stop                                        # stop the containers
+
+Accounts: `free@` / `studio@` / `pro@staging.vansen`, password `staging-pass`.
+
+`npm run verify` runs `supabase db reset` against the same containers and
+empties them. That is intended: staging data is disposable, and `stage:seed`
+restores it in about five seconds. Migration `0031_service_role_table_grants.sql`
+grants service_role data access to the public tables; the seed repeats the
+same idempotent grants for a database reset before that migration existed.
+
+What staging does **not** prove: no Stripe or Apple purchase completes (no
+webhook can reach a laptop); only text-to-image works (providers cannot fetch
+input images from a laptop); the Subscription tab's Stripe panel errors; nothing
+runs on a schedule except the job-worker tick `npm run stage` owns. This section
+never replaces the deployment procedure in §§1–7.
+
+`MEDIA_PUBLIC_ORIGIN` exists for the local stack only. It must never be set as
+a secret on the hosted project: it would rewrite every media URL production
+hands out.
 
 ## 8. Rollback
 
