@@ -177,9 +177,9 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | Item | State |
 |---|---|
 | `0025_release_telemetry.sql` | **applied to production 2026-09-22.** See §10 |
-| `api` | **v63**, revision `c4ba8e4`, stamped 2026-09-22T11:14:01Z. See §10 |
-| `stripe-webhook` v29, `appstore-webhook` v19, `job-worker` v17, `cleanup-worker` v15 | deployed with `c4ba8e4`. See §10 |
-| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `c4ba8e4` / `v17` |
+| `api` | **v64**, revision `c16b7fd`, stamped 2026-09-22T18:21:59Z. See §10 |
+| `stripe-webhook` v30, `appstore-webhook` v20, `job-worker` v19, `cleanup-worker` v17 | deployed and attested with `c16b7fd`. See §10 |
+| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `c16b7fd` / `v19` |
 | `RUNWAY_API_KEY` | unset |
 | R2 CORS policy, `storage_config.r2_bucket` row | not created |
 | FLUX retail price | deferred by owner decision 2026-09-22; decide before enabling `flux` |
@@ -469,3 +469,33 @@ Capabilities live: every image family and edit tool, `flux` included (its
 retail price is still an open owner decision), `persona`; all five video
 families `false`. This is a deployed candidate, not a qualified release:
 smokes, Gate B and the rehearsals are still owed.
+
+### 2026-09-22 — full `./deploy.sh` run (`c16b7fd`)
+
+Run 2026-09-22T18:21Z (2026-09-23 02:21 MYT) with `./deploy.sh --yes` from a
+clean `main`. Every gate passed, with `npm run verify` against a freshly started local
+stack. All five functions were then deployed, the Cloudflare worker went out,
+the manifest was stamped, and every read-back check matched. No migration
+changes: production stays at 0031.
+
+Component receipt:
+
+| Component | Version | Revision |
+|---|---|---|
+| `api` | v64 | `c16b7fd` |
+| `job-worker` | v19 | `c16b7fd` |
+| `cleanup-worker` | v17 | `c16b7fd` |
+| `stripe-webhook` | v30 | `c16b7fd` |
+| `appstore-webhook` | v20 | `c16b7fd` |
+
+```
+gitRevision    c16b7fd
+workerVersion  v19
+deployedAt     2026-09-22T18:21:59Z
+schemaVersion  0031
+catalogVersion 2026-09-22.4
+```
+
+This closes the discrepancy in the entry above: all five components, `api`
+and `cleanup-worker` included, are now proven to run the same committed
+revision. Still a deployed candidate, not a qualified release.
