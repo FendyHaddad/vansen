@@ -91,7 +91,9 @@
 - Local stack: `npm run db:test:start` / `npm run db:test:stop`. Start refuses a
   Supabase CLI other than the pinned 2.114.0, or a migration whose hash is not in
   `supabase/tests/bootstrap-manifest.json`.
-- Staging: `npm run stage` (same local stack + `functions serve` + `ng serve`),
+- Staging: `./dev.sh` (or `npm run stage`) starts the local stack + `functions serve`
+  + `ng serve`; `./kill.sh` stops everything, including orphans a closed terminal left.
+  Same local stack,
   seeded by `npm run stage:seed`, keys in gitignored `supabase/.env.staging`.
   `ng serve` points at localhost, not production. Text-to-image only; no purchase
   completes; migration 0031 (and the seed, for older databases) grants service_role

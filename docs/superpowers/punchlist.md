@@ -13,10 +13,12 @@ build clean. **`npm run verify` exits 0** with `VANSEN_LOCAL_DB` set. Migrations
 0026–0030 and the review fixes are local and uncommitted; see the status table at
 the end of `plans/post-implementation-review.md`.
 
-Production at 2026-09-22 (read from `/manifest` and the function inventory):
-`api` v59 at revision `ebdcbe2`, schema `0025`, catalog `2026-09-22.3`;
-`job-worker` v14 (bundle still carries catalog `2026-09-21.1`), `cleanup-worker`
-v13, `stripe-webhook` v26, `appstore-webhook` v16. Stripe is in TEST mode. All
+Production at 2026-09-22 (late, read from `/manifest` and the function inventory):
+migrations `0026`–`0031` pushed, schema `0031`; `api` v62 (source `a2a968a`,
+deployed with the bare CLI, so the stamped `gitRevision`/`deployedAt` in
+`/manifest` still read `8189bac` / 2026-09-21 until the next `deploy.sh` run),
+catalog `2026-09-22.4`; `job-worker` v15, `cleanup-worker` v14, `stripe-webhook`
+v27, `appstore-webhook` v17 — those four were NOT redeployed with `api`. Stripe is in TEST mode. All
 five video families are `enabled = false`.
 
 The full ordered list of what is still open, including six release blockers found
@@ -48,7 +50,7 @@ in the deployed bundle but have **never run live**. → Personas plan Task 12 St
 3. DevTools: `throw new Error('smoke-client-error')` → `app_errors` row `source='client'`, `client='web'`.
 4. Backoffice `/vansen/features` → style ranking + platform split; 7/30/90 toggle works.
 5. Backoffice `/vansen/errors` → **Web** chip filters to the smoke error; badge reads `web`.
-→ Analytics plan Task 9 Step 4.
+(The analytics plan itself was never committed; the five steps above are the whole check.)
 
 ### 4. Go-live blockers (account-level)
 - **Stripe live keys** — still TEST mode; flip `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` /

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Vankode mark. The tile is drawn rather than left transparent so the
+       white mark stays legible on a light browser tab strip too. -->
+  <rect width="32" height="32" rx="7" fill="#09090b"/>
+  <g transform="translate(10.855 7.68) scale(0.042341)" fill="#fff">
+    <path d="M227.687 292.106L161.883 102.242H188.587L188.911 103.117L242.387 256.231L227.687 292.106Z"/>
+    <path d="M43.7397 0L190.754 392.439H145.799L0 0H43.7397Z"/>
+  </g>
+</svg>
