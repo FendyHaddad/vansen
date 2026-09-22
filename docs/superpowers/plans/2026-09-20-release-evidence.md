@@ -177,9 +177,10 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | Item | State |
 |---|---|
 | `0025_release_telemetry.sql` | **applied to production 2026-09-22.** See §10 |
-| `api` | **v64**, revision `c16b7fd`, stamped 2026-09-22T18:21:59Z. See §10 |
-| `stripe-webhook` v30, `appstore-webhook` v20, `job-worker` v19, `cleanup-worker` v17 | deployed and attested with `c16b7fd`. See §10 |
-| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `c16b7fd` / `v19` |
+| `api` | **v66**, revision `73cd5cb`, stamped 2026-09-22T23:14:58Z. See §10 |
+| `stripe-webhook` v32, `appstore-webhook` v22, `job-worker` v21, `cleanup-worker` v18 | deployed and attested with `73cd5cb`. See §10 |
+| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `73cd5cb` / `v21`, schema `0032` |
+| `0032_persona_references.sql` | **applied to production 2026-09-22.** The `persona` family ships `enabled = false`. See §10 |
 | `RUNWAY_API_KEY` | unset |
 | R2 CORS policy, `storage_config.r2_bucket` row | not created |
 | FLUX retail price | deferred by owner decision 2026-09-22; decide before enabling `flux` |
@@ -499,3 +500,50 @@ catalogVersion 2026-09-22.4
 This closes the discrepancy in the entry above: all five components, `api`
 and `cleanup-worker` included, are now proven to run the same committed
 revision. Still a deployed candidate, not a qualified release.
+
+### 2026-09-22 — FLUX Dev removal and persona as saved references (`73cd5cb`)
+
+Run 2026-09-22T23:14Z (2026-09-23 07:14 MYT). Pre-check on production first:
+no persona job in flight (`jobs` joined to `generations` on `family_id =
+'persona'`, state not `done`: 0), no personas, no open training jobs.
+
+Then `./deploy.sh --yes` from a clean `main`: every gate passed (`npm run
+verify` against a freshly started local stack), all five functions deployed,
+the Cloudflare worker went out, the manifest was stamped and read back.
+Immediately after, `supabase db push --linked` applied
+`0032_persona_references.sql` (the only pending migration).
+
+Component receipt:
+
+| Component | Version | Revision |
+|---|---|---|
+| `api` | v66 | `73cd5cb` |
+| `job-worker` | v21 | `73cd5cb` |
+| `cleanup-worker` | v18 | `73cd5cb` |
+| `stripe-webhook` | v32 | `73cd5cb` |
+| `appstore-webhook` | v22 | `73cd5cb` |
+
+```
+gitRevision    73cd5cb
+workerVersion  v21
+deployedAt     2026-09-22T23:14:58Z
+schemaVersion  0032
+catalogVersion 2026-09-23.2
+```
+
+Read back from production after the push:
+
+| Check | Result |
+|---|---|
+| `training_jobs` table | dropped |
+| `reconcile_stale_trainings` cron | gone |
+| `fn_set_persona_photo`, `fn_persona_photos_valid`, `fn_persona_photos_complete` | present |
+| `models.enabled` for `persona` | `false` |
+| `provider_artifact_deletions` rows closed as `unsupported` | 0 (none were open) |
+| Cron runs at 23:13–23:15 (`drive_job_worker`, `reconcile_stale_jobs`, `check_alerts`, `advance_account_deletions`, `reap_deleted_content`, `drive_cleanup_worker`) | all `succeeded` |
+| `GET /api/personas` without a token | 401 |
+
+Not yet done: enabling `persona`, the persona smoke, the Nano Banana
+reference-edit smoke (the Google adapter now sends the prompt after the
+images), and the two owner-run scripts. Still a deployed candidate, not a
+qualified release.

@@ -2122,4 +2122,4 @@ grep -rn -i "lora\|flux-lora\|persona_training_credits\|photo_paths\|trigger_wor
 
 Expected: only historical mentions: comments explaining the retirement, and the `persona_training` ledger type in `enums.ts`, which stays for old ledger rows.
 
-- [ ] **Step 7: Leave uncommitted.** Report to the owner: what changed; that the deploy is `./deploy.sh` then `supabase db push --linked` immediately after, once they commit and a pre-check of `select count(*) from public.jobs where family_id = 'persona' and state <> 'done'` returns 0 (order and reason: `2026-09-20-release-runbook.md` §1, 0032 note); and that the two owner-run scripts are pending.
+- [ ] **Step 7: Leave uncommitted.** Report to the owner: what changed; that the deploy is `./deploy.sh` then `supabase db push --linked` immediately after, once they commit and a pre-check of `select count(*) from public.jobs j join public.generations g on g.id = j.generation_id where g.family_id = 'persona' and j.state <> 'done'` returns 0 (order and reason: `2026-09-20-release-runbook.md` §1, 0032 note); and that the two owner-run scripts are pending.

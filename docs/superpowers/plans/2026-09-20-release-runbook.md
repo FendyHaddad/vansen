@@ -57,7 +57,7 @@ returns 0 (an old fal persona job would be polled by the Google adapter
 forever):
 
 ```sql
-select count(*) from public.jobs where family_id = 'persona' and state <> 'done';
+select count(*) from public.jobs j join public.generations g on g.id = j.generation_id where g.family_id = 'persona' and j.state <> 'done';
 ```
 
 0032 ships the persona kill switch off. The gateway's modelGate has no owner

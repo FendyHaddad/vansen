@@ -236,7 +236,7 @@ gain.
 
 **Rollout**
 
-1. Owner commits. Then `./deploy.sh` (functions) first, then `supabase db push --linked` immediately after. Before either, `select count(*) from public.jobs where family_id = 'persona' and state <> 'done'` must return 0: an old fal persona job would otherwise be polled by the Google adapter forever. Migration-first breaks the currently deployed job-worker tick, which calls the `fn_claim_training_jobs` that 0032 drops; functions-first only makes the persona routes 503 until 0032 lands.
+1. Owner commits. Then `./deploy.sh` (functions) first, then `supabase db push --linked` immediately after. Before either, `select count(*) from public.jobs j join public.generations g on g.id = j.generation_id where g.family_id = 'persona' and j.state <> 'done'` must return 0: an old fal persona job would otherwise be polled by the Google adapter forever. Migration-first breaks the currently deployed job-worker tick, which calls the `fn_claim_training_jobs` that 0032 drops; functions-first only makes the persona routes 503 until 0032 lands.
    0032 ships the persona kill switch off. The gateway's modelGate has no
    owner bypass, so enable it first with
    `update public.models set enabled = true where id = 'persona';`, then run
