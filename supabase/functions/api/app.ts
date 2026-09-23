@@ -21,6 +21,9 @@ import {
   type ModelFamily,
   packCredits,
   PERSONA_GEN,
+  PERSONA_MAX_BYTES,
+  PERSONA_MIN_EDGE,
+  PERSONA_NAME_MAX,
   PERSONA_SLOTS,
   personaGenCreditCost,
   personaProviderCost,
@@ -31,11 +34,11 @@ import {
   videoFamilySupports,
   type VideoMode,
 } from "./_shared/model-families.ts";
+import { IMAGE_BATCH_MAX } from "./_shared/build-catalog.ts";
 import { applyStyle, styleById } from "./_shared/style-presets.ts";
 import { GenerationOp, LedgerType, MediaKind } from "./_shared/enums.ts";
 import {
   isPersonaSlot,
-  PERSONA_MIN_EDGE,
   personaPhotoFailure,
   personaPrompt,
   readyPersona,
@@ -158,7 +161,6 @@ export interface ApiDeps {
 
 const SUSPEND_STRIKES = 2;
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
-const PERSONA_MAX_BYTES = 2.5 * 1024 * 1024;
 
 /** D2: quarantined evidence is kept for 12 months after the enforcement
  * action, for appeals and legal defence. See the retention policy spec. */
@@ -2247,8 +2249,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         `Prompt too long (max ${MAX_PROMPT_LEN} characters)`,
       );
     }
-    if (batch < 1 || batch > 4) {
-      return fail(c, 400, "invalid_batch", "batch must be 1–4");
+    if (batch < 1 || batch > IMAGE_BATCH_MAX) {
+      return fail(c, 400, "invalid_batch", `batch must be 1–${IMAGE_BATCH_MAX}`);
     }
     if (styleId && !styleById(styleId)) {
       return fail(c, 400, "invalid_style", "Unknown style preset");
@@ -3509,7 +3511,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
     // The web client sends a 2048px JPEG at 0.92, typically 0.5–2 MB.
     if (form?.get("purpose") === "persona-photo" && file.size > PERSONA_MAX_BYTES) {
-      return fail(c, 400, "photo_too_large", "Use a smaller photo — at most 2.5 MB.");
+      return fail(c, 400, "photo_too_large",
+        `Use a smaller photo — at most ${PERSONA_MAX_BYTES / (1024 * 1024)} MB.`);
     }
     const tooSmallForPersona = form?.get("purpose") === "persona-photo" &&
       Math.min(dims.width, dims.height) < PERSONA_MIN_EDGE;
@@ -3712,8 +3715,8 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const name = typeof body?.name === "string"
       ? body.name.replace(/[\u0000-\u001f\u007f]/gu, "").trim()
       : "";
-    if (!name || name.length > 40) {
-      return fail(c, 400, "invalid_payload", "name required (max 40 chars)");
+    if (!name || name.length > PERSONA_NAME_MAX) {
+      return fail(c, 400, "invalid_payload", `name required (max ${PERSONA_NAME_MAX} chars)`);
     }
     if (body?.attested !== true) {
       return fail(c, 400, "invalid_payload", "Consent attestation is required");

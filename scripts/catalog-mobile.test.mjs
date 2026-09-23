@@ -32,6 +32,11 @@ test('catalog:mobile writes the seed-state catalog to the given path', () => {
     assert.equal(byId.veo.plan, 'pro');
     assert.equal(catalog.flat.upscale.enabled, true);
     assert.equal(catalog.flat.persona.enabled, false);
+    assert.deepEqual(catalog.flat.persona.photoSlots.map((s) => s.id), [
+      'front', 'left_three_quarter', 'right_three_quarter', 'left_profile', 'right_profile',
+    ]);
+    assert.equal(catalog.flat.persona.minEdge, 1024);
+    assert.equal(catalog.flat.persona.maxBytes, 2621440);
     assert.equal(catalog.flat.editTools.every((t) => t.enabled && t.plan === 'studio'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });

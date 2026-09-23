@@ -5,9 +5,6 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { PERSONA_SLOT_ORDER, type PersonaSlot } from "../_shared/model-families.ts";
 import type { ReferenceError } from "../_shared/reference-resolver.ts";
 
-/** Minimum short edge for a persona photo, in pixels. The client enforces it too. */
-export const PERSONA_MIN_EDGE = 1024;
-
 export function isPersonaSlot(value: string): value is PersonaSlot {
   return (PERSONA_SLOT_ORDER as readonly string[]).includes(value);
 }

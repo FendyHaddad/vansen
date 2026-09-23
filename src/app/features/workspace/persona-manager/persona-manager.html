@@ -74,7 +74,7 @@
         <span>Name</span>
         <input
           type="text"
-          maxlength="40"
+          [attr.maxlength]="nameMax"
           placeholder="Me"
           [value]="name()"
           (input)="name.set($any($event.target).value)"

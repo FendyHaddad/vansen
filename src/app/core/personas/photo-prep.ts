@@ -1,5 +1,6 @@
+import { PERSONA_MIN_EDGE } from '../catalog/model-families';
+
 export const PERSONA_MAX_EDGE = 2048;
-export const PERSONA_MIN_EDGE = 1024;
 const JPEG_QUALITY = 0.92;
 
 export class PhotoTooSmallError extends Error {

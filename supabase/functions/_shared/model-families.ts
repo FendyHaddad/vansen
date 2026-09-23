@@ -798,6 +798,24 @@ export const PERSONA_SLOTS: Record<'studio' | 'pro' | 'owner', number> = {
   owner: 5,
 };
 
+/** What each capture slot is called on screen, in every client. */
+export const PERSONA_SLOT_LABELS: Record<PersonaSlot, string> = {
+  front: 'Front',
+  left_three_quarter: 'Left ¾',
+  right_three_quarter: 'Right ¾',
+  left_profile: 'Left profile',
+  right_profile: 'Right profile',
+};
+
+/** Minimum short edge of a persona photo, in pixels. Clients check it first; the gateway re-checks. */
+export const PERSONA_MIN_EDGE = 1024;
+
+/** Largest persona photo the gateway accepts, in bytes (2.5 MB). */
+export const PERSONA_MAX_BYTES = 2.5 * 1024 * 1024;
+
+/** Longest persona name the gateway accepts, after trimming. */
+export const PERSONA_NAME_MAX = 40;
+
 /** The fixed settings a persona image is rendered and priced at. */
 export function personaSettings(aspectRatio: string): GenerationSettings {
   return { version: 'pro', resolution: PERSONA_GEN.resolution, aspectRatio };
@@ -818,6 +836,17 @@ export function personaProviderCost(): number {
 export function personaGenCreditCost(): number {
   return Math.ceil(
     (personaProviderCost() / (1 - STUDIO_MARGIN)) * 100 * PERSONA_GEN.premium,
+  );
+}
+
+/**
+ * The ratios a persona request passes the gateway's check with: Nano Banana's
+ * ratios where its Pro version renders at the persona resolution.
+ */
+export function personaAspectRatios(): string[] {
+  const nano = nanoFamily();
+  return nano.capabilities.aspectRatios.filter((ratio) =>
+    resolutionsFor(nano, ratio, 'pro').some((option) => option.value === PERSONA_GEN.resolution)
   );
 }
 

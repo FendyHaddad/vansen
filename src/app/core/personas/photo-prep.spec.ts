@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fitWithin, isTooSmall, PERSONA_MAX_EDGE, PERSONA_MIN_EDGE } from './photo-prep';
+import { fitWithin, isTooSmall, PERSONA_MAX_EDGE } from './photo-prep';
+import { PERSONA_MIN_EDGE } from '../catalog/model-families';
 
 // prepPhoto itself needs a real canvas (browser-only); the sizing math is the
 // testable core and is covered here.

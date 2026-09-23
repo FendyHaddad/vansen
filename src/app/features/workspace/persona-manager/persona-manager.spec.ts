@@ -5,7 +5,7 @@ import { PersonaManager } from './persona-manager';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { ApiService } from '../../../core/api/api-service';
 import { PersonaDto } from '../../../core/api/dtos';
-import { PERSONA_SLOT_ORDER } from '../../../core/catalog/model-families';
+import { PERSONA_SLOT_LABELS, PERSONA_SLOT_ORDER } from '../../../core/catalog/model-families';
 
 function persona(overrides: Partial<PersonaDto> = {}): PersonaDto {
   return {
@@ -206,5 +206,18 @@ describe('PersonaManager', () => {
     const component = make();
     expect(component.guideUrl('front')).toBe('/personas/guides/front.jpg');
     expect(component.guideUrl('left_profile')).toBe('/personas/guides/left_profile.jpg');
+  });
+
+  it('labels every slot and caps the name from the shared catalog', () => {
+    const component = make();
+    expect(component.slotLabels).toBe(PERSONA_SLOT_LABELS);
+    expect(PERSONA_SLOT_ORDER.map((slot) => component.slotLabels[slot])).toEqual([
+      'Front',
+      'Left ¾',
+      'Right ¾',
+      'Left profile',
+      'Right profile',
+    ]);
+    expect(component.nameMax).toBe(40);
   });
 });

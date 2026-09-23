@@ -12,7 +12,14 @@ import { PersonaStore } from '../../../core/personas/persona-store';
 import { prepPhoto, PhotoTooSmallError } from '../../../core/personas/photo-prep';
 import { ApiService } from '../../../core/api/api-service';
 import { PersonaDto, UploadResponse } from '../../../core/api/dtos';
-import { PERSONA_SLOT_ORDER, PersonaSlot } from '../../../core/catalog/model-families';
+import {
+  PERSONA_MAX_BYTES,
+  PERSONA_MIN_EDGE,
+  PERSONA_NAME_MAX,
+  PERSONA_SLOT_LABELS,
+  PERSONA_SLOT_ORDER,
+  PersonaSlot,
+} from '../../../core/catalog/model-families';
 import { PersonaStatus } from '../../../core/enums';
 import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
@@ -29,8 +36,8 @@ const CREATE_ERROR_MESSAGES: Record<string, string> = {
  * `invalid_reference` carries its own server message (which photo problem it
  * was), so it is read off the error rather than looked up here. */
 const SLOT_UPLOAD_MESSAGES: Record<string, string> = {
-  photo_too_small: 'Use a sharper, higher-resolution photo (at least 1024px).',
-  photo_too_large: 'Use a smaller photo — at most 2.5 MB.',
+  photo_too_small: `Use a sharper, higher-resolution photo (at least ${PERSONA_MIN_EDGE}px).`,
+  photo_too_large: `Use a smaller photo — at most ${PERSONA_MAX_BYTES / (1024 * 1024)} MB.`,
   account_suspended: 'Your account is suspended — contact support.',
   photo_unavailable:
     'That photo is in use by another persona or being removed — upload a new one.',
@@ -62,13 +69,8 @@ export class PersonaManager {
   readonly statuses = PersonaStatus;
 
   readonly slotOrder = PERSONA_SLOT_ORDER;
-  readonly slotLabels: Record<PersonaSlot, string> = {
-    front: 'Front',
-    left_three_quarter: 'Left ¾',
-    right_three_quarter: 'Right ¾',
-    left_profile: 'Left profile',
-    right_profile: 'Right profile',
-  };
+  readonly slotLabels: Record<PersonaSlot, string> = PERSONA_SLOT_LABELS;
+  readonly nameMax = PERSONA_NAME_MAX;
 
   readonly creating = signal(false);
   readonly name = signal('');

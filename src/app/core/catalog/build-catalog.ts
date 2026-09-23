@@ -12,6 +12,13 @@ import {
   EDIT_TOOLS,
   MODEL_FAMILIES,
   PERSONA_GEN,
+  PERSONA_MAX_BYTES,
+  PERSONA_MIN_EDGE,
+  PERSONA_NAME_MAX,
+  PERSONA_SLOT_LABELS,
+  PERSONA_SLOT_ORDER,
+  PERSONA_SLOTS,
+  personaAspectRatios,
   personaGenCreditCost,
   qualitiesFor,
   referenceRule,
@@ -26,6 +33,7 @@ import type {
   GenerationSettings,
   ModelFamily,
   ModelKind,
+  PersonaSlot,
 } from './model-families';
 import { STYLE_PRESETS } from './style-presets';
 import { TREND_PRESETS } from './trend-presets';
@@ -80,13 +88,26 @@ export interface CatalogEditTool {
   plan: CatalogPlan;
 }
 
+/** Every persona rule the gateway enforces, so a client renders them instead of copying them. */
+export interface CatalogPersona {
+  creditsPerImage: number;
+  enabled: boolean;
+  photoSlots: { id: PersonaSlot; label: string }[];
+  minEdge: number;
+  maxBytes: number;
+  maxNameLength: number;
+  planSlots: Record<'studio' | 'pro' | 'owner', number>;
+  aspectRatios: string[];
+  batch: { min: number; max: number };
+}
+
 export interface Catalog {
   catalogVersion: string;
   families: CatalogFamily[];
   flat: {
     editTools: CatalogEditTool[];
     upscale: { credits: number; enabled: boolean };
-    persona: { creditsPerImage: number; enabled: boolean };
+    persona: CatalogPersona;
   };
   styles: { id: string; label: string }[];
   trends: { id: string; label: string; prompt: string; aspectRatio: string | null }[];
@@ -223,6 +244,20 @@ function familyEntry(family: ModelFamily, row: ModelRow | undefined): CatalogFam
   };
 }
 
+function personaEntry(row: ModelRow | undefined): CatalogPersona {
+  return {
+    creditsPerImage: personaGenCreditCost(),
+    enabled: row?.enabled === true,
+    photoSlots: PERSONA_SLOT_ORDER.map((id) => ({ id, label: PERSONA_SLOT_LABELS[id] })),
+    minEdge: PERSONA_MIN_EDGE,
+    maxBytes: PERSONA_MAX_BYTES,
+    maxNameLength: PERSONA_NAME_MAX,
+    planSlots: { ...PERSONA_SLOTS },
+    aspectRatios: personaAspectRatios(),
+    batch: { min: 1, max: IMAGE_BATCH_MAX },
+  };
+}
+
 export function buildCatalog(rows: ModelRow[], families: ModelFamily[] = MODEL_FAMILIES): Catalog {
   const byId = new Map(rows.map((row) => [row.id, row]));
   return {
@@ -237,7 +272,7 @@ export function buildCatalog(rows: ModelRow[], families: ModelFamily[] = MODEL_F
         plan: planOf(byId.get(tool.id)),
       })),
       upscale: { credits: upscaleCreditCost(), enabled: byId.get(UPSCALER.id)?.enabled === true },
-      persona: { creditsPerImage: personaGenCreditCost(), enabled: byId.get(PERSONA_GEN.id)?.enabled === true },
+      persona: personaEntry(byId.get(PERSONA_GEN.id)),
     },
     styles: STYLE_PRESETS.map((s) => ({ id: s.id, label: s.name })),
     trends: TREND_PRESETS.map((t) => ({ id: t.id, label: t.name, prompt: t.prompt, aspectRatio: t.aspectRatio ?? null })),
