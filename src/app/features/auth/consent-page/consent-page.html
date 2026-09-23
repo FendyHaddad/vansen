@@ -1,0 +1,60 @@
+<main class="auth-shell">
+  <div class="auth-card">
+    <a routerLink="/" class="site-brand">Vansen</a>
+    <h1>Connect an assistant</h1>
+
+    @switch (phase()) {
+      @case ('loading') {
+        <p class="auth-sub" role="status" aria-live="polite">Loading the request…</p>
+      }
+      @case ('signing-in') {
+        <p class="auth-sub" role="status" aria-live="polite">Taking you to sign in…</p>
+      }
+      @case ('redirecting') {
+        <p class="auth-sub" role="status" aria-live="polite">Redirecting…</p>
+      }
+      @case ('error') {
+        <p class="auth-sub" role="alert">{{ errorMessage() }}</p>
+        <p class="mt-6 text-center text-sm">
+          <a routerLink="/app" class="linkish">Back to Vansen</a>
+        </p>
+      }
+      @case ('consent') {
+        @if (details(); as d) {
+          <p class="auth-sub">
+            <strong>{{ d.clientName }}</strong> wants to connect to your Vansen account.
+          </p>
+
+          <div class="consent-target">
+            <span class="consent-target-label">Sends you back to</span>
+            <span class="consent-target-host">{{ redirectHost() }}</span>
+          </div>
+
+          @if (redirectIsInsecure()) {
+            <p class="consent-warning" role="alert">
+              This address isn't secured with https. Only continue if you recognize it.
+            </p>
+          }
+
+          <p class="consent-caps-title">This lets it:</p>
+          <ul class="consent-caps">
+            @for (cap of capabilities; track cap) {
+              <li>{{ cap }}</li>
+            }
+          </ul>
+
+          <p class="auth-live" role="status" aria-live="polite">{{ errorMessage() }}</p>
+
+          <div class="consent-actions">
+            <button hlmBtn variant="outline" type="button" [disabled]="busy()" (click)="deny()">
+              Deny
+            </button>
+            <button hlmBtn type="button" [disabled]="busy()" (click)="allow()">
+              {{ busy() ? 'One moment…' : 'Allow' }}
+            </button>
+          </div>
+        }
+      }
+    }
+  </div>
+</main>

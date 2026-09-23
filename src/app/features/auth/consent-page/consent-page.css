@@ -1,0 +1,113 @@
+.auth-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 3rem 1.5rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 26rem;
+}
+
+.auth-card h1 {
+  margin-top: 2rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.auth-sub {
+  margin-top: 0.25rem;
+  margin-bottom: 1.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.auth-sub strong {
+  color: var(--foreground);
+}
+
+/* Always present so the live region exists before it has anything to say —
+   a region added at the same moment as its text is not announced. */
+.auth-live {
+  min-height: 1.25rem;
+  color: var(--destructive);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  margin-top: 1rem;
+}
+
+.linkish {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.linkish:hover {
+  color: var(--foreground);
+}
+
+.consent-target {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 0.625rem 0.875rem;
+  margin-bottom: 1rem;
+  font-size: 0.8125rem;
+}
+
+.consent-target-label {
+  color: var(--muted-foreground);
+}
+
+.consent-target-host {
+  font-weight: 600;
+  word-break: break-all;
+  text-align: right;
+}
+
+.consent-warning {
+  border: 1px solid color-mix(in oklch, var(--destructive) 50%, var(--border));
+  background: color-mix(in oklch, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+  border-radius: calc(var(--radius) - 2px);
+  padding: 0.625rem 0.875rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  margin-bottom: 1rem;
+}
+
+.consent-caps-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.consent-caps {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+
+.consent-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.consent-actions button {
+  flex: 1;
+}

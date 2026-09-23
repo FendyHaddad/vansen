@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmLabel } from '@spartan-ng/helm/label';
 import { AuthService } from '../../core/auth/auth-service';
 import { MODEL_FAMILIES } from '../../core/catalog/model-families';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
+import { safeConsentReturnUrl } from './consent-page/consent-return-url';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -19,6 +20,7 @@ type AuthMode = 'signin' | 'signup';
 export class LoginPage {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly capabilities = inject(PublicCapabilitiesService);
 
   constructor() {
@@ -44,6 +46,17 @@ export class LoginPage {
   readonly submitLabel = computed(() =>
     this.mode() === 'signin' ? 'Sign in' : 'Create account',
   );
+
+  /**
+   * Where to go after a successful sign-in.
+   *
+   * Only ever `/app`, or a `returnUrl` naming our own consent page — never a
+   * caller-supplied destination taken at face value. See consent-return-url.ts.
+   */
+  private postLoginUrl(): string {
+    const raw = this.route.snapshot.queryParamMap.get('returnUrl');
+    return safeConsentReturnUrl(raw) ?? '/app';
+  }
 
   toggleMode(): void {
     this.mode.set(this.mode() === 'signin' ? 'signup' : 'signin');
@@ -76,12 +89,12 @@ export class LoginPage {
     try {
       if (this.mode() === 'signin') {
         await this.auth.signInEmail(email, password);
-        await this.router.navigate(['/app']);
+        await this.router.navigateByUrl(this.postLoginUrl());
         return;
       }
       await this.auth.signUpEmail(email, password);
       if (this.auth.isAuthed()) {
-        await this.router.navigate(['/app']);
+        await this.router.navigateByUrl(this.postLoginUrl());
         return;
       }
       // Email confirmation flow: account created, session arrives after confirm

@@ -36,6 +36,16 @@ export const routes: Routes = [
     title: 'Confirm your email — Vansen',
     loadComponent: () => import('./features/auth/confirm-page').then((m) => m.ConfirmPage),
   },
+  // The Supabase OAuth 2.1 server's consent screen (assistants connecting via
+  // MCP, see docs/superpowers/specs/2026-09-23-mcp-connection-design.md §6).
+  // No guard: a signed-out visitor is sent to login and back by the page
+  // itself, because a guard's own redirect can't carry the return URL along.
+  {
+    path: 'oauth/consent',
+    title: 'Connect an assistant — Vansen',
+    loadComponent: () =>
+      import('./features/auth/consent-page/consent-page').then((m) => m.ConsentPage),
+  },
   {
     path: 'onboarding',
     canActivate: [authGuard, onboardingGuard],
