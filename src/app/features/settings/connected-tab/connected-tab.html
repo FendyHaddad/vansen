@@ -1,0 +1,75 @@
+<div class="tab">
+  <header class="tab-head">
+    <h2 class="tab-title">Connected assistants</h2>
+    <p class="muted">Claude, ChatGPT and other MCP clients connected to your account.</p>
+  </header>
+
+  @if (error()) {
+    <p class="small error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <div class="panel">
+      <p class="muted small">Loading connected assistants…</p>
+    </div>
+  } @else if (grants().length) {
+    <div class="panel">
+      <span class="eyebrow">Connected</span>
+      @for (grant of grants(); track grant.client.id; let last = $last) {
+        <div class="grant-row">
+          <div class="grant-icon">
+            <ng-icon name="lucideBot" size="18" />
+          </div>
+          <div class="grant-text">
+            <p class="grant-name">{{ grant.client.name || 'Unnamed client' }}</p>
+            <p class="muted small">
+              Connected {{ grant.granted_at | date: 'mediumDate' }}
+              @if (grant.scopes.length) {
+                · {{ grant.scopes.join(' ') }}
+              }
+            </p>
+          </div>
+          <button
+            hlmBtn
+            variant="outline"
+            size="sm"
+            [disabled]="revokingId() === grant.client.id"
+            (click)="revoke(grant)"
+          >
+            <ng-icon name="lucideTrash2" size="14" />
+            {{ revokingId() === grant.client.id ? 'Disconnecting…' : 'Revoke' }}
+          </button>
+        </div>
+        @if (!last) {
+          <div class="divider"></div>
+        }
+      }
+    </div>
+  } @else {
+    <div class="panel empty-panel">
+      <div class="empty-icon">
+        <ng-icon name="lucideBot" size="20" />
+      </div>
+      <h3 class="panel-title">No assistants connected yet</h3>
+      <p class="muted small">
+        Connect Claude or ChatGPT below to generate images from a chat — it spends your
+        credits and follows your plan the same way the app does.
+      </p>
+    </div>
+  }
+
+  <div class="panel">
+    <span class="eyebrow">Connect a new assistant</span>
+    <div class="url-row">
+      <code class="mcp-url">{{ mcpUrl }}</code>
+      <button hlmBtn variant="outline" size="sm" (click)="copyUrl()">
+        <ng-icon [name]="copied() ? 'lucideCheck' : 'lucideCopy'" size="14" />
+        {{ copied() ? 'Copied' : 'Copy' }}
+      </button>
+    </div>
+    <ul class="client-steps">
+      <li><span class="client-name">Claude</span> — Settings → Connectors → Add custom connector, then paste the URL above.</li>
+      <li><span class="client-name">ChatGPT</span> — turn on developer mode, then add a connector with the URL above.</li>
+    </ul>
+  </div>
+</div>

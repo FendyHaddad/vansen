@@ -85,6 +85,79 @@ describe('AuthService session teardown', () => {
     await TestBed.inject(AuthService).signOut();
     expect(spy).toHaveBeenCalled();
   });
+
+  it('R: web sign-out is local scope only, so it never revokes connected assistants', async () => {
+    // A global sign-out kills every OAuth grant (see the MCP spike report):
+    // Claude or ChatGPT would have to re-run the whole consent flow just
+    // because the customer signed out of one browser tab.
+    const auth = TestBed.inject(AUTH_CLIENT);
+    const spy = vi.spyOn(auth, 'signOut');
+    await TestBed.inject(AuthService).signOut();
+    expect(spy).toHaveBeenCalledWith({ scope: 'local' });
+  });
+});
+
+/**
+ * Connected assistants (Settings → Connected assistants).
+ *
+ * `auth.oauth` is a separate surface from the rest of GoTrueClient, so these
+ * get their own fake rather than extending `fakeAuth`.
+ */
+function oauthAuth(over: Record<string, unknown> = {}) {
+  return {
+    getSession: () => Promise.resolve({ data: { session: null } }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => undefined } } }),
+    signOut: () => Promise.resolve({ error: null }),
+    oauth: {
+      listGrants: vi.fn(() => Promise.resolve({ data: [], error: null })),
+      revokeGrant: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      ...over,
+    },
+  } as unknown as SupabaseClient['auth'];
+}
+
+describe('AuthService connected assistants', () => {
+  async function setup(over: Record<string, unknown> = {}) {
+    TestBed.resetTestingModule();
+    const auth = oauthAuth(over);
+    TestBed.configureTestingModule({ providers: [{ provide: AUTH_CLIENT, useValue: auth }] });
+    const service = TestBed.inject(AuthService);
+    await service.whenReady();
+    return { service, auth };
+  }
+
+  it('lists the grants the client returns', async () => {
+    const grant = {
+      client: { id: 'client-1', name: 'Claude', uri: '', logo_uri: '' },
+      scopes: ['openid', 'email'],
+      granted_at: '2026-09-01T00:00:00Z',
+    };
+    const { service } = await setup({
+      listGrants: vi.fn(() => Promise.resolve({ data: [grant], error: null })),
+    });
+    await expect(service.listGrants()).resolves.toEqual([grant]);
+  });
+
+  it('never echoes the vendor error when the grant list fails', async () => {
+    const { service } = await setup({
+      listGrants: vi.fn(() => Promise.resolve({ data: null, error: { message: 'db down' } })),
+    });
+    await expect(service.listGrants()).rejects.toThrow(/try again/i);
+  });
+
+  it('revokes by client id', async () => {
+    const { service, auth } = await setup();
+    await service.revokeGrant('client-1');
+    expect((auth as unknown as { oauth: { revokeGrant: ReturnType<typeof vi.fn> } }).oauth.revokeGrant)
+      .toHaveBeenCalledWith({ clientId: 'client-1' });
+  });
+
+  it('never echoes the vendor error when revoke fails', async () => {
+    const { service } = await setup({
+      revokeGrant: vi.fn(() => Promise.resolve({ data: null, error: { message: 'boom' } })),
+    });
+    await expect(service.revokeGrant('client-1')).rejects.toThrow(/try again/i);
+  });
 });
 
 /**
