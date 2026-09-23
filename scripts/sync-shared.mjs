@@ -9,6 +9,41 @@ import { fileURLToPath } from 'node:url';
 
 const scriptRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/** Deno needs explicit `.ts` extensions on relative imports; the Angular masters omit them. */
+function withTsExtensions(code) {
+  return code.replace(/from '(\.{1,2}\/[^']+)';/g, (match, spec) =>
+    spec.endsWith('.ts') ? match : `from '${spec}.ts';`,
+  );
+}
+
+/**
+ * The pieces model-families.ts re-exports, relative to src/app/core/catalog/.
+ * Each is copied to the same relative path under _shared/, so the barrel's
+ * imports resolve unchanged once they carry a `.ts` extension.
+ */
+const CATALOG_MODULES = [
+  'family-types.ts',
+  'generation-input.ts',
+  'families/shared-options.ts',
+  'families/nano-banana.ts',
+  'families/gpt-image.ts',
+  'families/flux.ts',
+  'families/seedream.ts',
+  'families/veo.ts',
+  'families/omni.ts',
+  'families/kling.ts',
+  'families/runway.ts',
+  'families/seedance.ts',
+  'family-registry.ts',
+  'family-options.ts',
+  'credit-cost.ts',
+  'plan-pricing.ts',
+  'edit-tools.ts',
+  'upscaler.ts',
+  'persona-gen.ts',
+  'video-modes.ts',
+];
+
 export const FILES = [
   {
     src: 'src/app/core/enums.ts',
@@ -18,13 +53,13 @@ export const FILES = [
   {
     src: 'src/app/core/catalog/model-families.ts',
     out: 'model-families.ts',
-    // Deno cannot resolve the Angular-relative PAYG_MARGIN import; inline it.
-    transform: (code) =>
-      code.replace(
-        "import { PAYG_MARGIN } from '../../features/pricing/model-catalog';",
-        'const PAYG_MARGIN = 0.33;',
-      ),
+    transform: withTsExtensions,
   },
+  ...CATALOG_MODULES.map((path) => ({
+    src: `src/app/core/catalog/${path}`,
+    out: path,
+    transform: withTsExtensions,
+  })),
   {
     src: 'src/app/core/catalog/style-presets.ts',
     out: 'style-presets.ts',
@@ -87,7 +122,7 @@ export function runSync(root = scriptRoot, argv = process.argv) {
       assertSharedMatches(output, expected);
       continue;
     }
-    mkdirSync(outDir, { recursive: true });
+    mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, expected);
     console.log(`synced ${file.src} -> supabase/functions/_shared/${file.out}`);
   }
