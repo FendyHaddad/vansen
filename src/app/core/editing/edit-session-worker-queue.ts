@@ -1,14 +1,10 @@
+// Runs one edit op at a time: in a background Worker when the platform has
+// one, synchronously otherwise (vitest, fallback paths) — identical output.
+// `enqueue` serializes every caller behind whatever is already running, so
+// `reset()` (`EditSession.close()`) only settles one in-flight dispatch.
+// Split out of `edit-session.ts` — self-contained, no session state needed.
 import { PixelBuffer } from './pixel-buffer';
 import { WorkerOp, runOpSync } from './edit-worker';
-
-/**
- * Runs one edit op at a time: in a background Worker when the platform has
- * one, synchronously otherwise (vitest, fallback paths) — identical output
- * either way. `enqueue` serializes every caller behind whatever is already
- * running, so `reset()` (an `EditSession.close()`) only ever has to settle
- * exactly one in-flight dispatch. Split out of `edit-session.ts` — the queue
- * mechanics are self-contained and don't need the session's own state.
- */
 export class EditWorkerQueue {
   private worker: Worker | null = null;
   private opQueue: Promise<unknown> = Promise.resolve();

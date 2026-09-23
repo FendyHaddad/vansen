@@ -30,8 +30,9 @@ export const SERVICE_ROLE_KEY =
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
-/** Credits match PLAN_CREDITS in _shared/model-families.ts. A drift here shows
- * up as a balance that does not match the plan the UI is displaying. */
+/** Credits match PLAN_CREDITS in _shared/plan-pricing.ts (barrelled through
+ * model-families.ts). A drift here shows up as a balance that does not
+ * match the plan the UI is displaying. */
 export const STAGING_USERS = [
   { email: 'free@staging.vansen', password: 'staging-pass', plan: null, credits: 0 },
   { email: 'studio@staging.vansen', password: 'staging-pass', plan: 'studio', credits: 1500 },

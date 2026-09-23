@@ -1,3 +1,8 @@
+// State and run logic for the on-device (ONNX) and selection-driven tools:
+// Cut Out, Upscale 2×, AI Sharpen, Magic Erase, Bokeh, Smart Select, plus
+// AI Remove/Fill on a selection (`AiSelectionRequest`). Split out of
+// `tool-options.ts`; the click routing that feeds `runErase`/`runSelect`/
+// the bokeh focus stays on the panel component, calling straight through.
 import { computed, signal } from '@angular/core';
 import { EDIT_TOOLS } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
@@ -37,15 +42,6 @@ export interface AiSelectionRequest {
   maskPngBase64: string;
 }
 
-/**
- * State and run logic for the on-device (ONNX) and selection-driven tools:
- * Cut Out, Upscale 2×, AI Sharpen, Magic Erase, Bokeh and Smart Select — plus
- * AI Remove/Fill on a selection. Split out of `tool-options.ts`; the click
- * routing that feeds `runErase`/`runSelect`/the bokeh focus still lives on
- * the panel component (it reacts to the session's shared `pointPick`
- * regardless of which tool group is active), which calls straight through
- * to the methods here.
- */
 export class EngineToolsController {
   /** 0..100, scales the bokeh blur. */
   readonly bokehStrength = signal(50);

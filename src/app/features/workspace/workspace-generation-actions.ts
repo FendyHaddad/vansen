@@ -1,3 +1,8 @@
+// Submit / retry / variation / upscale / delete / download / AI-edit actions
+// for the workspace page, moved out of WorkspacePage verbatim. Owns the
+// per-item busy-spinner set; component-scoped (see `WorkspacePage`'s
+// `providers`). Some call sites thread a side effect in via callback
+// (`onSuccess`, `onApplied`, the mask thunk) instead of reaching the component.
 import { Injectable, inject, signal } from '@angular/core';
 import { ApiError } from '../../core/api/api-service';
 import type { CreateGenerationRequest } from '../../core/api/dtos';
@@ -37,16 +42,6 @@ function refusalMessage(e: unknown): string | null {
   return e.message;
 }
 
-/**
- * Submit / retry / variation / upscale / delete / download / AI-edit actions
- * for the workspace page, moved out of WorkspacePage verbatim. Owns the
- * per-item busy-spinner set. Component-scoped (see the component's
- * `providers`) so a fresh instance is created with each page.
- *
- * Some call sites need a component-owned side effect (a viewChild call)
- * threaded into the exact point the original code ran it — those take an
- * `onSuccess` callback rather than reaching back into the component.
- */
 @Injectable()
 export class WorkspaceGenerationActions {
   private readonly store = inject(GenerationStore);
@@ -223,7 +218,7 @@ export class WorkspaceGenerationActions {
 
   async aiTool(
     req: { toolId: string; prompt: string; maskPngBase64?: string },
-    mask: string | undefined,
+    resolveMask: () => string | undefined,
     onApplied: () => void,
   ): Promise<void> {
     const item = this.editSession.item();
@@ -238,6 +233,10 @@ export class WorkspaceGenerationActions {
         return;
       }
 
+      // Ai Select passes its own mask; otherwise the hand-painted mask layer.
+      // Resolved here, inside the try and after the expand branch, so Expand
+      // never touches the mask canvas and a throw lands in the catch below.
+      const mask = resolveMask();
       if (tool.needsMask && !mask) {
         this.notices.notice.set('Paint a mask first — the tool needs to know where to work.');
         return;

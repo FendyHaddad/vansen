@@ -1,3 +1,8 @@
+// Center stage in edit mode: the working image + paintable mask overlay.
+// Pan/zoom gesture state lives in `ViewportPanZoom`, crop-box gesture state
+// in `CropGesture`, heal/liquify/clone/retouch stroke bookkeeping in
+// `BrushStrokes` (all beside this file). This component owns the DOM/pointer
+// wiring, the tool input signals, and the screen-space overlay computeds.
 import {
   ChangeDetectionStrategy,
   Component,
@@ -20,15 +25,6 @@ import { CropHandle, MIN_CROP_PX, CropGesture } from './crop-geometry';
 import { ViewportPanZoom } from './pan-zoom';
 import { clamp } from './viewport-math';
 
-/**
- * Center stage in edit mode: the working image + paintable mask overlay.
- *
- * Pan/zoom gesture state lives in `ViewportPanZoom`, crop-box gesture state
- * in `CropGesture`, and heal/liquify/clone/retouch stroke bookkeeping in
- * `BrushStrokes` (all beside this file). This component owns the DOM/pointer
- * wiring, the tool input signals, and the screen-space overlay computeds that
- * combine them.
- */
 @Component({
   selector: 'app-canvas-viewport',
   templateUrl: './canvas-viewport.html',

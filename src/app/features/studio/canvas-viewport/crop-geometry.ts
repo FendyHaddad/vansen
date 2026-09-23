@@ -1,12 +1,9 @@
+// Crop-tool gesture state and math, moved out of CanvasViewport verbatim.
+// `resolveCropDrag` is pure (image-pixel geometry only); `CropGesture` is the
+// small stateful wrapper the component drives from its pointer handlers.
 import { signal } from '@angular/core';
 import { CropRect } from '../../../core/editing/ops/crop';
 import { clamp } from './viewport-math';
-
-/**
- * Crop-tool gesture state and math, moved out of CanvasViewport verbatim.
- * `resolveCropDrag` is pure (image-pixel geometry only); `CropGesture` is the
- * small stateful wrapper the component drives from its pointer handlers.
- */
 
 /** Crop drag intent: draw a new box, move it, or resize from an edge/corner. */
 export type CropHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';

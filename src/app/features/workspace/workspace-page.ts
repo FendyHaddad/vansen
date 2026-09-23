@@ -1,3 +1,8 @@
+// Top-level workspace route: library grid + generate rail in library mode,
+// canvas viewport + tool rail in edit mode. Generation/billing/notice logic
+// lives in the component-scoped `WorkspaceGenerationActions`,
+// `WorkspaceBillingActions` and `WorkspaceNotices` (injected below) — this
+// file owns mode switching and wiring those services to the template.
 import {
   ChangeDetectionStrategy,
   Component,
@@ -403,8 +408,11 @@ export class WorkspacePage {
   }
 
   async onAiTool(req: { toolId: string; prompt: string; maskPngBase64?: string }): Promise<void> {
-    const mask = req.maskPngBase64 ?? this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
-    await this.actions.aiTool(req, mask, () => this.viewport()?.maskCanvas()?.clear());
+    await this.actions.aiTool(
+      req,
+      () => req.maskPngBase64 ?? this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined,
+      () => this.viewport()?.maskCanvas()?.clear(),
+    );
   }
 
   usePrompt(value: string): void {

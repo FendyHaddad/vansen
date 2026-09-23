@@ -1,14 +1,12 @@
+// Pointer-drag bookkeeping for the four brush tools (heal, liquify, clone,
+// retouch), moved out of CanvasViewport verbatim. The component still owns
+// the pointer event wiring and the tool-specific input signals (brush size,
+// strengths, ...) and passes their values in at each call; this class only
+// tracks in-flight stroke state and talks to EditSession.
 import { EditSession } from '../../../core/editing/edit-session';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
 import { RetouchMode } from '../../../core/editing/ops/retouch';
 
-/**
- * Pointer-drag bookkeeping for the four brush tools (heal, liquify, clone,
- * retouch), moved out of CanvasViewport verbatim. The component still owns
- * the pointer event wiring and the tool-specific input signals (brush size,
- * strengths, ...) and passes their values in at each call; this class only
- * tracks in-flight stroke state and talks to EditSession.
- */
 export class BrushStrokes {
   constructor(private readonly session: EditSession) {}
 

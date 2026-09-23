@@ -7,7 +7,7 @@
 //                                right_three_quarter.jpg left_profile.jpg right_profile.jpg>
 // Writes <dir>/likeness-persona.{jpg,png} and <dir>/likeness-normal.{jpg,png},
 // named from the type Gemini returns. Compare them
-// by eye; a clear gain sets PERSONA_GEN.premium in model-families.ts.
+// by eye; a clear gain sets PERSONA_GEN.premium in persona-gen.ts.
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { buildGeminiRequest, callGemini } from './generate-persona-guides.mjs';

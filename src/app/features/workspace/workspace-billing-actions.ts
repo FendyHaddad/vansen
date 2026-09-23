@@ -1,3 +1,6 @@
+// Subscription / plan-change / checkout-redirect handling for the workspace
+// page, moved out of WorkspacePage verbatim. Component-scoped (see the
+// component's `providers`) so a fresh instance is created with each page.
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ApiError } from '../../core/api/api-service';
@@ -7,11 +10,6 @@ import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { WorkspaceNotices } from './workspace-notices';
 
-/**
- * Subscription / plan-change / checkout-redirect handling for the workspace
- * page, moved out of WorkspacePage verbatim. Component-scoped (see the
- * component's `providers`) so a fresh instance is created with each page.
- */
 @Injectable()
 export class WorkspaceBillingActions {
   private readonly billing = inject(BillingService);

@@ -43,8 +43,9 @@
 - Personas: five guided photos (front, left/right ¾, left/right profile; ≥1024px short
   edge), free to create, Studio 2 / Pro 5 slots, consent recorded. Hidden `persona` family
   = Google Nano Banana Pro (`gemini-3-pro-image`) at 4K with the five photos as labelled
-  references and an identity instruction, 46 credits per image (`PERSONA_GEN.premium` 1.0
-  until the owner's likeness test). No training, no provider-held artifact. Spec:
+  references and an identity instruction, 46 credits per image (`PERSONA_GEN.premium`
+  in `persona-gen.ts`, barrelled through `model-families.ts`, 1.0 until the owner's
+  likeness test). No training, no provider-held artifact. Spec:
   `docs/superpowers/specs/2026-09-23-persona-references-design.md`.
 - Studio editing (Phase 3b, live): workspace edit mode (grid ↔ canvas swap, old
   `/app/edit/:id` absorbed). Local tools = Canvas2D engine `src/app/core/editing/`
@@ -62,7 +63,8 @@
   (Apache; click→mask→MI-GAN remove or alpha cut-out). RMBG (bria) and the AGPL ISNet
   mirror are license-banned. `POST /edits/save` = moderated $0 "Studio Edit"
   version, Studio-gated (403 `studio_required`). AI edit tools `edit-remove|edit-fill|
-  edit-expand|edit-bg` in `EDIT_TOOLS` (model-families.ts): FIXED retail prices
+  edit-expand|edit-bg` in `EDIT_TOOLS` (edit-tools.ts, barrelled through
+  model-families.ts): FIXED retail prices
   ($0.10/$0.10/$0.10/$0.05, not the margin formula), op='edit' + familyId=tool id,
   fal FLUX-fill (mask as data URI) + BiRefNet, kill-switch rows in `models`.
   Expand = client pads canvas 25%/side + border mask.

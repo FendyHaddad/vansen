@@ -1,3 +1,8 @@
+// Workspace-page notice banner, suspension flag and the polite live-region
+// announcer, moved out of WorkspacePage verbatim. Also home to the pure
+// helpers the banner text is built from: `modelDisabledNotice` and
+// `announcementFor`. Component-scoped (see `WorkspacePage`'s `providers`) so
+// a fresh `WorkspaceNotices` instance is created with each page.
 import { Injectable, effect, inject, signal } from '@angular/core';
 import { ApiError } from '../../core/api/api-service';
 import { GenerationStore, type GenerationItem } from '../../core/generations/generation-store';
@@ -44,12 +49,6 @@ export function announcementFor(changed: GenerationItem[]): string {
   return parts.join('. ');
 }
 
-/**
- * Workspace-page notice banner, suspension flag and the polite live-region
- * announcer, moved out of WorkspacePage verbatim. Component-scoped (see the
- * component's `providers`) so a fresh instance is created with each page,
- * matching the original per-component fields.
- */
 @Injectable()
 export class WorkspaceNotices {
   private readonly store = inject(GenerationStore);

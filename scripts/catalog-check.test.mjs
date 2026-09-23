@@ -92,3 +92,55 @@ test('shared --check fails when the master changes and the copy does not', () =>
   }
 });
 
+test('shared --check fails when a new catalog file is neither synced nor marked web-only', () => {
+  const dir = fixtureTree();
+  try {
+    // A split like the WS4 model-families revamp adds a new file under
+    // core/catalog/ and forgets to add it to CATALOG_MODULES — this must not
+    // pass silently, or the server catalog just quietly falls behind.
+    const strayPath = join(dir, 'src/app/core/catalog/stray-new-module.ts');
+    writeFileSync(strayPath, 'export const STRAY = 1;\n');
+    assert.throws(
+      () => runSync(dir, ['node', 'sync-shared.mjs', '--check']),
+      /not synced and not marked web-only/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared --check passes a stray catalog spec file (specs are never synced)', () => {
+  const dir = fixtureTree();
+  try {
+    runSync(dir, ['node', 'sync-shared.mjs']);
+    const strayPath = join(dir, 'src/app/core/catalog/stray-new-module.spec.ts');
+    writeFileSync(strayPath, "import { describe } from 'vitest';\ndescribe('x', () => {});\n");
+    // Should not throw on account of the stray spec file.
+    runSync(dir, ['node', 'sync-shared.mjs', '--check']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared --check fails when a master uses a relative-import style withTsExtensions cannot rewrite', () => {
+  const dir = fixtureTree();
+  try {
+    runSync(dir, ['node', 'sync-shared.mjs']);
+    const creditCost = FILES.find((f) => f.src.endsWith('credit-cost.ts'));
+    const master = join(dir, creditCost.src);
+    // Double quotes: withTsExtensions' regex only matches single-quoted
+    // `from '...';` specifiers, so this relative import is left un-rewritten
+    // and would 404 as a Deno import at deploy time.
+    const original = readFileSync(master, 'utf8');
+    const tampered = original.replace(
+      "from './generation-input';",
+      'from "./generation-input";',
+    );
+    assert.notEqual(tampered, original, 'fixture text did not match');
+    writeFileSync(master, tampered);
+    assert.throws(() => runSync(dir, ['node', 'sync-shared.mjs', '--check']), /did not rewrite/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+

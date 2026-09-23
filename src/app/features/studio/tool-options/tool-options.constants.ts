@@ -1,12 +1,9 @@
+// Static option tables for the tool strip's preset pickers (crop ratios,
+// liquify brush modes, filter looks, retouch brush modes). Pure data — no
+// behavior — so the panel component can stay focused on wiring.
 import { FilterPreset } from '../../../core/editing/ops/filters';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
 import { RetouchMode } from '../../../core/editing/ops/retouch';
-
-/**
- * Static option tables for the tool strip's preset pickers (crop ratios,
- * liquify brush modes, filter looks, retouch brush modes). Pure data — no
- * behavior — so the panel component can stay focused on wiring.
- */
 
 export interface CropPreset {
   label: string;

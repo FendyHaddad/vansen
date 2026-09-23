@@ -1,3 +1,8 @@
+// One editing session over a library image: working pixels, history, dirty
+// state. Heavy ops go to a Worker when the platform has one; vitest and
+// fallback paths run synchronously — identical output. Stable public entry
+// point; op dispatch lives in `edit-session-worker-queue.ts`, blob export in
+// `edit-session-render.ts`, downscaling in `edit-session-downscale.ts`.
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { SessionLifecycle } from '../auth/session-lifecycle';
 import { GenerationDto } from '../api/dtos';
@@ -9,15 +14,6 @@ import { DownscaleCache } from './edit-session-downscale';
 import { ImagePreviewRenderer, exportBuffer } from './edit-session-render';
 import { EditWorkerQueue, abortError, isAbort } from './edit-session-worker-queue';
 
-/**
- * One editing session over a library image: working pixels, history, dirty
- * state. Heavy ops go to a Worker when the platform has one; vitest and
- * fallback paths run synchronously — identical output either way. The public
- * API here is the stable entry point; op dispatch lives in
- * `edit-session-worker-queue.ts`, blob encoding/export in
- * `edit-session-render.ts`, and preview downscaling in
- * `edit-session-downscale.ts`.
- */
 @Injectable({ providedIn: 'root' })
 export class EditSession {
   private engine: EditEngine | null = null;

@@ -1,11 +1,8 @@
+// Click-drag pan state for the zoomed-in canvas viewport, moved out of
+// CanvasViewport verbatim. Zoom itself stays on EditSession — this only
+// tracks the CSS-pixel pan offset and the in-flight drag gesture.
 import { signal } from '@angular/core';
 import { clamp } from './viewport-math';
-
-/**
- * Click-drag pan state for the zoomed-in canvas viewport, moved out of
- * CanvasViewport verbatim. Zoom itself stays on EditSession — this only
- * tracks the CSS-pixel pan offset and the in-flight drag gesture.
- */
 export class ViewportPanZoom {
   readonly pan = signal({ x: 0, y: 0 });
   private readonly drag = signal<{

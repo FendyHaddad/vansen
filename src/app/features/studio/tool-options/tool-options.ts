@@ -1,3 +1,8 @@
+// Parameter strip for the active local tool (brush size, amounts, apply).
+// Stable entry point other files bind to (selector, inputs/outputs); state
+// and behaviour split into PreviewOpsController (live-preview pipeline) and
+// EngineToolsController (on-device ONNX / selection-driven tools). Tool-
+// switch reset, histogram redraw and canvas-click routing stay here.
 import {
   ChangeDetectionStrategy,
   Component,
@@ -25,18 +30,6 @@ import {
 import { AiSelectionRequest, EngineToolsController } from './tool-options-engine-tools';
 import { PreviewOpsController } from './tool-options-preview-ops';
 
-/**
- * Parameter strip for the active local tool (brush size, amounts, apply).
- *
- * This component is the stable entry point other files bind to (selector,
- * inputs/outputs). Its own state and behaviour are split into two grouped
- * controllers: `PreviewOpsController` (`tool-options-preview-ops.ts`) for the
- * tools that run through the session's live-preview pipeline, and
- * `EngineToolsController` (`tool-options-engine-tools.ts`) for the on-device
- * (ONNX) and selection-driven tools. The tool-switch reset, the histogram
- * redraw and the canvas-click routing stay here because they are the same
- * three effects regardless of which controller owns the affected state.
- */
 @Component({
   selector: 'app-tool-options',
   templateUrl: './tool-options.html',

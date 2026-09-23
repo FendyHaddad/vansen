@@ -1,3 +1,8 @@
+// State and preview/apply logic for the tools that go through the session's
+// live-preview pipeline: adjust, sharpen, smooth, crop (rotate/flip/
+// straighten), filters, enhance, dehaze, portrait smooth, levels and
+// perspective. One `PreviewScheduler` coalesces every slider drag into one
+// compute per frame, same as before this was split out of `tool-options.ts`.
 import { ModelSignal, signal } from '@angular/core';
 import { EditSession } from '../../../core/editing/edit-session';
 import { PREVIEW_MAX_DIM } from '../../../core/editing/editor-policy';
@@ -7,14 +12,6 @@ import { lumaHistogram } from '../../../core/editing/ops/levels';
 import { FlipAxis } from '../../../core/editing/ops/transform';
 import { PixelBuffer } from '../../../core/editing/pixel-buffer';
 import { StudioTool } from '../studio-tool';
-
-/**
- * State and preview/apply logic for the tools that go through the session's
- * live-preview pipeline: adjust, sharpen, smooth, crop (rotate/flip/
- * straighten), filters, enhance, dehaze, portrait smooth, levels and
- * perspective. One `PreviewScheduler` coalesces every slider drag into one
- * compute per frame, same as before this was split out of `tool-options.ts`.
- */
 export class PreviewOpsController {
   readonly brightness = signal(0);
   readonly contrast = signal(0);

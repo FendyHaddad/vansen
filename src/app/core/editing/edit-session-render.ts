@@ -1,15 +1,11 @@
+// Encodes the committed pixels to a Blob URL for the `<img>` the viewport
+// overlays its live preview onto, plus the same encoding for export/
+// download. `renderSeq` drops an encode that resolves after a newer commit
+// already started its own — only the latest may win. Split out of
+// `edit-session.ts` — only needs the engine passed in, never the session.
 import { signal } from '@angular/core';
 import { EditEngine } from './edit-engine';
 import { PixelBuffer } from './pixel-buffer';
-
-/**
- * Encodes the committed pixels to a Blob URL for the `<img>` the viewport
- * overlays its live preview onto, plus the same encoding for export/
- * download. `renderSeq` drops an encode that resolves after a newer commit
- * already started its own — Blob encoding is async, so both can be in
- * flight at once and only the latest may win. Split out of `edit-session.ts`
- * — this only ever needs the engine passed in, never the session itself.
- */
 export class ImagePreviewRenderer {
   private objectUrl = '';
   private renderSeq = 0;
