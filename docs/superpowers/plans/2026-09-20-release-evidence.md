@@ -755,3 +755,21 @@ covers the whole `/catalog` body). Spec `specs/2026-09-23-mobile-personas-design
 Mobile (`vansen-mobile` `bd6f644`, local, 510 tests) adds personas: list, create with consent,
 five-slot detail with photo prep, composer persona chip. Persona stays off until the owner's smoke.
 
+### 2026-09-23 — mobile parity phases 3+4, catalog 2026-09-23.4 (`b005993`)
+
+`supabase db push --linked` applied `0034_edit_tools_pro.sql` (AI edit tools Pro, owner decision:
+follow the web), then `./deploy.sh --yes` exited 0: `DEPLOYED b005993 · catalog 2026-09-23.4 · api v73`.
+Spec `specs/2026-09-23-mobile-parity-phase34-design.md`.
+
+| Check | Result |
+|---|---|
+| `GET /catalog` | 200, `catalogVersion` 2026-09-23.4, `etag: W/"2026-09-23.4-b6527d2c"`; `If-None-Match` → 304 |
+| `flat.editTools[].plan` | pro for edit-remove, edit-fill, edit-expand, edit-bg (10/10/10/5 credits, enabled) |
+| `flat.upscale` | 7 credits, enabled, plan studio (cloud upscale stays Studio, as the web sells it) |
+| styles / trends | 20 styles with thumb + category + categoryLabel; 12 trends with thumb; `/styles/oil-painting.webp` and `/trends/90s-yearbook.webp` 200 `image/webp` from `https://vansen.vankode.com` |
+| `GET /jobs` unauthenticated | 401 (unchanged); read failure now 503 `jobs_unavailable` (test-covered) |
+
+Mobile (`vansen-mobile` `b2c4207`, local, 750 tests): cloud upscale + Edited-from link, styles and trends,
+job cancel, Settings → Usage, password recovery (MT-06), AI edit tools Pro-locked, web origin fixed to
+`https://vansen.vankode.com`. No store build.
+
