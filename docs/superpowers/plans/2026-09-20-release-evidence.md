@@ -739,3 +739,19 @@ Read-back:
 
 Mobile (`vansen-mobile` `52ed3bc`, local commit, no remote) renders this catalog; no store build.
 
+### 2026-09-23 — mobile personas, catalog 2026-09-23.3 (`4588a10`)
+
+`./deploy.sh --yes` exited 0: `DEPLOYED 4588a10 · catalog 2026-09-23.3 · api v71`. Additive:
+`flat.persona` gains photoSlots, minEdge, maxBytes, maxNameLength, planSlots, aspectRatios, batch
+(`a012c42`); `CATALOG_VERSION` bumped because the served body changed (the fingerprint spec now
+covers the whole `/catalog` body). Spec `specs/2026-09-23-mobile-personas-design.md`.
+
+| Check | Result |
+|---|---|
+| `GET /catalog` | 200, `catalogVersion` 2026-09-23.3, `etag: W/"2026-09-23.3-d26c4fb4"` |
+| same with `If-None-Match` | 304 |
+| `flat.persona` | 46 credits, `enabled: false`, 5 slots front → right_profile, minEdge 1024, maxBytes 2621440, name 40, studio 2 / pro 5 / owner 5, ratios 1:1 3:4 4:3 16:9 9:16, batch 1–4 |
+
+Mobile (`vansen-mobile` `bd6f644`, local, 510 tests) adds personas: list, create with consent,
+five-slot detail with photo prep, composer persona chip. Persona stays off until the owner's smoke.
+
