@@ -773,3 +773,11 @@ Mobile (`vansen-mobile` `b2c4207`, local, 750 tests): cloud upscale + Edited-fro
 job cancel, Settings → Usage, password recovery (MT-06), AI edit tools Pro-locked, web origin fixed to
 `https://vansen.vankode.com`. No store build.
 
+### 2026-09-23 — clean-code revamp (`988777b`)
+
+Behaviour-preserving refactor (spec `specs/2026-09-23-clean-code-revamp-design.md`): `app.ts`
+4,112 → 57 lines (33 route/service/lib modules, route and middleware order identical, memos one per
+`createApp`); `model-families.ts` → barrel over 20 modules (buildCatalog output byte-identical);
+workspace-page, canvas-viewport, tool-options, edit-session split by concern. `npm run verify` 9/9 PASS;
+tests unchanged except import paths. `./deploy.sh --yes` exited 0: `DEPLOYED 988777b · catalog
+2026-09-23.4 · api v75`. Read-back: `/catalog` 200 at .4 with 9 families; `/profile` unauthenticated 401.
