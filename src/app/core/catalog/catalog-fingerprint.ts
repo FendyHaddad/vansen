@@ -3,11 +3,11 @@
  *
  * `catalog-version.spec.ts` recomputes this from MODEL_FAMILIES and fails when
  * the two disagree, so a catalog change that forgets a version bump — and with
- * it the Deno `_shared` copy and the Flutter fixture — is a red test on the
- * machine that caused it rather than a silent divergence between three repos.
+ * it the Deno `_shared` copy and every client's `catalog_stale` signal — is a
+ * red test on the machine that caused it.
  *
  * To update: change the catalog, bump CATALOG_VERSION, run `npm run
- * sync-shared` and `npm run export-catalog`, hand the new Dart fixture to the
- * mobile repo, then paste the new fingerprint here.
+ * sync-shared`, regenerate mobile's bundled copy with `npm run catalog:mobile
+ * <path>`, then paste the new fingerprint here.
  */
 export const recordedCatalogFingerprint = '-74a85f4f';

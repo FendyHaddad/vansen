@@ -305,6 +305,7 @@ for component in job-worker cleanup-worker stripe-webhook appstore-webhook; do
   check "$component version" "v$(functionVersion "$component")" "v$((before + 1))"
 done
 check "capabilities"   "$(curl -fsS "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
+check "catalog"        "$(curl -fsS "$FUNCTIONS_URL/catalog" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "web app"        "$(curl -fsS -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
 tick
 

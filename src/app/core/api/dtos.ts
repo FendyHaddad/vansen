@@ -28,6 +28,8 @@ export interface SubscriptionDto {
   /** Plan booked to take effect at pendingAt; null when nothing is scheduled. */
   pendingPlan: 'studio' | 'pro' | null;
   pendingAt: string | null;
+  /** The gateway's one entitlement rule: active, or canceled inside the paid period. */
+  entitled: boolean;
 }
 
 /** Studio <-> Pro. 'now' restarts the cycle; 'period_end' books it for renewal. */

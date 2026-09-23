@@ -30,6 +30,35 @@ export const FILES = [
     out: 'style-presets.ts',
     transform: (code) => code,
   },
+  {
+    src: 'src/app/features/studio/studio-tool.ts',
+    out: 'studio-tool.ts',
+    transform: (code) => code,
+  },
+  {
+    src: 'src/app/core/catalog/entitlements.ts',
+    out: 'entitlements.ts',
+    transform: (code) =>
+      code.replace(
+        "import type { StudioTool } from '../../features/studio/studio-tool';",
+        "import type { StudioTool } from './studio-tool.ts';",
+      ),
+  },
+  {
+    src: 'src/app/core/catalog/trend-presets.ts',
+    out: 'trend-presets.ts',
+    transform: (code) => code,
+  },
+  {
+    src: 'src/app/core/catalog/build-catalog.ts',
+    out: 'build-catalog.ts',
+    // Deno needs explicit extensions on the sibling imports.
+    transform: (code) =>
+      code.replace(
+        /from '\.\/(model-families|style-presets|trend-presets|entitlements)';/g,
+        "from './$1.ts';",
+      ),
+  },
 ];
 
 export function transformed(file, root = scriptRoot) {

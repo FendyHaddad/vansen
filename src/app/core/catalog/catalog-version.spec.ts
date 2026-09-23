@@ -13,8 +13,8 @@ import { recordedCatalogFingerprint } from './catalog-fingerprint';
 
 /**
  * Every settings combination the family actually offers. The price of each one
- * goes into the fingerprint, so a repriced tier cannot reach the mobile
- * fixture without a version bump — the catalog's contract covers prices, not
+ * goes into the fingerprint, so a repriced tier cannot reach /catalog
+ * without a version bump — the catalog's contract covers prices, not
  * just which chips exist.
  */
 function offeredSettings(family: ModelFamily): GenerationSettings[] {
@@ -41,8 +41,8 @@ function offeredSettings(family: ModelFamily): GenerationSettings[] {
 }
 
 /**
- * The catalog version is a promise to two other codebases: the Deno `_shared`
- * copy and the Flutter fixture. This fingerprint fails whenever the catalog's
+ * The catalog version is a promise to the Deno `_shared` copy and to every
+ * client that sends it back. This fingerprint fails whenever the catalog's
  * shape or its prices change without a bump, so a silent divergence becomes a
  * red test on the machine that caused it.
  */
@@ -77,8 +77,8 @@ function fingerprint(): string {
 describe('catalog version', () => {
   it('matches the recorded fingerprint — bump CATALOG_VERSION and this value together', () => {
     // When this fails: you changed the catalog. Bump CATALOG_VERSION, re-run
-    // `npm run sync-shared` and `npm run export-catalog`, hand the new Dart
-    // fixture to the mobile repo, then paste the new fingerprint here.
+    // `npm run sync-shared`, regenerate mobile's bundled catalog with
+    // `npm run catalog:mobile <path>`, then paste the new fingerprint here.
     expect({ version: CATALOG_VERSION, fingerprint: fingerprint() }).toEqual({
       version: '2026-09-23.2',
       fingerprint: recordedCatalogFingerprint,

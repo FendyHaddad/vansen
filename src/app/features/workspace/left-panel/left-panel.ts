@@ -20,6 +20,7 @@ import {
 import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import {
+  AUDIO_OPTIONS,
   FamilyOption,
   GenerationSettings,
   MODEL_FAMILIES,
@@ -264,11 +265,7 @@ export class LeftPanel {
     () => this.mode() === 'video' && (this.videoMode() === 'i2v' || this.videoMode() === 'keyframes'),
   );
 
-  readonly audioOptions: FamilyOption[] = [
-    { value: 'off', label: 'Off', tooltip: 'Silent clip. Cheapest.' },
-    { value: 'on', label: 'Sound', tooltip: 'Ambient sound and music.' },
-    { value: 'voice', label: 'Voice', tooltip: 'Sound plus spoken dialogue.' },
-  ];
+  readonly audioOptions: FamilyOption[] = AUDIO_OPTIONS;
 
   readonly videoInputsReady = computed(() => {
     if (this.mode() !== 'video') return true;

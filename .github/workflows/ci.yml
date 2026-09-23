@@ -29,8 +29,6 @@ jobs:
         run: npm run check:migrations
       - name: Shared catalog drift
         run: npm run check:shared
-      - name: JSON and Dart catalog drift
-        run: npm run check:catalog
       # Currently RED on purpose: the twelve trend thumbnails are not generated
       # yet. Deleting the gate to get a green tick would be deleting the only
       # thing that remembers.

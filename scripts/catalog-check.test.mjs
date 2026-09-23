@@ -1,9 +1,8 @@
-// Proves the two drift checks actually fail on drift — and that neither of
-// them writes. A "check" that silently regenerates what it is checking would
-// pass forever while the three copies of the catalog quietly diverged.
+// Proves the shared-sync drift check actually fails on drift — and that it
+// never writes. A "check" that silently regenerates what it is checking would
+// pass forever while the Angular and Deno copies of the catalog diverged.
 //
 //   node --test scripts/catalog-check.test.mjs
-import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -93,46 +92,3 @@ test('shared --check fails when the master changes and the copy does not', () =>
   }
 });
 
-function checkCatalog() {
-  return spawnSync('npx', ['tsx', 'scripts/export-catalog.mjs', '--check'], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-}
-
-/** Mutate a committed fixture, run the check, restore it whatever happens. */
-function withTamperedFixture(name, run) {
-  const path = join(root, 'contracts', 'catalog', name);
-  const original = readFileSync(path, 'utf8');
-  try {
-    writeFileSync(path, `${original}\n// tampered\n`);
-    run();
-  } finally {
-    writeFileSync(path, original);
-  }
-}
-
-test('catalog --check passes on the committed fixtures and writes nothing', () => {
-  const paths = ['catalog.json', 'model_catalog_fixture.dart']
-    .map((n) => join(root, 'contracts', 'catalog', n));
-  const before = snapshot(paths);
-  const result = checkCatalog();
-  assert.equal(result.status, 0, result.stderr);
-  assertUntouched(before);
-});
-
-test('catalog --check fails when catalog.json drifts', () => {
-  withTamperedFixture('catalog.json', () => {
-    const result = checkCatalog();
-    assert.notEqual(result.status, 0, 'a tampered catalog.json must fail the check');
-    assert.match(result.stderr, /catalog drift/);
-  });
-});
-
-test('catalog --check fails when the Dart fixture drifts', () => {
-  withTamperedFixture('model_catalog_fixture.dart', () => {
-    const result = checkCatalog();
-    assert.notEqual(result.status, 0, 'a tampered Dart fixture must fail the check');
-    assert.match(result.stderr, /catalog drift/);
-  });
-});

@@ -104,6 +104,8 @@ import { applyIapTransaction } from "./_shared/iap-grants.ts";
 import { applyFulfillment } from "./_shared/billing-fulfillment.ts";
 import { settleDone, settleFailed } from "./_shared/jobs/settlement.ts";
 import { classifyProviderError } from "./_shared/providers/provider-errors.ts";
+import { CATALOG_STALE, catalogHandler, isStaleCatalog } from "./catalog.ts";
+import { isEntitled } from "./services/entitlement.ts";
 
 /**
  * What `GET /manifest` reports about this deployment.
@@ -488,6 +490,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const { data } = await admin.from("models").select("id,enabled");
     return c.json(publicCapabilities(data ?? [], deps.env.releaseFlags));
   });
+
+  // Public, unauthenticated: the one catalog every app renders. See catalog.ts.
+  app.get("/catalog", catalogHandler(admin, logError));
 
   // Public, unauthenticated: exactly what is running here. After a deploy the
   // only way to tell whether a fix was live was to try it and infer; the
@@ -1238,14 +1243,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       .eq("user_id", userId)
       .maybeSingle();
     if (!data) return null;
-    if (data.status === "expired") return null;
-    if (
-      data.status === "canceled" &&
-      data.current_period_end &&
-      new Date(data.current_period_end).getTime() < Date.now()
-    ) {
-      return null;
-    }
+    if (!isEntitled(data, Date.now())) return null;
     return data.plan as "studio" | "pro" | "owner";
   }
 
@@ -1276,6 +1274,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
           currentPeriodEnd: subscription.current_period_end,
           pendingPlan: subscription.pending_plan ?? null,
           pendingAt: subscription.pending_at ?? null,
+          entitled: isEntitled(subscription, Date.now()),
         }
         : null,
     });
@@ -2033,6 +2032,23 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   }
 
   /**
+   * An option the catalog does not offer. From a client on an older catalog it
+   * is not the client's bug — its picker is out of date — so it gets 409
+   * catalog_stale and refreshes; everyone else gets the plain 400.
+   */
+  function optionRefusal(
+    c: Context,
+    sentCatalog: unknown,
+    code: string,
+    message: string,
+  ): Response {
+    if (isStaleCatalog(sentCatalog)) {
+      return fail(c, 409, CATALOG_STALE.code, CATALOG_STALE.message);
+    }
+    return fail(c, 400, code, message);
+  }
+
+  /**
    * The price and the provider request as ONE object. They used to be derived
    * separately — the catalog priced by version and resolution while the adapter
    * hard-coded a model and a size — so a customer could pay the 4K price for a
@@ -2045,14 +2061,15 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     op: string,
     settings: GenerationSettings,
     ctx: GenerationInput & { hasMask: boolean },
+    sentCatalog: unknown,
   ): { normalized: NormalizedRequest; credits: number } | Response {
     try {
       const normalized = normalizeGenerationRequest(family, op, settings, ctx);
       return { normalized, credits: quote(normalized, family).credits };
     } catch {
-      return fail(
+      return optionRefusal(
         c,
-        400,
+        sentCatalog,
         "invalid_settings",
         `${family.name} cannot render that combination of options.`,
       );
@@ -2294,9 +2311,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     const personaFamily = persona ? familyById("nano-banana") : undefined;
     const personaInvalid = personaFamily ? validateSettings(personaFamily, settings) : null;
     if (personaInvalid) {
-      return fail(
+      return optionRefusal(
         c,
-        400,
+        body.catalogVersion,
         "invalid_settings",
         `Personas do not offer ${personaInvalid.field} ${personaInvalid.value}.`,
       );
@@ -2353,7 +2370,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       } else {
         const family = familyById(String(body.familyId ?? ""));
         if (!family) {
-          return fail(c, 400, "invalid_family", "Unknown model family");
+          return optionRefusal(c, body.catalogVersion, "invalid_family", "Unknown model family");
         }
         if (
           family.kind === MediaKind.Video && op !== GenerationOp.Generate &&
@@ -2379,9 +2396,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         // and charge for a request the provider will clamp or reject.
         const invalid = validateSettings(family, settings);
         if (invalid) {
-          return fail(
+          return optionRefusal(
             c,
-            400,
+            body.catalogVersion,
             "invalid_settings",
             `${family.name} does not offer ${invalid.field} ${invalid.value}.`,
           );
@@ -2447,9 +2464,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
       ? body.referenceUploadId
       : null;
     if (video && referenceUploadId) {
-      return fail(
+      return optionRefusal(
         c,
-        400,
+        body.catalogVersion,
         "reference_unsupported",
         "Use the video reference slots for this model.",
       );
@@ -2459,9 +2476,9 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
     const referenceFamily = familyById(familyId);
     if (referenceUploadId && !referenceFamily?.capabilities.imageInput) {
-      return fail(
+      return optionRefusal(
         c,
-        400,
+        body.catalogVersion,
         "reference_unsupported",
         "This model does not take a reference image.",
       );
@@ -2536,7 +2553,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
         referenceCount: persona ? persona.paths.length : (referenceUrl ? 1 : 0),
         hasMask: typeof body.maskPngBase64 === "string" ||
           (typeof body.maskUploadId === "string" && !!body.maskUploadId),
-      })
+      }, body.catalogVersion)
       : null;
     if (priced instanceof Response) return priced;
     const normalized = priced?.normalized;

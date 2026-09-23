@@ -1,9 +1,9 @@
 /**
  * Catalog version. Bump on ANY change to a family's id, options, prices or
- * provider mapping. Clients send it back with a request so the server can tell
- * a stale composer's quote from a current one, and the Dart fixture in the
- * mobile repo pins it. `catalog-version.spec.ts` fails if the catalog content
- * hash changes without a bump.
+ * provider mapping. GET /catalog serves it, clients send it back with a
+ * request, and the gateway answers an invalid request from an older version
+ * with 409 catalog_stale. `catalog-version.spec.ts` fails if the catalog
+ * content hash changes without a bump.
  */
 export const CATALOG_VERSION = '2026-09-23.2';
 
@@ -988,3 +988,10 @@ const REFERENCE_RULES: Record<VideoMode, ReferenceRule> = {
 export function referenceRule(mode: VideoMode): ReferenceRule {
   return REFERENCE_RULES[mode];
 }
+
+/** The three audio settings a `selectable` video family offers, in chip order. */
+export const AUDIO_OPTIONS: FamilyOption[] = [
+  { value: 'off', label: 'Off', tooltip: 'Silent clip. Cheapest.' },
+  { value: 'on', label: 'Sound', tooltip: 'Ambient sound and music.' },
+  { value: 'voice', label: 'Voice', tooltip: 'Sound plus spoken dialogue.' },
+];

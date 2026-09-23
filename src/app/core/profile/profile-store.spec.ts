@@ -6,9 +6,9 @@ import { PreferencesService } from '../preferences/preferences-service';
 import { ProfileResponse, SubscriptionDto } from '../api/dtos';
 import { ProfileStore } from './profile-store';
 
-/** No scheduled change is the norm — cases that care pass pendingPlan/pendingAt. */
-type SubFixture = Omit<SubscriptionDto, 'pendingPlan' | 'pendingAt'> &
-  Partial<Pick<SubscriptionDto, 'pendingPlan' | 'pendingAt'>>;
+/** No scheduled change is the norm; the server's entitlement defaults to true. */
+type SubFixture = Omit<SubscriptionDto, 'pendingPlan' | 'pendingAt' | 'entitled'> &
+  Partial<Pick<SubscriptionDto, 'pendingPlan' | 'pendingAt' | 'entitled'>>;
 
 function response(subscription: SubFixture | null): ProfileResponse {
   return {
@@ -21,7 +21,9 @@ function response(subscription: SubFixture | null): ProfileResponse {
       ageConfirmed: true,
     },
     credits: { plan: 0, pack: 0 },
-    subscription: subscription ? { pendingPlan: null, pendingAt: null, ...subscription } : null,
+    subscription: subscription
+      ? { pendingPlan: null, pendingAt: null, entitled: true, ...subscription }
+      : null,
   };
 }
 
@@ -66,7 +68,7 @@ describe('ProfileStore plan computeds', () => {
 
     const past = new Date(Date.now() - 86_400_000).toISOString();
     apiMock.get.mockResolvedValue(
-      response({ plan: 'studio', status: 'expired', currentPeriodEnd: past }),
+      response({ plan: 'studio', status: 'expired', currentPeriodEnd: past, entitled: false }),
     );
     await store.load();
     expect(store.plan()).toBeNull();
@@ -83,7 +85,7 @@ describe('ProfileStore plan computeds', () => {
 
     const past = new Date(Date.now() - 86_400_000).toISOString();
     apiMock.get.mockResolvedValue(
-      response({ plan: 'studio', status: 'canceled', currentPeriodEnd: past }),
+      response({ plan: 'studio', status: 'canceled', currentPeriodEnd: past, entitled: false }),
     );
     await store.load();
     expect(store.plan()).toBeNull();
@@ -129,6 +131,42 @@ describe('ProfileStore plan computeds', () => {
     await store.load();
     expect(store.proActive()).toBe(false);
     expect(store.isOwner()).toBe(false);
+    expect(store.studioActive()).toBe(false);
+  });
+
+  it("entitled is the server's call, not a status check", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'pro', status: 'canceled', currentPeriodEnd: past, entitled: true }),
+    );
+    const store = make();
+    await store.load();
+    expect(store.entitled()).toBe(true);
+    expect(store.plan()).toBe('pro');
+    expect(store.proActive()).toBe(true);
+
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'pro', status: 'active', currentPeriodEnd: null, entitled: false }),
+    );
+    await store.load();
+    expect(store.entitled()).toBe(false);
+    expect(store.plan()).toBeNull();
+    expect(store.studioActive()).toBe(false);
+    expect(store.proActive()).toBe(false);
+  });
+
+  it('a cached profile from before entitled existed reads as not entitled', async () => {
+    const legacy = {
+      plan: 'studio',
+      status: 'active',
+      currentPeriodEnd: null,
+      pendingPlan: null,
+      pendingAt: null,
+    } as unknown as SubscriptionDto;
+    apiMock.get.mockResolvedValue({ ...response(null), subscription: legacy });
+    const store = make();
+    await store.load();
+    expect(store.entitled()).toBe(false);
     expect(store.studioActive()).toBe(false);
   });
 });

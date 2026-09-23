@@ -25,41 +25,26 @@ export class ProfileStore {
 
   readonly ageConfirmed = computed(() => this.profileSig()?.ageConfirmed ?? false);
 
-  /** Active plan id, or null (expired / never subscribed). */
+  /** The server's entitlement verdict. A profile cached before it existed reads false until revalidated. */
+  readonly entitled = computed(() => this.subscriptionSig()?.entitled === true);
+
+  /** Active plan id, or null (not entitled / never subscribed). */
   readonly plan = computed<SubscriptionPlan | null>(() => {
     const sub = this.subscriptionSig();
     if (!sub) return null;
-    if (sub.status === SubscriptionStatus.Expired) return null;
-    if (
-      sub.status === SubscriptionStatus.Canceled &&
-      sub.currentPeriodEnd && new Date(sub.currentPeriodEnd).getTime() < Date.now()
-    ) {
-      return null;
-    }
+    if (!sub.entitled) return null;
     return sub.plan;
   });
 
-  readonly studioActive = computed(() => {
-    const sub = this.subscriptionSig();
-    if (!sub) return false;
-    // 'canceled' still runs until the paid period ends
-    if (sub.status === SubscriptionStatus.Expired) return false;
-    return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
-  });
+  readonly studioActive = computed(() => this.entitled());
 
   /** Hidden internal tier — unlimited credits, never surfaced as a plan name. */
-  readonly isOwner = computed(() => {
-    const sub = this.subscriptionSig();
-    return !!sub && sub.plan === SubscriptionPlan.Owner && sub.status !== SubscriptionStatus.Expired;
-  });
+  readonly isOwner = computed(() => this.plan() === SubscriptionPlan.Owner);
 
-  /** Pro benefits: pro or owner plan, not expired past its paid period. */
+  /** Pro benefits: an entitled pro or owner plan. */
   readonly proActive = computed(() => {
-    const sub = this.subscriptionSig();
-    if (!sub) return false;
-    if (sub.plan !== SubscriptionPlan.Pro && sub.plan !== SubscriptionPlan.Owner) return false;
-    if (sub.status === SubscriptionStatus.Expired) return false;
-    return !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date();
+    const plan = this.plan();
+    return plan === SubscriptionPlan.Pro || plan === SubscriptionPlan.Owner;
   });
 
   /**

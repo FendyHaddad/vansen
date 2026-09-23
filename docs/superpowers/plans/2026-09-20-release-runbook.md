@@ -442,6 +442,12 @@ differs, **roll the web back first, then the functions**: this is deploy.sh's
 order reversed. A stale browser against a newer server shows a stale price; a
 newer browser against an older server makes broken requests.
 
+**From the server-driven catalog revision on (`/profile` returns
+`subscription.entitled`), roll the web back before or together with the
+functions.** A functions-only rollback to an older revision removes `entitled`
+from `/profile`, and the current web gate then reads every paid user as not
+entitled.
+
 **Migrations.** Forward-only. A bad migration is fixed by a new migration
 (`00NN_*.sql`, re-record `supabase/tests/bootstrap-manifest.json`, `supabase db
 push --linked`). Recent destructive migrations, whose data cannot be restored
