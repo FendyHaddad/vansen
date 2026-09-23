@@ -1,7 +1,11 @@
 // Token containment and the /mcp front door (spec §3, §5, §8): OAuth tokens
 // only on /mcp, session tokens never on /mcp, the PRM, the kill switch, 405s.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { Hono } from "jsr:@hono/hono";
 import { createApp } from "./app.ts";
+import { createContext, type Vars } from "./lib/context.ts";
+import { registerMcpRoutes } from "./routes/mcp.ts";
+import { TEST_USER } from "./testing/fakes.ts";
 import {
   MCP_HEADERS,
   MCP_RESOURCE,
@@ -165,4 +169,51 @@ Deno.test("no app route accepts 'mcp' from the x-vansen-client header", async ()
   const reserve = db.rpcCalls.find((c) => c.name === "fn_reserve_generation");
   assert(reserve, "submitted");
   assertEquals((reserve.args.p_items as Record<string, unknown>[])[0].client, "");
+});
+
+/** A POST to a percent-encoded path: Hono routes it on the decoded one. */
+function rawPost(app: ReturnType<typeof mcpApp>["app"], path: string, token: string, body: unknown) {
+  return app.request(path, {
+    method: "POST",
+    headers: { ...MCP_HEADERS, authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+}
+
+const TOOLS_LIST = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+
+Deno.test("a session token on a percent-encoded /api/%6Dcp is still refused with the 401 challenge", async () => {
+  const { app } = mcpApp();
+  const res = await rawPost(app, "/api/%6Dcp", SESSION_JWT, TOOLS_LIST);
+  assertEquals(res.status, 401);
+  assertStringIncludes(res.headers.get("www-authenticate") ?? "", `resource_metadata="${PRM_URL}"`);
+});
+
+Deno.test("an OAuth token on /api/%6Dcp is the MCP route: accepted, and exempt from the HTTP age gate", async () => {
+  const { app, db } = mcpApp();
+  db.tables.profiles = [{ id: db.tables.profiles[0].id, birth_date: null, strikes: 0, prefs: {} }];
+  const res = await rawPost(app, "/api/%6Dcp", OAUTH_TOKEN, TOOLS_LIST);
+  assertEquals(res.status, 200);
+});
+
+Deno.test("an OAuth token on a percent-encoded app route is still refused", async () => {
+  const { app } = mcpApp();
+  const res = await app.request("/api/%70rofile", { headers: { authorization: `Bearer ${OAUTH_TOKEN}` } });
+  assertEquals(res.status, 403);
+  assertEquals((await res.json()).error.code, "token_not_allowed");
+});
+
+Deno.test("the /mcp handler itself refuses a request with no OAuth client id", async () => {
+  // Defence in depth: mount the handler without the containment middleware.
+  const deps = mcpDeps();
+  const ctx = createContext(deps);
+  const bare = new Hono<Vars>().basePath("/api");
+  bare.use("*", async (c, next) => {
+    c.set("userId", TEST_USER);
+    await next();
+  });
+  registerMcpRoutes(bare, ctx);
+  const res = await rawPost(bare, "/api/mcp", SESSION_JWT, TOOLS_LIST);
+  assertEquals(res.status, 401);
+  assertStringIncludes(res.headers.get("www-authenticate") ?? "", `resource_metadata="${PRM_URL}"`);
 });

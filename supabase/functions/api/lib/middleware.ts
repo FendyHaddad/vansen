@@ -3,9 +3,12 @@
 // registerAuthMiddleware: bearer auth, OAuth token containment (assistant
 // tokens only on /mcp, app sessions never there), the 18+ age gate (memoised
 // per app) and the shared per-user request budgets. Hono runs these in order.
+// Every path check reads c.req.path, the decoded path Hono routes on, so a
+// percent-encoded path cannot reach a route while dodging its checks.
 import type { Context } from "jsr:@hono/hono";
 import { cors } from "jsr:@hono/hono/cors";
 import type { ApiContext, App, Vars } from "./context.ts";
+import type { McpEnv } from "./deps.ts";
 import { fail } from "./http.ts";
 import { oauthClientIdOf } from "./token-claims.ts";
 import { MCP_PATH, wwwAuthenticate } from "../mcp/metadata.ts";
@@ -54,24 +57,31 @@ export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
   });
 }
 
+/** A 401 an MCP client can act on: the header names our PRM. */
+export function mcpChallenge(
+  c: Context<Vars>,
+  mcp: McpEnv | undefined,
+  message: string,
+  invalid = false,
+): Response {
+  const res = fail(c, 401, "unauthorized", message);
+  res.headers.set("www-authenticate", wwwAuthenticate(mcp, invalid));
+  return res;
+}
+
 export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
   const { admin, ageConfirmed, deps } = ctx;
 
-  const isMcp = (c: Context<Vars>) => new URL(c.req.url).pathname === MCP_PATH;
-
-  /** A 401 an MCP client can act on: the header names our PRM. */
-  function mcpChallenge(c: Context<Vars>, message: string, invalid = false): Response {
-    const res = fail(c, 401, "unauthorized", message);
-    res.headers.set("www-authenticate", wwwAuthenticate(deps.env.mcp, invalid));
-    return res;
-  }
+  const isMcp = (c: Context<Vars>) => c.req.path === MCP_PATH;
+  const challenge = (c: Context<Vars>, message: string, invalid = false) =>
+    mcpChallenge(c, deps.env.mcp, message, invalid);
 
   app.use("*", async (c, next) => {
     const token = c.req.header("authorization")?.replace(/^Bearer /i, "");
-    if (!token && isMcp(c)) return mcpChallenge(c, "Missing token");
+    if (!token && isMcp(c)) return challenge(c, "Missing token");
     if (!token) return fail(c, 401, "unauthorized", "Missing token");
     const { data, error } = await admin.auth.getUser(token);
-    if ((error || !data.user) && isMcp(c)) return mcpChallenge(c, "Invalid token", true);
+    if ((error || !data.user) && isMcp(c)) return challenge(c, "Invalid token", true);
     if (error || !data.user) {
       return fail(c, 401, "unauthorized", "Invalid token");
     }
@@ -84,7 +94,7 @@ export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
       return fail(c, 403, "token_not_allowed", "This token only works for the assistant connection.");
     }
     if (!oauthClientId && isMcp(c)) {
-      return mcpChallenge(c, "Connect through your assistant's sign-in, not an app session.");
+      return challenge(c, "Connect through your assistant's sign-in, not an app session.");
     }
     c.set("userId", data.user.id);
     c.set("email", data.user.email ?? "");
@@ -105,7 +115,7 @@ export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
 
   /** The age-gate refusal for this request, or null when it may continue. */
   async function ageGateRefusal(c: Context<Vars>): Promise<Response | null> {
-    const key = `${c.req.method} ${new URL(c.req.url).pathname}`;
+    const key = `${c.req.method} ${c.req.path}`;
     if (AGE_EXEMPT.has(key)) return null;
     if (await ageConfirmed(c.get("userId"))) return null;
     return fail(
@@ -125,7 +135,7 @@ export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
   /** Which shared budget this request draws on, if any. The `mcp` bucket is
    * taken per generate-type tool call inside /mcp, not per HTTP request. */
   function requestBucket(c: Context<Vars>): RequestBucket | null {
-    const path = new URL(c.req.url).pathname;
+    const path = c.req.path;
     return c.req.method !== "POST" ? null
       : path === "/api/generations" || /^\/api\/generations\/[^/]+\/retry$/.test(path)
       ? "generation"

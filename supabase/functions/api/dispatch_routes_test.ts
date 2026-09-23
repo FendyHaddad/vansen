@@ -86,6 +86,21 @@ Deno.test('a replay of the same key returns the same ids and reserves once', asy
   assertEquals(db.tables.generations.length, 1);
 });
 
+Deno.test('a replay after the user deleted the item answers 202 without the tombstoned row', async () => {
+  const deps = testDeps();
+  const db = deps.admin as unknown as FakeDb;
+  ready(db);
+  const app = createApp(deps);
+
+  await app.request('/api/generations', post(generate(), KEY));
+  db.tables.generations[0].deleted_at = '2026-09-20T00:00:01.000Z';
+  const again = await app.request('/api/generations', post(generate(), KEY));
+
+  assertEquals(again.status, 202);
+  assertEquals((await again.json()).items, []);
+  assertEquals(db.tables.generations.length, 1);
+});
+
 Deno.test('the same key with a DIFFERENT body is refused, not silently replayed', async () => {
   const deps = testDeps();
   const db = deps.admin as unknown as FakeDb;

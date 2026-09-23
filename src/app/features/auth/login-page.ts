@@ -7,6 +7,7 @@ import { AuthService } from '../../core/auth/auth-service';
 import { MODEL_FAMILIES } from '../../core/catalog/model-families';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 import { safeConsentReturnUrl } from './consent-page/consent-return-url';
+import { ConsentReturn } from './consent-page/consent-return';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -22,6 +23,7 @@ export class LoginPage {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly capabilities = inject(PublicCapabilitiesService);
+  private readonly consentReturn = inject(ConsentReturn);
 
   constructor() {
     void this.capabilities.load();
@@ -54,8 +56,11 @@ export class LoginPage {
    * caller-supplied destination taken at face value. See consent-return-url.ts.
    */
   private postLoginUrl(): string {
-    const raw = this.route.snapshot.queryParamMap.get('returnUrl');
-    return safeConsentReturnUrl(raw) ?? '/app';
+    return safeConsentReturnUrl(this.rawReturnUrl()) ?? '/app';
+  }
+
+  private rawReturnUrl(): string | null {
+    return this.route.snapshot.queryParamMap.get('returnUrl');
   }
 
   toggleMode(): void {
@@ -68,6 +73,8 @@ export class LoginPage {
     if (this.googleBusy()) return;
     this.googleBusy.set(true);
     this.error.set('');
+    // Google comes back to /app, not here: carry the consent return over.
+    this.consentReturn.set(this.rawReturnUrl());
     try {
       await this.auth.signInGoogle();
       // Supabase redirects the browser; stay busy until the page unloads.
@@ -98,6 +105,7 @@ export class LoginPage {
         return;
       }
       // Email confirmation flow: account created, session arrives after confirm
+      this.consentReturn.set(this.rawReturnUrl());
       this.signupDone.set(true);
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : 'Authentication failed');

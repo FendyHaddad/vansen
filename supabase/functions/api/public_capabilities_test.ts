@@ -50,6 +50,7 @@ Deno.test('the response carries nothing but the whitelist', async () => {
   assertEquals(
     Object.keys(body).sort(),
     [
+      'assistantConnection',
       'backgroundCompletion',
       'catalogVersion',
       'completionNotifications',
@@ -77,6 +78,21 @@ Deno.test('release flags default off and are reported off', async () => {
   const body = await res.json();
   assertEquals(body.backgroundCompletion, false);
   assertEquals(body.completionNotifications, false);
+  assertEquals(body.assistantConnection, false);
+});
+
+Deno.test('assistantConnection reports MCP_ENABLED', () => {
+  assertEquals(publicCapabilities([], { ...OFF, mcpEnabled: true }).assistantConnection, true);
+  assertEquals(publicCapabilities([], OFF).assistantConnection, false);
+});
+
+Deno.test('MCP_ENABLED is read per request, so the kill switch needs no new isolate', () => {
+  const env: Record<string, string> = { MCP_ENABLED: 'on' };
+  const flags = releaseFlagsFromEnv((k) => env[k]);
+  assertEquals(flags.mcpEnabled, true);
+  env.MCP_ENABLED = 'off';
+  assertEquals(flags.mcpEnabled, false);
+  assertEquals(publicCapabilities([], flags).assistantConnection, false);
 });
 
 Deno.test('a verified flag is reported on', async () => {

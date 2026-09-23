@@ -4,7 +4,7 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { AuthService } from '../../../core/auth/auth-service';
 import { ConsentDetails, ConsentService } from './consent-service';
 import { safeConsentReturnUrl } from './consent-return-url';
-import { NAVIGATE_AWAY } from './navigate-away';
+import { NAVIGATE_AWAY, isAllowedRedirect } from './navigate-away';
 
 type Phase = 'loading' | 'signing-in' | 'consent' | 'redirecting' | 'error';
 
@@ -46,19 +46,21 @@ export class ConsentPage {
 
   readonly capabilities = CAPABILITIES;
 
+  /** The one thing a client cannot choose freely, so it leads the screen.
+   * A custom scheme keeps its scheme (cursor://…) so it reads as an app. */
   readonly redirectHost = computed(() => {
     const uri = this.details()?.redirectUri;
     if (!uri) return '';
-    try {
-      return new URL(uri).host;
-    } catch {
-      return uri;
-    }
+    const url = parseUrl(uri);
+    if (!url) return uri;
+    if (url.protocol === 'https:' || url.protocol === 'http:') return url.host;
+    return `${url.protocol}//${url.host}`;
   });
 
+  /** Plain http only: a custom scheme like cursor:// is not "insecure". */
   readonly redirectIsInsecure = computed(() => {
     const uri = this.details()?.redirectUri;
-    return !!uri && !uri.startsWith('https://');
+    return !!uri && parseUrl(uri)?.protocol === 'http:';
   });
 
   constructor() {
@@ -88,8 +90,7 @@ export class ConsentPage {
     try {
       const outcome = await this.consent.load(authorizationId);
       if (outcome.kind === 'redirect') {
-        this.phase.set('redirecting');
-        this.navigateAway(outcome.url);
+        this.leave(outcome.url);
         return;
       }
       this.details.set(outcome.details);
@@ -112,18 +113,34 @@ export class ConsentPage {
     this.busy.set(true);
     this.errorMessage.set('');
     try {
-      const url = await call();
-      this.phase.set('redirecting');
-      this.navigateAway(url);
+      this.leave(await call());
     } catch (e) {
       this.errorMessage.set(messageOf(e));
       this.busy.set(false);
     }
   }
 
+  /** Defence in depth behind GoTrue's registration checks. */
+  private leave(url: string): void {
+    if (!isAllowedRedirect(url)) {
+      this.fail("This assistant's return address isn't one Vansen will open. Nothing was shared.");
+      return;
+    }
+    this.phase.set('redirecting');
+    this.navigateAway(url);
+  }
+
   private fail(message: string): void {
     this.phase.set('error');
     this.errorMessage.set(message);
+  }
+}
+
+function parseUrl(raw: string): URL | null {
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
   }
 }
 

@@ -19,11 +19,11 @@
 
   <main class="settings-main">
     <nav class="tab-nav" aria-label="Settings sections">
-      @for (tab of tabs; track tab.id) {
+      @for (tab of tabs(); track tab.id) {
         <button
           type="button"
           class="tab-link"
-          [class.tab-active]="active() === tab.id"
+          [class.tab-active]="shown() === tab.id"
           (click)="active.set(tab.id)"
         >
           <span class="tab-icon">
@@ -38,7 +38,7 @@
     </nav>
 
     <section class="tab-content">
-      @switch (active()) {
+      @switch (shown()) {
         @case ('profile') {
           <app-profile-tab />
         }

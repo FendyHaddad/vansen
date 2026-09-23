@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { NgIcon, provideIcons } from '@ng-icons/core';
@@ -36,8 +36,10 @@ export class ConnectedTab {
   readonly error = signal('');
   readonly revokingId = signal<string | null>(null);
   readonly copied = signal(false);
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.copiedTimer));
     void this.load();
   }
 
@@ -80,7 +82,8 @@ export class ConnectedTab {
     try {
       await navigator.clipboard.writeText(this.mcpUrl);
       this.copied.set(true);
-      setTimeout(() => this.copied.set(false), COPIED_FLASH_MS);
+      clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => this.copied.set(false), COPIED_FLASH_MS);
     } catch {
       // Clipboard permission denied or unavailable in this browser — the URL
       // is still plain, selectable text right above the button.

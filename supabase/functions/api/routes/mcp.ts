@@ -5,6 +5,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "npm:@modelcontextprotocol/sdk@1.30.0/server/webStandardStreamableHttp.js";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
+import { mcpChallenge } from "../lib/middleware.ts";
 import { PRM_SUFFIX, protectedResourceMetadata } from "../mcp/metadata.ts";
 import { buildMcpServer } from "../mcp/server.ts";
 
@@ -38,6 +39,12 @@ export function registerMcpPublicRoutes(app: App, ctx: ApiContext): void {
 
 export function registerMcpRoutes(app: App, ctx: ApiContext): void {
   app.post("/mcp", async (c) => {
+    // Containment already refused any token without a client_id; this guard
+    // keeps a future routing slip from running the tools as nobody's grant.
+    const clientId = c.get("oauthClientId");
+    if (!clientId) {
+      return mcpChallenge(c, ctx.deps.env.mcp, "Connect through your assistant's sign-in, not an app session.");
+    }
     // Server-set: every generation and app_errors row from here is 'mcp',
     // whatever x-vansen-client says.
     c.set("client", "mcp");
@@ -45,7 +52,7 @@ export function registerMcpRoutes(app: App, ctx: ApiContext): void {
       c,
       ctx,
       userId: c.get("userId"),
-      clientId: c.get("oauthClientId") ?? "",
+      clientId,
       sleep: ctx.deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
     });
     const transport = new WebStandardStreamableHTTPServerTransport({

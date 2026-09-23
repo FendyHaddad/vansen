@@ -19,6 +19,8 @@ export interface PublicCapabilities {
   backgroundCompletion: boolean;
   completionNotifications: boolean;
   catalogVersion: string;
+  /** MCP_ENABLED: the Connected assistants tab is shown only while on. */
+  assistantConnection: boolean;
 }
 
 /** Overridable in tests. Anonymous by construction — it sends no token. */
@@ -43,6 +45,7 @@ function parse(raw: unknown): PublicCapabilities | null {
     completionNotifications:
       body.backgroundCompletion === true && body.completionNotifications === true,
     catalogVersion: typeof body.catalogVersion === 'string' ? body.catalogVersion : '',
+    assistantConnection: body.assistantConnection === true,
   };
 }
 
@@ -60,6 +63,7 @@ export class PublicCapabilitiesService {
   readonly completionNotifications = computed(
     () => this.caps()?.completionNotifications === true,
   );
+  readonly assistantConnection = computed(() => this.caps()?.assistantConnection === true);
 
   /** Safe to call from several pages at once; the request happens once. */
   load(): Promise<void> {

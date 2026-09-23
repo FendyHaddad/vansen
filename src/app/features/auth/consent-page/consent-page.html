@@ -21,14 +21,17 @@
       }
       @case ('consent') {
         @if (details(); as d) {
-          <p class="auth-sub">
-            <strong>{{ d.clientName }}</strong> wants to connect to your Vansen account.
-          </p>
-
           <div class="consent-target">
-            <span class="consent-target-label">Sends you back to</span>
+            <span class="consent-target-label">An app at</span>
             <span class="consent-target-host">{{ redirectHost() }}</span>
+            <span class="consent-target-label">wants to connect to your Vansen account.</span>
           </div>
+
+          <p class="auth-sub">
+            It calls itself <span class="consent-client-name">{{ d.clientName }}</span>.
+            <span class="consent-unverified">Unverified app:</span> anyone can pick that
+            name. Only allow it if you started connecting from {{ redirectHost() }} just now.
+          </p>
 
           @if (redirectIsInsecure()) {
             <p class="consent-warning" role="alert">

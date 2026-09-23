@@ -132,4 +132,20 @@ describe('ConnectedTab', () => {
     expect(writeText).toHaveBeenCalledWith(`${environment.apiBaseUrl}/mcp`);
     expect(tab.copied()).toBe(true);
   });
+
+  it('clears the "Copied" timer when the tab is destroyed', async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn(() => Promise.resolve()) } });
+    auth.listGrants.mockResolvedValue([]);
+    const tab = make();
+    await settle();
+    vi.useFakeTimers();
+    try {
+      await tab.copyUrl();
+      expect(vi.getTimerCount()).toBe(1);
+      fixture.destroy();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

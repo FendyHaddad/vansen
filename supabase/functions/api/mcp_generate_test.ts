@@ -116,7 +116,7 @@ Deno.test("a style resolves by label and reaches the submission", async () => {
   assertEquals(payload.styleId, "oil-painting");
 });
 
-Deno.test("a repeated call with the same JSON-RPC id and arguments charges once", async () => {
+Deno.test("a retry with the same JSON-RPC id and arguments, inside the window, charges once", async () => {
   const { app, db } = finishingApp();
   const args = { prompt: "a red fox", model: "flux" };
   const first = await callTool(app, "generate_image", args, { id: 7 });
@@ -143,6 +143,63 @@ Deno.test("the same idempotency_key with different arguments is refused, not rep
   const result = await callTool(app, "generate_image", { prompt: "a blue fox", idempotency_key: "k" });
   assert(result.isError);
   assertEquals(jsonOf(result).error, "idempotency_conflict");
+  assertEquals(db.tables.generations.length, 1);
+});
+
+Deno.test("a replay says it was already submitted and that nothing new was charged", async () => {
+  const { app } = finishingApp();
+  const args = { prompt: "a red fox", model: "flux" };
+  const first = await callTool(app, "generate_image", args, { id: 8 });
+  assertStringIncludes(textOf(first), "credits charged");
+  const again = await callTool(app, "generate_image", args, { id: 8 });
+  assertStringIncludes(textOf(again), "already submitted");
+  assertStringIncludes(textOf(again), "nothing new charged");
+  assert(!textOf(again).includes("credits charged for this request"), textOf(again));
+});
+
+Deno.test("same id + args after the retry window is a new generation", async () => {
+  const { app, db } = finishingApp();
+  const args = { prompt: "a red fox", model: "flux" };
+  db.setNow(new Date("2026-09-20T10:00:00.000Z"));
+  await callTool(app, "generate_image", args, { id: 3 });
+  db.setNow(new Date("2026-09-20T10:05:00.000Z"));
+  const later = await callTool(app, "generate_image", args, { id: 3 });
+  assertEquals(db.tables.generations.length, 2, "a deliberate re-run generates anew");
+  assertStringIncludes(textOf(later), "credits charged");
+});
+
+Deno.test("a retry that crosses into the next time bucket still replays", async () => {
+  const { app, db } = finishingApp();
+  const args = { prompt: "a red fox", model: "flux" };
+  // 10:01:59 and 10:02:01 sit in adjacent 120 s buckets.
+  db.setNow(new Date("2026-09-20T10:01:59.000Z"));
+  await callTool(app, "generate_image", args, { id: 4 });
+  db.setNow(new Date("2026-09-20T10:02:01.000Z"));
+  await callTool(app, "generate_image", args, { id: 4 });
+  assertEquals(db.tables.generations.length, 1, "one generation, one charge");
+});
+
+Deno.test("a conflict on a derived key is a plain try-again, not a key the user never gave", async () => {
+  const { app, db } = finishingApp();
+  db.rpcHandlers.fn_reserve_generation = () => {
+    throw new Error("idempotency_conflict");
+  };
+  const result = await callTool(app, "generate_image", { prompt: "a red fox" });
+  assert(result.isError);
+  assertEquals(jsonOf(result).error, "idempotency_conflict");
+  const sentence = textOf(result).split("\n")[0];
+  assert(!/idempotency_key/i.test(sentence), sentence);
+  assertStringIncludes(sentence.toLowerCase(), "try again");
+});
+
+Deno.test("a replay never re-serves an image the user has since deleted", async () => {
+  const { app, db } = finishingApp();
+  const args = { prompt: "a red fox", model: "flux" };
+  await callTool(app, "generate_image", args, { id: 21 });
+  db.tables.generations[0].deleted_at = "2026-09-20T00:00:01.000Z";
+  const again = await callTool(app, "generate_image", args, { id: 21 });
+  assertEquals(again.content.filter((b) => b.type === "image").length, 0);
+  assertEquals(jsonOf(again).items.length, 0);
   assertEquals(db.tables.generations.length, 1);
 });
 
@@ -202,6 +259,8 @@ Deno.test("mapped refusal: content_policy", async () => {
   assert(result.isError);
   assertEquals(jsonOf(result).error, "content_policy");
   assertStringIncludes(textOf(result), "content policy");
+  assertStringIncludes(textOf(result), "Do not retry or reword automatically; tell the user.");
+  assert(!/rephrase/i.test(textOf(result)), "never invite the assistant to reword and resubmit");
   assertEquals(reserveCalls(db).length, 0);
 });
 

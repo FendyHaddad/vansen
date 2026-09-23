@@ -497,9 +497,13 @@ export function createSubmitGeneration(ctx: Services) {
     const generationIds = ((reservation.data ?? {}) as {
       generationIds?: string[];
     }).generationIds ?? [];
+    // A replay returns the original ids; never re-serve one the user has
+    // since deleted, and never another account's row.
     const { data: createdRows } = await admin
       .from("generations")
       .select("*")
+      .eq("user_id", userId)
+      .is("deleted_at", null)
       .in("id", generationIds);
     // 202: accepted, not finished. The worker executes it whether or not this
     // client is still here to watch.

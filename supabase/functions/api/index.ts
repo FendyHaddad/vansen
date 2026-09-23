@@ -5,6 +5,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import Stripe from "npm:stripe@17";
 import { createApp } from "./app.ts";
 import { releaseFlagsFromEnv } from "./services/public-capabilities.ts";
+import { mcpEnvFrom } from "./mcp/metadata.ts";
 import { adapterFor } from "./_shared/providers/index.ts";
 import { storageFor } from "./_shared/storage/index.ts";
 import { moderate } from "./_shared/moderation.ts";
@@ -42,20 +43,8 @@ const release = {
   deployedAt: Deno.env.get("DEPLOYED_AT") ?? null,
 };
 
-/**
- * Where assistants reach /mcp and sign in. Hosted, both derive from
- * SUPABASE_URL. Inside `supabase functions serve` SUPABASE_URL is
- * http://kong:8000, which no client can resolve, so a local run sets
- * MCP_PUBLIC_SUPABASE_URL (e.g. http://127.0.0.1:54321). Never set it hosted.
- */
-const publicSupabaseUrl = (Deno.env.get("MCP_PUBLIC_SUPABASE_URL") ||
-  Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
-const mcp = publicSupabaseUrl
-  ? {
-    resourceUrl: `${publicSupabaseUrl}/functions/v1/api/mcp`,
-    authServerUrl: `${publicSupabaseUrl}/auth/v1`,
-  }
-  : undefined;
+/** Where assistants reach /mcp and sign in (see mcpEnvFrom). */
+const mcp = mcpEnvFrom((k) => Deno.env.get(k));
 
 const app = createApp({
   admin,

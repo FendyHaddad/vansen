@@ -93,6 +93,51 @@ describe('ConsentPage', () => {
     expect(fixture.nativeElement.textContent).toContain("isn't secured with https");
   });
 
+  function withRedirect(redirectUri: string) {
+    return make({
+      consent: {
+        load: vi.fn(() =>
+          Promise.resolve({ kind: 'details' as const, details: { ...CLIENT_DETAILS, redirectUri } }),
+        ),
+      },
+    });
+  }
+
+  it('does not claim a custom scheme (cursor://, vscode://) is insecure', async () => {
+    for (const uri of ['cursor://anysphere.cursor-retrieval/oauth/callback', 'vscode://vscode.mcp/cb']) {
+      const { fixture, page } = withRedirect(uri);
+      await settle();
+      fixture.detectChanges();
+      expect(page.redirectIsInsecure()).toBe(false);
+      expect(fixture.nativeElement.textContent).not.toContain("isn't secured");
+    }
+  });
+
+  it('weights the redirect host over the self-chosen name, and says the app is unverified', async () => {
+    const { fixture } = make({});
+    await settle();
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    const host = el.querySelector('.consent-target-host');
+    const name = el.querySelector('.consent-client-name');
+    expect(host?.textContent?.trim()).toBe('claude.ai');
+    expect(name?.textContent).toContain('Claude');
+    // The host comes first: it is the one thing the client cannot fake.
+    expect(host!.compareDocumentPosition(name!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(el.textContent).toContain('Unverified app');
+  });
+
+  it('refuses to leave for a dangerous redirect, and says so', async () => {
+    const { fixture, page, navigateAway } = make({
+      consent: { approve: vi.fn(() => Promise.resolve('javascript:alert(1)')) },
+    });
+    await settle();
+    await page.allow();
+    fixture.detectChanges();
+    expect(navigateAway).not.toHaveBeenCalled();
+    expect(page.phase()).toBe('error');
+  });
+
   it('does not warn when the redirect target is https', async () => {
     const { fixture, page } = make({});
     await settle();

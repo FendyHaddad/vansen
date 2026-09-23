@@ -24,3 +24,12 @@ Deno.test('rate limiter database outage fails closed before request work', async
   assertEquals(res.status, 503);
   assertEquals((await res.json()).error.code, 'request_limit_unavailable');
 });
+Deno.test('a percent-encoded /api/%67enerations still draws a generation slot', async () => {
+  const deps = testDeps();
+  const db = deps.admin as unknown as FakeDb;
+  db.rpcHandlers.fn_take_request_slot = () => ({ allowed: false, retryAfterSeconds: 42 });
+  const res = await createApp(deps).request('/api/%67enerations', { method: 'POST', headers: AUTH, body: '{}' });
+  assertEquals(res.status, 429);
+  assertEquals(db.rpcCalls.find(c => c.name === 'fn_take_request_slot')?.args, { p_user: TEST_USER, p_bucket: 'generation' });
+  assertEquals(db.rpcCalls.some(c => c.name === 'fn_reserve_generation'), false);
+});

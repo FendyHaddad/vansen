@@ -1,7 +1,8 @@
 // The shared path of generate_image, upscale_image and vary_image: take a
 // slot from the `mcp` budget, submit through the gateway service with the
 // tool's Idempotency-Key, then wait up to 25 s for the worker and return
-// the images — or the ids, with how to collect them. Entry: submitAndWait().
+// the images — or the ids, with how to collect them. A replay says it
+// charged nothing new. Entry: submitAndWait().
 import { takeRequestSlot } from "../services/request-slots.ts";
 import { gatewayFailure, mappedError, rateLimited } from "./errors.ts";
 import { toolIdempotencyKey } from "./idempotency.ts";
@@ -34,7 +35,13 @@ export async function waitForItems(
   return items;
 }
 
-function summarize(items: GenerationItem[], charged: number): string {
+/** The closing sentence: what this call cost. A replay cost nothing new. */
+function chargeSentence(charged: number, replay: boolean): string {
+  if (replay) return "This request was already submitted, so nothing new charged.";
+  return `${charged} credits charged for this request.`;
+}
+
+function summarize(items: GenerationItem[], charged: number, replay: boolean): string {
   const done = items.filter((i) => i.status === "done").length;
   const failed = items.filter((i) => i.status === "failed").length;
   const pending = items.length - done - failed;
@@ -48,7 +55,8 @@ function summarize(items: GenerationItem[], charged: number): string {
       } to collect ${pending === 1 ? "it" : "them"}`,
     );
   }
-  return `${parts.join("; ")}. ${charged} credits charged for this request.`;
+  const head = parts.length ? `${parts.join("; ")}. ` : "";
+  return `${head}${chargeSentence(charged, replay)}`;
 }
 
 /** What a generate-type tool answers once the wait is over. */
@@ -56,11 +64,12 @@ export async function generationOutcome(
   env: ToolEnv,
   items: GenerationItem[],
   credits: unknown,
+  replay = false,
 ): Promise<ToolOutcome> {
   const charged = items.reduce((sum, i) => sum + (Number(i.priceCredits) || 0), 0);
   const blocks = await imageBlocks(env, items);
   const outcome = items.every(isSettled) ? "ok" : "pending";
-  return ok(summarize(items, charged), { items: items.map(itemView), credits }, blocks, outcome);
+  return ok(summarize(items, charged, replay), { items: items.map(itemView), credits }, blocks, outcome);
 }
 
 export async function submitAndWait(
@@ -74,9 +83,10 @@ export async function submitAndWait(
   if ("unavailable" in slot) return mappedError("request_limit_unavailable", "");
   if (!slot.allowed) return rateLimited(slot.retryAfterSeconds);
 
-  const res = await submit(await toolIdempotencyKey(env, call, tool, args));
-  if (!res.ok) return await gatewayFailure(res);
+  const { key, derived, replay } = await toolIdempotencyKey(env, call, tool, args);
+  const res = await submit(key);
+  if (!res.ok) return await gatewayFailure(res, { derivedKey: derived });
   const body = await res.json() as { items?: GenerationItem[]; credits?: unknown };
   const items = await waitForItems(env, body.items ?? []);
-  return await generationOutcome(env, items, body.credits ?? null);
+  return await generationOutcome(env, items, body.credits ?? null, replay);
 }

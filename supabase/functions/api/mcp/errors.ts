@@ -9,7 +9,7 @@ import type { ToolOutcome } from "./tool-kit.ts";
 const MAPPED: Record<string, [sentence: string, action: string]> = {
   content_policy: [
     "That prompt breaks Vansen's content policy, so nothing was generated or charged.",
-    "Rephrase it; repeated violations suspend the account.",
+    "Do not retry or reword automatically; tell the user. Repeated violations suspend the account.",
   ],
   insufficient_credits: [
     "There aren't enough credits on this Vansen account for that.",
@@ -85,11 +85,27 @@ export function mappedError(code: string, fallback: string, extra: Record<string
   return toolError(code, fallback || "Vansen couldn't do that.");
 }
 
+/**
+ * A conflict on a key we derived is not the user's doing (they gave no key):
+ * the same call came back with a different body inside the retry window.
+ */
+function derivedKeyConflict(): ToolOutcome {
+  return toolError(
+    "idempotency_conflict",
+    "Vansen couldn't take that request just now; nothing was charged.",
+    "Try again in a few minutes.",
+  );
+}
+
 /** A non-2xx gateway Response as a tool error. */
-export async function gatewayFailure(res: Response): Promise<ToolOutcome> {
+export async function gatewayFailure(
+  res: Response,
+  opts: { derivedKey?: boolean } = {},
+): Promise<ToolOutcome> {
   const body = await res.json().catch(() => null);
   const error = (body?.error ?? {}) as { code?: string; message?: string; errorId?: string };
   const code = error.code ?? "internal";
+  if (code === "idempotency_conflict" && opts.derivedKey) return derivedKeyConflict();
   if (code === "rate_limited") {
     return rateLimited(Number(res.headers.get("retry-after")) || 60);
   }

@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/auth/auth-guard';
 import { ageGuard, onboardingGuard } from './core/auth/age-guard';
 import { unsavedChangesGuard } from './core/editing/unsaved-changes-guard';
+import { consentReturnGuard } from './features/auth/consent-page/consent-return';
 
 export const routes: Routes = [
   {
@@ -54,7 +55,9 @@ export const routes: Routes = [
   },
   {
     path: 'app',
-    canActivate: [authGuard, ageGuard],
+    // consentReturnGuard: a Google sign-in started from the consent page
+    // lands here; it goes back to consent before the workspace loads.
+    canActivate: [authGuard, consentReturnGuard, ageGuard],
     // Navigating away from a dirty canvas used to throw the work away silently.
     canDeactivate: [unsavedChangesGuard],
     loadComponent: () => import('./features/workspace/workspace-page').then((m) => m.WorkspacePage),

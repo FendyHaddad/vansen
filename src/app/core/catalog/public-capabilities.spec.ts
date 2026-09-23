@@ -21,6 +21,7 @@ const FULL = {
   backgroundCompletion: true,
   completionNotifications: true,
   catalogVersion: '2026-09-21.1',
+  assistantConnection: true,
 };
 
 /**
@@ -45,6 +46,18 @@ describe('PublicCapabilitiesService', () => {
     expect(svc.familyEnabled('flux')).toBe(true);
     expect(svc.familyEnabled('kling')).toBe(false);
     expect(svc.backgroundCompletion()).toBe(true);
+  });
+
+  it('reports the assistant connection only when the server says it is on', async () => {
+    expect(svc.assistantConnection()).toBe(false);
+    await svc.load();
+    expect(svc.assistantConnection()).toBe(true);
+    svc = serving({ ...FULL, assistantConnection: 'yes' });
+    await svc.load();
+    expect(svc.assistantConnection()).toBe(false);
+    svc = serving({ ...FULL, assistantConnection: undefined });
+    await svc.load();
+    expect(svc.assistantConnection()).toBe(false);
   });
 
   it('drops a family id this client does not know', async () => {

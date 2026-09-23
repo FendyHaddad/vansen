@@ -19,13 +19,15 @@ export interface PublicCapabilities {
   completionNotifications: boolean;
   /** Lets a stale client notice its catalog no longer matches the server's. */
   catalogVersion: string;
+  /** The assistant connection (MCP_ENABLED) is on: the web shows its tab. */
+  assistantConnection: boolean;
 }
 
 /** Release flags the deployment owns, so P9 can flip one without a rebuild. */
 export interface ReleaseFlags {
   backgroundCompletion: boolean;
   completionNotifications: boolean;
-  /** The /mcp assistant connection (MCP_ENABLED). Never published here. */
+  /** The /mcp assistant connection (MCP_ENABLED); published as a boolean. */
   mcpEnabled: boolean;
 }
 
@@ -38,8 +40,11 @@ export function releaseFlagsFromEnv(get: (k: string) => string | undefined): Rel
     // Notifications need both halves: work that finishes with no client
     // attached, and a delivery path proven on the device.
     completionNotifications: background && get('RELEASE_COMPLETION_NOTIFICATIONS') === 'on',
-    // Off: /mcp answers 503 mcp_disabled; its PRM is still served.
-    mcpEnabled: get('MCP_ENABLED') === 'on',
+    // Off: /mcp answers 503 mcp_disabled; its PRM is still served. A getter:
+    // the kill switch is read on every request, not once per isolate.
+    get mcpEnabled() {
+      return get('MCP_ENABLED') === 'on';
+    },
   };
 }
 
@@ -56,5 +61,6 @@ export function publicCapabilities(
     backgroundCompletion: flags.backgroundCompletion,
     completionNotifications: flags.backgroundCompletion && flags.completionNotifications,
     catalogVersion: CATALOG_VERSION,
+    assistantConnection: flags.mcpEnabled,
   };
 }
