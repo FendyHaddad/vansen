@@ -17,6 +17,7 @@ import { createAgeGate } from "../services/age-gate.ts";
 import { createJobs } from "../services/jobs.ts";
 import { createLibrary } from "../services/library.ts";
 import { createReplay } from "../services/replay.ts";
+import { createOauthStore } from "../oauth/store.ts";
 
 export type Vars = {
   Variables: {
@@ -25,8 +26,9 @@ export type Vars = {
     requestId: string;
     /** Server-set client tag ('mcp' on /mcp); wins over the header. */
     client?: string;
-    /** The OAuth grant's client_id; set only for assistant tokens. */
+    /** The OAuth client and grant of an assistant's token; /mcp only. */
     oauthClientId?: string;
+    grantId?: string;
   };
 };
 export type App = Hono<Vars>;
@@ -80,6 +82,7 @@ function createServices(deps: ApiDeps) {
     ...createGenerationDtos(signing.signStored),
     ...createAccountClosure({ admin, stripe, logError, ageOkMemo }),
     ...createAgeGate(admin, ageOkMemo),
+    oauth: createOauthStore(admin),
   };
 }
 

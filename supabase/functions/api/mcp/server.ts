@@ -1,7 +1,7 @@
 // One McpServer per /mcp request (stateless), with the v1 tools registered.
 // runTool() is the wrapper every call goes through: the per-tool age gate,
 // exceptions turned into a tool error + an app_errors row (client 'mcp'),
-// and one structured log line (user, client_id, tool, outcome, ms).
+// and one structured log line (user, client, grant, tool, outcome, ms).
 import { McpServer } from "npm:@modelcontextprotocol/sdk@1.30.0/server/mcp.js";
 import type { CallToolResult } from "npm:@modelcontextprotocol/sdk@1.30.0/types.js";
 import type { z } from "npm:zod@4";
@@ -50,6 +50,7 @@ async function runTool(
     event: "mcp_tool",
     user: env.userId,
     clientId: env.clientId,
+    grantId: env.grantId,
     tool: def.name,
     outcome,
     ms: Math.round(performance.now() - started),

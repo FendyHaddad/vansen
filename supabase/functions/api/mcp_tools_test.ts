@@ -3,7 +3,7 @@
 // and unexpected failures logged to app_errors with client 'mcp'.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { FakeDb, TEST_USER } from "./testing/fakes.ts";
-import { callTool, jsonOf, mcpApp, rpc, textOf } from "./testing/mcp.ts";
+import { callTool, jsonOf, mcpApp, OAUTH_CLIENT, OAUTH_GRANT, rpc, textOf } from "./testing/mcp.ts";
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1]);
 const P1 = "00000000-0000-4000-8000-000000000001";
@@ -255,7 +255,8 @@ Deno.test("every tool call writes one structured log line", async () => {
   assert(line, "an mcp_tool log line");
   assertEquals(line.tool, "get_account");
   assertEquals(line.user, TEST_USER);
-  assertEquals(line.clientId, "11111111-2222-4333-8444-555555555555");
+  assertEquals(line.clientId, OAUTH_CLIENT);
+  assertEquals(line.grantId, OAUTH_GRANT);
   assertEquals(line.outcome, "ok");
   assertEquals(typeof line.ms, "number");
 });

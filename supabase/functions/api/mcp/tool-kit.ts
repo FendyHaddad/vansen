@@ -15,8 +15,9 @@ export interface ToolEnv {
   c: Context<Vars>;
   ctx: ApiContext;
   userId: string;
-  /** The OAuth grant's client id (from the verified token). */
+  /** The OAuth client and grant of the resolved access token. */
   clientId: string;
+  grantId: string;
   sleep: (ms: number) => Promise<void>;
 }
 
