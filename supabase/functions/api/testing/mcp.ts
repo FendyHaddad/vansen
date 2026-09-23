@@ -1,14 +1,19 @@
-// Test doubles for the /mcp surface: an OAuth-shaped access token (a JWT
-// whose payload carries client_id, as Supabase's OAuth server issues), a
-// gateway with MCP switched on, and a JSON-RPC caller over app.request.
+// Test doubles for the /mcp surface: an opaque vsn_at_ access token seeded
+// with its client and grant (as our authorization server issues), an app
+// session JWT, a gateway with MCP switched on, and a JSON-RPC caller.
 import type { Hono } from "jsr:@hono/hono";
 import { createApp } from "../app.ts";
 import type { ApiDeps } from "../app.ts";
 import type { Vars } from "../lib/context.ts";
+import { sha256Hex } from "../oauth/secrets.ts";
 import { FakeDb, TEST_USER, testDeps } from "./fakes.ts";
+import { installOauthRpcs } from "./oauth.ts";
 
-export const OAUTH_CLIENT = "11111111-2222-4333-8444-555555555555";
-export const MCP_RESOURCE = "https://project.example/functions/v1/api/mcp";
+export const OAUTH_CLIENT = "vsn_client_testclient0000000000";
+export const OAUTH_GRANT = "99999999-2222-4333-8444-555555555555";
+export const MCP_API = "https://project.example/functions/v1/api";
+export const MCP_RESOURCE = `${MCP_API}/mcp`;
+export const MCP_ISSUER = "https://vansen.vankode.com";
 
 function b64url(value: unknown): string {
   return btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_")
@@ -20,19 +25,45 @@ export function jwtWith(claims: Record<string, unknown>): string {
   return `${b64url({ alg: "ES256", typ: "JWT" })}.${b64url(claims)}.sig`;
 }
 
-export const OAUTH_TOKEN = jwtWith({
-  sub: TEST_USER,
-  aud: "authenticated",
-  client_id: OAUTH_CLIENT,
-  scope: "openid email",
-});
+/** The assistant's access token: opaque, never known to GoTrue. */
+export const OAUTH_TOKEN = `vsn_at_${"A".repeat(43)}`;
+const OAUTH_TOKEN_HASH = await sha256Hex(OAUTH_TOKEN);
 export const SESSION_JWT = jwtWith({ sub: TEST_USER, aud: "authenticated" });
 
-/** testDeps with MCP on, both token kinds registered, and instant sleeps. */
+/** Seeds a registered client, its active grant and a live access token. */
+export function seedOauthGrant(db: FakeDb, userId = TEST_USER): void {
+  installOauthRpcs(db);
+  db.tables.oauth_clients = [{
+    id: OAUTH_CLIENT,
+    client_name: "Claude",
+    redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+    registered_ip_hash: "seed",
+    created_at: db.now().toISOString(),
+  }];
+  db.tables.oauth_grants = [{
+    id: OAUTH_GRANT,
+    user_id: userId,
+    client_id: OAUTH_CLIENT,
+    created_at: db.now().toISOString(),
+    last_used_at: null,
+    revoked_at: null,
+  }];
+  db.tables.oauth_tokens = [{
+    token_hash: OAUTH_TOKEN_HASH,
+    grant_id: OAUTH_GRANT,
+    kind: "access",
+    // Far off: tool tests move the clock by hours. Expiry has its own tests.
+    expires_at: "2099-01-01T00:00:00.000Z",
+    revoked_at: null,
+    replaced_by: null,
+  }];
+}
+
+/** testDeps with MCP on, both token kinds known, and instant sleeps. */
 export function mcpDeps(over: Partial<ApiDeps> = {}): ApiDeps {
   const base = testDeps();
   const db = base.admin as unknown as FakeDb;
-  db.tokens.set(OAUTH_TOKEN, { id: TEST_USER, email: "test@example.com" });
+  seedOauthGrant(db);
   db.tokens.set(SESSION_JWT, { id: TEST_USER, email: "test@example.com" });
   return {
     ...base,
@@ -40,10 +71,7 @@ export function mcpDeps(over: Partial<ApiDeps> = {}): ApiDeps {
     env: {
       ...base.env,
       releaseFlags: { ...base.env.releaseFlags, mcpEnabled: true },
-      mcp: {
-        resourceUrl: MCP_RESOURCE,
-        authServerUrl: "https://project.example/auth/v1",
-      },
+      mcp: { resourceUrl: MCP_RESOURCE, apiUrl: MCP_API, issuer: MCP_ISSUER },
     },
     ...over,
   };

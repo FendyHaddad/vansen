@@ -329,26 +329,51 @@ hands out.
 
 ## 7c. Assistant connection (MCP)
 
-Spec: `specs/2026-09-23-mcp-connection-design.md` (§9 is the rollout order).
-The gateway serves `POST /api/mcp` and the public PRM at
-`/api/mcp/.well-known/oauth-protected-resource`; both are dark until the
-owner steps are done and the flag is on.
+Spec: `specs/2026-09-23-mcp-connection-design.md` (§R replaces the Supabase
+OAuth server; §R6 is the rollout order). The gateway is its own OAuth 2.1
+authorization server: it issues opaque `vsn_at_`/`vsn_rt_` tokens that only
+`POST /api/mcp` accepts, so GoTrue never sees an assistant token. Supabase's
+OAuth server stays **off** (no dashboard step, no ES256 step).
 
-- **Owner steps (dashboard):** enable the OAuth 2.1 server and Dynamic Client
-  Registration, authorization path `/oauth/consent`, `site_url` =
-  `https://vansen.vankode.com`, asymmetric (ES256) JWT signing keys.
-- **Migration:** `0035_mcp_client.sql` (client tag `mcp`, request bucket `mcp`
-  at 10 per minute).
+- **Routes (all on `api`):** the PRM at
+  `/api/mcp/.well-known/oauth-protected-resource`; public `/api/oauth/register`,
+  `/authorize`, `/token`, `/revoke`; session `/api/oauth/requests/:id`
+  (+ `/approve`, `/deny`) and `/api/oauth/grants` (+ `DELETE /:clientId`).
+- **Issuer:** `https://vansen.vankode.com`. Its RFC 8414 metadata is the
+  static file `public/.well-known/oauth-authorization-server` on the web
+  Worker; a Deno drift test keeps it equal to `buildAsMetadata()`.
+- **Migrations:** `0035_mcp_client.sql` (client tag `mcp`, request bucket `mcp`
+  at 10 per minute) and `0036_mcp_oauth.sql` (the five `oauth_*` tables, the
+  RPCs, and the daily cron job `purge_oauth` at 03:20 UTC).
 - **Flag:** Edge Function secret `MCP_ENABLED`; only the exact string `on`
-  enables `/mcp`. Anything else answers 503 `mcp_disabled` (the PRM is still
-  served). This is also the kill switch.
-- **Read back after deploy:** the PRM answers 200 with
-  `resource = https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/mcp`,
-  and a bare `POST /api/mcp` answers 401 with a `WWW-Authenticate` header that
-  names it.
-- `MCP_PUBLIC_SUPABASE_URL` exists for `supabase functions serve` only (where
-  `SUPABASE_URL` is `http://kong:8000`). Never set it on the hosted project:
-  the PRM would point clients somewhere else.
+  enables `/mcp`, `/oauth/register`, `/oauth/authorize`, `/oauth/token` and the
+  consent endpoints. Anything else answers 503 `mcp_disabled`. The PRM, the
+  metadata, `/oauth/revoke` and the grant endpoints keep working, so users can
+  always disconnect. This is also the kill switch.
+- **Consent redirect:** `/oauth/authorize` sends the browser to
+  `<first APP_ORIGIN>/oauth/consent`. `APP_ORIGIN`'s first entry must be
+  `https://vansen.vankode.com`.
+- **Read back after deploy:**
+  - `https://vansen.vankode.com/.well-known/oauth-authorization-server`
+    answers JSON (not `index.html`);
+  - the PRM answers 200 with
+    `resource = https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/mcp`
+    and `authorization_servers = ["https://vansen.vankode.com"]`;
+  - a bare `POST /api/mcp` answers 401 with a `WWW-Authenticate` header that
+    names the PRM;
+  - with the flag off, `POST /api/oauth/register` answers 503.
+- **`MCP_PUBLIC_SUPABASE_URL` and `MCP_ISSUER` are for `supabase functions
+  serve` only** (where `SUPABASE_URL` is `http://kong:8000`, which no client
+  resolves). `MCP_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` gives the public
+  api and MCP URLs. `MCP_ISSUER` is the local issuer; it defaults to
+  `<local api>/oauth`, whose metadata the api serves at
+  `<local api>/oauth/.well-known/oauth-authorization-server`. Spec-following
+  clients (MCP Inspector 2.7.0, SDK 2.0) never try that path-appended URL, so
+  for them set `MCP_ISSUER` to a local web origin root (e.g.
+  `http://127.0.0.1:4200`) that serves the api's copy at
+  `/.well-known/oauth-authorization-server`, the same shape as hosted. The
+  code ignores both unless `SUPABASE_URL` is the kong host; never set either on
+  the hosted project anyway.
 
 ## 8. Rollback
 

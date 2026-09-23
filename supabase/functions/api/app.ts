@@ -29,6 +29,7 @@ import { registerUploadRoutes } from "./routes/uploads.ts";
 import { registerPersonaRoutes } from "./routes/personas.ts";
 import { registerLibraryWriteRoutes } from "./routes/library-writes.ts";
 import { registerMcpPublicRoutes, registerMcpRoutes } from "./routes/mcp.ts";
+import { registerOauthPublicRoutes, registerOauthSessionRoutes } from "./routes/oauth.ts";
 
 export type { ApiDeps, ApiEnv, ReleaseIdentity } from "./lib/deps.ts";
 
@@ -41,6 +42,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   registerRequestMiddleware(app, ctx);
   registerPublicRoutes(app, ctx);
   registerMcpPublicRoutes(app, ctx);
+  registerOauthPublicRoutes(app, ctx);
   registerAuthMiddleware(app, ctx);
   registerProfileRoutes(app, ctx);
   registerLedgerRoutes(app, ctx);
@@ -55,6 +57,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   registerPersonaRoutes(app, ctx);
   registerLibraryWriteRoutes(app, ctx);
   registerMcpRoutes(app, ctx);
+  registerOauthSessionRoutes(app, ctx);
 
   return app;
 }

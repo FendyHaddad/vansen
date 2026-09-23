@@ -1,17 +1,17 @@
 // Global middleware, in two phases so the public routes sit between them.
 // registerRequestMiddleware: CORS, the request id, the unhandled-error answer.
-// registerAuthMiddleware: bearer auth, OAuth token containment (assistant
-// tokens only on /mcp, app sessions never there), the 18+ age gate (memoised
-// per app) and the shared per-user request budgets. Hono runs these in order.
+// registerAuthMiddleware: bearer auth (lib/bearer-auth.ts: our opaque tokens
+// on /mcp, GoTrue sessions everywhere else), the 18+ age gate (memoised per
+// app) and the shared per-user request budgets. Hono runs these in order.
 // Every path check reads c.req.path, the decoded path Hono routes on, so a
 // percent-encoded path cannot reach a route while dodging its checks.
 import type { Context } from "jsr:@hono/hono";
 import { cors } from "jsr:@hono/hono/cors";
 import type { ApiContext, App, Vars } from "./context.ts";
-import type { McpEnv } from "./deps.ts";
 import { fail } from "./http.ts";
-import { oauthClientIdOf } from "./token-claims.ts";
-import { MCP_PATH, wwwAuthenticate } from "../mcp/metadata.ts";
+import { authenticateMcp, authenticateSession } from "./bearer-auth.ts";
+import { MCP_PATH } from "../mcp/metadata.ts";
+import { isPublicOauthPath } from "../oauth/paths.ts";
 import { type RequestBucket, takeRequestSlot } from "../services/request-slots.ts";
 
 export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
@@ -20,7 +20,9 @@ export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
   app.use(
     "*",
     cors({
-      origin: (origin) => allowedOrigin(origin) ?? undefined,
+      // The OAuth endpoints assistants call are public (RFC 8414/7591 clients
+      // may run in a browser): any origin, never credentials.
+      origin: (origin, c) => isPublicOauthPath(c.req.path) ? "*" : allowedOrigin(origin) ?? undefined,
       allowHeaders: ["authorization", "content-type", "x-vansen-client"],
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     }),
@@ -57,48 +59,14 @@ export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
   });
 }
 
-/** A 401 an MCP client can act on: the header names our PRM. */
-export function mcpChallenge(
-  c: Context<Vars>,
-  mcp: McpEnv | undefined,
-  message: string,
-  invalid = false,
-): Response {
-  const res = fail(c, 401, "unauthorized", message);
-  res.headers.set("www-authenticate", wwwAuthenticate(mcp, invalid));
-  return res;
-}
-
 export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
-  const { admin, ageConfirmed, deps } = ctx;
+  const { admin, ageConfirmed } = ctx;
 
   const isMcp = (c: Context<Vars>) => c.req.path === MCP_PATH;
-  const challenge = (c: Context<Vars>, message: string, invalid = false) =>
-    mcpChallenge(c, deps.env.mcp, message, invalid);
 
   app.use("*", async (c, next) => {
-    const token = c.req.header("authorization")?.replace(/^Bearer /i, "");
-    if (!token && isMcp(c)) return challenge(c, "Missing token");
-    if (!token) return fail(c, 401, "unauthorized", "Missing token");
-    const { data, error } = await admin.auth.getUser(token);
-    if ((error || !data.user) && isMcp(c)) return challenge(c, "Invalid token", true);
-    if (error || !data.user) {
-      return fail(c, 401, "unauthorized", "Invalid token");
-    }
-    // Containment (spec §3). An assistant's OAuth token is a full Supabase JWT
-    // for the user; `client_id` is the only thing that tells it apart, and
-    // Supabase stamps no audience we could bind to instead. So: OAuth tokens
-    // only on /mcp, and the app's own session never on /mcp.
-    const oauthClientId = oauthClientIdOf(token);
-    if (oauthClientId && !isMcp(c)) {
-      return fail(c, 403, "token_not_allowed", "This token only works for the assistant connection.");
-    }
-    if (!oauthClientId && isMcp(c)) {
-      return challenge(c, "Connect through your assistant's sign-in, not an app session.");
-    }
-    c.set("userId", data.user.id);
-    c.set("email", data.user.email ?? "");
-    if (oauthClientId) c.set("oauthClientId", oauthClientId);
+    const refused = isMcp(c) ? await authenticateMcp(c, ctx) : await authenticateSession(c, ctx);
+    if (refused) return refused;
     await next();
   });
 

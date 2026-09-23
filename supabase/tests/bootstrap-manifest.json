@@ -146,6 +146,10 @@
     {
       "file": "0035_mcp_client.sql",
       "sha256": "fd722892919c"
+    },
+    {
+      "file": "0036_mcp_oauth.sql",
+      "sha256": "a4cd901d9572"
     }
   ]
 }

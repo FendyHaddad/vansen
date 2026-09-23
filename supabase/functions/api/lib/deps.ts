@@ -28,12 +28,14 @@ export interface ReleaseIdentity {
   deployedAt: string | null;
 }
 
-/** Where assistants find us: the MCP resource URL and its OAuth server. */
+/** Where assistants find us: the MCP resource URL and our OAuth server. */
 export interface McpEnv {
   /** The exact public URL of POST /mcp; clients compare it to the PRM. */
   resourceUrl: string;
-  /** Supabase Auth's issuer, e.g. https://<ref>.supabase.co/auth/v1. */
-  authServerUrl: string;
+  /** The api's public base URL; the /oauth/* endpoints live under it. */
+  apiUrl: string;
+  /** The OAuth issuer the PRM names (hosted: the web origin). */
+  issuer: string;
 }
 
 export interface ApiEnv {

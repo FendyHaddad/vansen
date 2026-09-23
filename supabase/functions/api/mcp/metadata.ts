@@ -2,20 +2,18 @@
 // Metadata (RFC 9728) and the 401 WWW-Authenticate header that points at it.
 // The PRM lives at <resource>/.well-known/oauth-protected-resource; the
 // resource must equal the MCP URL exactly, since clients compare the two.
-// mcpEnvFrom() decides the public URLs from the environment.
+// mcpEnvFrom() decides the public URLs and the issuer from the environment.
 import type { McpEnv } from "../lib/deps.ts";
+import { DEFAULT_ISSUER, OAUTH_SCOPE } from "../oauth/metadata.ts";
 
 export const MCP_PATH = "/api/mcp";
 export const PRM_SUFFIX = "/.well-known/oauth-protected-resource";
 
-/** Supabase's OAuth server only knows OIDC scopes; anything else is refused. */
-export const MCP_SCOPES = ["openid", "email"];
-
 export function protectedResourceMetadata(env: McpEnv) {
   return {
     resource: env.resourceUrl,
-    authorization_servers: [env.authServerUrl],
-    scopes_supported: MCP_SCOPES,
+    authorization_servers: [env.issuer],
+    scopes_supported: [OAUTH_SCOPE],
     bearer_methods_supported: ["header"],
     resource_name: "Vansen",
   };
@@ -32,23 +30,24 @@ function hostOf(url: string): string {
   }
 }
 
+const trimmed = (url: string | undefined) => (url || "").replace(/\/$/, "");
+
 /**
- * Where assistants reach /mcp and sign in. Hosted, both derive from
- * SUPABASE_URL. Inside `supabase functions serve` SUPABASE_URL is
- * http://kong:8000, so a local run sets MCP_PUBLIC_SUPABASE_URL (e.g.
- * http://127.0.0.1:54321); it is ignored anywhere else, so a stray hosted
- * secret cannot repoint the PRM.
+ * Where assistants reach /mcp and sign in. Hosted, the api URL derives from
+ * SUPABASE_URL and the issuer is the web origin. Inside `supabase functions
+ * serve` SUPABASE_URL is http://kong:8000, which no client resolves, so a local
+ * run sets MCP_PUBLIC_SUPABASE_URL (e.g. http://127.0.0.1:54321) and may set
+ * MCP_ISSUER (default <local api>/oauth). Both are ignored anywhere else, so a
+ * stray hosted secret cannot repoint the PRM, the issuer or the endpoints.
  */
 export function mcpEnvFrom(get: (k: string) => string | undefined): McpEnv | undefined {
-  const supabaseUrl = get("SUPABASE_URL") || "";
-  const override = get("MCP_PUBLIC_SUPABASE_URL") || "";
+  const supabaseUrl = trimmed(get("SUPABASE_URL"));
   const local = hostOf(supabaseUrl) === LOCAL_KONG_HOST;
-  const base = (local && override ? override : supabaseUrl).replace(/\/$/, "");
+  const base = local ? trimmed(get("MCP_PUBLIC_SUPABASE_URL")) || supabaseUrl : supabaseUrl;
   if (!base) return undefined;
-  return {
-    resourceUrl: `${base}/functions/v1/api/mcp`,
-    authServerUrl: `${base}/auth/v1`,
-  };
+  const apiUrl = `${base}/functions/v1/api`;
+  const issuer = local ? trimmed(get("MCP_ISSUER")) || `${apiUrl}/oauth` : DEFAULT_ISSUER;
+  return { resourceUrl: `${apiUrl}/mcp`, apiUrl, issuer };
 }
 
 /** The 401 challenge. `invalid` adds error="invalid_token" so clients refresh. */
