@@ -719,3 +719,23 @@ version `a5b95faa` (2026-09-23T00:09:51Z), before it `029ca6d3` (23:14:53Z) and
 - `cleanup-worker` under a rolled-back tree (it needs `CLEANUP_WORKER_SECRET`,
   absent locally); its directory is unchanged since `5b5ddca`, but its bundled
   `_shared` is not
+
+### 2026-09-23 — server-driven catalog (`bd6e3bc`)
+
+`./deploy.sh --yes` exited 0: `DEPLOYED bd6e3bc · catalog 2026-09-23.2 · api v69`
+(job-worker v24, cleanup-worker v21, stripe-webhook v35, appstore-webhook v25). Additive: new
+public `GET /catalog`, optional `catalogVersion` → 409 `catalog_stale`, `subscription.entitled`
+on `/profile`. Spec `specs/2026-09-23-server-driven-catalog-design.md`.
+
+Read-back:
+
+| Check | Result |
+|---|---|
+| `GET /catalog` | 200, `etag: "2026-09-23.2-d26c4fb4"`, `cache-control: public, max-age=300` |
+| same with `If-None-Match` | 304 |
+| families | nano-banana, gpt-image, flux, seedream on; veo, omni, kling, runway, seedance off; persona flat 46, off |
+| `/profile` unauthenticated | 401 (unchanged) |
+| `subscription.entitled` | covered by `profile_entitled_test.ts`; not read back live (needs a signed-in token) |
+
+Mobile (`vansen-mobile` `52ed3bc`, local commit, no remote) renders this catalog; no store build.
+
