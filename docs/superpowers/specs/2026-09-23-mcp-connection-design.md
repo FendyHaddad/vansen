@@ -23,7 +23,7 @@ This section overrides §0, decision 2 of §1, and §2, §3, §6, §7 and §9 wh
 
 - **Issuer:** `https://vansen.vankode.com`, the web origin, which we control at the root. Its metadata is a static file served by the web Worker at `https://vansen.vankode.com/.well-known/oauth-authorization-server`. That satisfies RFC 8414 discovery without path insertion.
 - **Endpoints:** the endpoints named in that metadata live in the `api` function, under `<api>/oauth/*`. The metadata may point to another host.
-- **Local runs:** the `api` also serves the same JSON at `<api>/oauth/.well-known/oauth-authorization-server`, built from `MCP_ISSUER`. Locally, `MCP_ISSUER = <local api>/oauth`, and clients use the path-appended fallback as the Inspector did in the spike. On the hosted project `MCP_ISSUER` is unset and defaults to `https://vansen.vankode.com`.
+- **Local runs:** current clients never try a path-appended metadata URL (Task 5 confirmed it with the Inspector), so locally the issuer is also a web-origin root: `MCP_ISSUER=http://127.0.0.1:4200`, with the metadata served there. Both `MCP_ISSUER` and `MCP_PUBLIC_SUPABASE_URL` take effect only on the local stack (runbook §7c). On the hosted project `MCP_ISSUER` is unset and defaults to `https://vansen.vankode.com`.
 - **Drift gate:** a Deno test asserts that the static file equals `buildAsMetadata("https://vansen.vankode.com", "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api")`.
 - **PRM:** `authorization_servers: [MCP_ISSUER]`, `scopes_supported: ["vansen"]`.
 - **Static metadata file** (`public/.well-known/oauth-authorization-server`, exact content; `<api>` = `https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api`):
