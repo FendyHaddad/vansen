@@ -6,6 +6,23 @@ Date: 2026-09-23. Checklist item "MCP connection" in `plans/post-implementation-
 
 Research: `.superpowers/sdd/mcp/research-external.md` (MCP and OAuth landscape, client requirements) and the codebase survey in the session record.
 
+## 0. Spike result (2026-09-23): GO with Supabase's OAuth 2.1 server
+
+Full report: `.superpowers/sdd/mcp/spike-report.md`. The MCP Inspector, acting as the OAuth client, went end to end on the local stack:
+a bare 401, then PRM discovery at the `/mcp` sub-path, DCR, PKCE, consent, token, and a tool call.
+
+- **Config:** `[auth.oauth_server] enabled = true`, `authorization_url_path = "/oauth/consent"`, `allow_dynamic_registration = true` (CLI 2.114.0).
+- **supabase-js 2.110.0:** `auth.oauth.getAuthorizationDetails`, `approveAuthorization`, `denyAuthorization`, `listGrants`, `revokeGrant({ clientId })`.
+- **Claims:** the access token carries `client_id` and `scope`. `aud` is always `"authenticated"`, and `resource` is ignored, so **`client_id` containment is the binding** (§3). `admin.auth.getUser` accepts the token.
+- **Revoke and deletion:** revoking a grant kills its refresh token, and the next `getUser` rejects its access token. Deleting the auth user cascades to the grants.
+- **SDK:** `npm:@modelcontextprotocol/sdk@1.30.0`, `WebStandardStreamableHTTPServerTransport`, stateless (`sessionIdGenerator: undefined`), `enableJsonResponse: true`. `/mcp` answers `POST` only; `GET` and `DELETE` get 405, because a stateless `GET` would hold an open stream on the Edge worker.
+- **Consent page:** it must handle an already-consented client, where `getAuthorizationDetails` returns a `redirect_url` instead of details. It follows the redirect at once.
+- **Web sign-out:** `signOut()` defaults to global scope, which also revokes every assistant grant. Decision: web and mobile sign out with `{ scope: 'local' }`, and assistants are managed only in Connected assistants. Account deletion and password recovery still end everything.
+- **Owner steps, added:**
+  - Hosted JWT signing must use **asymmetric keys (ES256)**. ID tokens fail under HS256 when `openid` is requested.
+  - Read-only curl of the hosted AS metadata at rollout. Locally the RFC 8414 URL returned 404 and clients fell back to the OIDC discovery URL.
+- **Local stack:** `supabase/config.toml` gains the `[auth.oauth_server]` section above.
+
 ## 1. Decisions
 
 1. **Protocol target: MCP 2025-06-18 / 2025-11-25.**
