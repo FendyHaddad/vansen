@@ -1,4 +1,4 @@
-@if (suspended()) {
+@if (notices.suspended()) {
   <div class="suspended-screen">
     <div class="suspended-card">
       <h1>Account suspended</h1>
@@ -12,7 +12,7 @@
     </div>
   </div>
 }
-<div class="shell" [class.shell-hidden]="suspended()">
+<div class="shell" [class.shell-hidden]="notices.suspended()">
   <aside class="sidebar">
     <div class="side-head">
       <a routerLink="/app" class="ws-brand">Vansen</a>
@@ -24,7 +24,7 @@
         (generateRequested)="onGenerate($event)"
         (pickReferenceRequested)="startReferencePick()"
         (managePersonasRequested)="openPersonaManager()"
-        (upgradeRequested)="upgradePlan()"
+        (upgradeRequested)="billing.upgradePlan()"
         (pickVideoRequested)="videoPickerOpen.set(true)"
       />
     </div>
@@ -76,7 +76,7 @@
         @if (studioActive()) {
           <span class="topbar-div" aria-hidden="true"></span>
           @if (!isOwner()) {
-            <button type="button" class="credit-add-btn" (click)="packsOpen.set(true)">
+            <button type="button" class="credit-add-btn" (click)="billing.packsOpen.set(true)">
               <ng-icon name="lucidePlus" size="14" />
               Add credits
             </button>
@@ -170,11 +170,11 @@
           </button>
         </div>
       }
-      <p class="sr-only" role="status" aria-live="polite">{{ liveMessage() }}</p>
-      @if (notice()) {
+      <p class="sr-only" role="status" aria-live="polite">{{ notices.liveMessage() }}</p>
+      @if (notices.notice()) {
         <div class="notice-banner">
-          {{ notice() }}
-          <button type="button" class="notice-close" aria-label="Dismiss" (click)="notice.set('')">
+          {{ notices.notice() }}
+          <button type="button" class="notice-close" aria-label="Dismiss" (click)="notices.notice.set('')">
             <ng-icon name="lucideX" size="13" />
           </button>
         </div>
@@ -183,7 +183,7 @@
         <div class="notice-banner">
           <span class="num">{{ days }}</span> day{{ days === 1 ? '' : 's' }} left before your
           library is deleted — it goes when the paid period ends. Download what you need or
-          <button type="button" class="linkish" (click)="subscribeTo('studio')">
+          <button type="button" class="linkish" (click)="billing.subscribeTo('studio')">
             resubscribe from <span class="num">$15</span>/mo
           </button>
         </div>
@@ -217,7 +217,7 @@
       } @else {
         <app-library-grid
           [items]="generations()"
-          [busyIds]="busyIds()"
+          [busyIds]="actions.busyIds()"
           [pickMode]="pickingReference()"
           [samplePrompts]="samplePrompts"
           [search]="searchTerm()"
@@ -226,14 +226,14 @@
           (moreWanted)="onMoreWanted()"
           (picked)="onReferencePicked($event)"
           (opened)="onOpened($event)"
-          (download)="onDownload($event)"
-          (upscale)="onUpscale($event)"
-          (variation)="onVariation($event)"
+          (download)="actions.download($event)"
+          (upscale)="actions.upscale($event)"
+          (variation)="actions.variation($event)"
           (edit)="onEdit($event)"
-          (retry)="onRetry($event)"
-          (deleted)="onDeleteMany($event)"
+          (retry)="actions.retry($event)"
+          (deleted)="actions.deleteMany($event)"
           (promptPicked)="usePrompt($event)"
-          (cancel)="onCancel($event)"
+          (cancel)="actions.cancel($event)"
         />
       }
     </main>
@@ -242,16 +242,16 @@
   <app-right-panel
     data-tour="right-panel"
     [editing]="mode() === 'edit'"
-    (saveRequested)="onSaveEdit()"
+    (saveRequested)="actions.saveEdit()"
     (aiToolRequested)="onAiTool($event)"
-    [checkoutBusy]="checkoutBusy()"
-    (subscribeRequested)="subscribeTo($event)"
-    (upgradeRequested)="upgradePlan()"
-    (downgradeRequested)="downgradePlan()"
+    [checkoutBusy]="billing.checkoutBusy()"
+    (subscribeRequested)="billing.subscribeTo($event)"
+    (upgradeRequested)="billing.upgradePlan()"
+    (downgradeRequested)="billing.downgradePlan()"
   />
 
-  @if (packsOpen()) {
-    <app-credit-packs-dialog (dismissed)="packsOpen.set(false)" />
+  @if (billing.packsOpen()) {
+    <app-credit-packs-dialog (dismissed)="billing.packsOpen.set(false)" />
   }
 
   @if (personaManagerOpen()) {
@@ -267,17 +267,17 @@
     />
   }
 
-  @if (planChange(); as target) {
+  @if (billing.planChange(); as target) {
     <app-plan-change-dialog
       [target]="target"
-      [current]="currentPlan()"
+      [current]="billing.currentPlan()"
       [periodEnd]="profileStore.subscription()?.currentPeriodEnd ?? null"
       [planCredits]="planCredits()"
-      [busy]="planChangeBusy()"
+      [busy]="billing.planChangeBusy()"
       [pendingPlan]="profileStore.subscription()?.pendingPlan ?? null"
-      [error]="planChangeError()"
-      (confirmed)="confirmPlanChange($event)"
-      (dismissed)="planChange.set(null)"
+      [error]="billing.planChangeError()"
+      (confirmed)="billing.confirmPlanChange($event)"
+      (dismissed)="billing.planChange.set(null)"
     />
   }
 
@@ -285,13 +285,13 @@
     <app-detail-overlay
       [item]="opened"
       [parent]="openedParent()"
-      [busy]="busyIds().has(opened.id)"
+      [busy]="actions.busyIds().has(opened.id)"
       [retryable]="retryable()"
       (closed)="openedId.set(null)"
-      (retry)="onRetry($event)"
-      (download)="onDownload($event)"
-      (upscale)="onUpscale($event)"
-      (variation)="onVariation($event)"
+      (retry)="actions.retry($event)"
+      (download)="actions.download($event)"
+      (upscale)="actions.upscale($event)"
+      (variation)="actions.variation($event)"
       (edit)="onEdit($event)"
       (deleted)="onDeleted($event)"
       (openParent)="onOpened($event)"

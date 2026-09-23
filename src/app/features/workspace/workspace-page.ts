@@ -25,21 +25,14 @@ import { LedgerService } from '../../core/ledger/ledger-service';
 import { GenerationStore, type GenerationItem } from '../../core/generations/generation-store';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
-import { BillingService } from '../../core/billing/billing-service';
-import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
-import { ApiError } from '../../core/api/api-service';
 import type { RetryableDto } from '../../core/api/dtos';
-import { MediaCache } from '../../core/media/media-cache';
-import { GenerationOp } from '../../core/enums';
 import { referenceRoutingFor } from './reference-routing';
 import { EditSession } from '../../core/editing/edit-session';
-import { editToolById } from '../../core/catalog/model-families';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { NotificationBell } from '../../shared/notification-bell/notification-bell';
 import { NotificationToast } from '../../shared/notification-toast/notification-toast';
-import { NotificationStore } from '../../core/notifications/notification-store';
 import { TourService } from '../../core/tour/tour-service';
 import { TourOverlay } from '../../shared/tour-overlay/tour-overlay';
 import { LeftPanel, GenerateRequest } from './left-panel/left-panel';
@@ -54,59 +47,19 @@ import { PersonaManager } from './persona-manager/persona-manager';
 import { VideoPickerDialog } from './video-picker-dialog/video-picker-dialog';
 import { PersonaStore } from '../../core/personas/persona-store';
 import { ConfirmService } from '../../shared/confirm/confirm-service';
+import { WorkspaceNotices } from './workspace-notices';
+import { WorkspaceGenerationActions } from './workspace-generation-actions';
+import { WorkspaceBillingActions } from './workspace-billing-actions';
+
+// Re-exported so existing specs (model-disabled-notice.spec.ts,
+// live-announcements.spec.ts) keep importing from this path.
+export { modelDisabledNotice, announcementFor } from './workspace-notices';
 
 const SAMPLE_PROMPTS = [
   'A neon-lit street in the rain, cinematic, 35mm',
   'Product shot of a perfume bottle on black marble, studio light',
   'Isometric cutaway of a cozy cabin in a snowstorm',
 ];
-
-/** Synchronous video-submit / cancel error codes → verbatim notice copy. */
-const VIDEO_ERROR_COPY: Record<string, string> = {
-  provider_blocked: 'Provider declined this prompt. Credits refunded.',
-  too_many_jobs: '3 videos are still rendering — wait for one to finish',
-  unsupported_mode: "This model can't do that mode.",
-  bad_parent: 'Pick a finished video to extend or edit.',
-  not_cancellable: "This model can't be cancelled once started.",
-  bad_reference_count: 'Add the reference images this mode needs.',
-};
-
-async function fetchBlob(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
-  return res.blob();
-}
-
-/** The model_disabled notice. A persona run has no other model to try. */
-export function modelDisabledNotice(personaRun: boolean): string {
-  if (personaRun) return 'Personas are temporarily unavailable.';
-  return 'That model is temporarily unavailable. Try another.';
-}
-
-/**
- * Plain words for what just happened, for the polite live region.
- *
- * Deliberately short and countable: a screen reader reads this aloud over
- * whatever the person is doing, so it says what changed and stops.
- */
-export function announcementFor(changed: GenerationItem[]): string {
-  const done = changed.filter((i) => i.status === 'done').length;
-  const failed = changed.filter((i) => i.status === 'failed');
-  const cancelled = failed.filter((i) => i.failure?.cancelled).length;
-  const broken = failed.length - cancelled;
-
-  const parts: string[] = [];
-  if (done) parts.push(`${done} ${done === 1 ? 'generation is' : 'generations are'} ready`);
-  // "Failed" alone leaves the obvious question unanswered, and the refund is
-  // the part that decides whether to try again.
-  if (broken) {
-    parts.push(
-      `${broken} ${broken === 1 ? 'generation' : 'generations'} failed and ${broken === 1 ? 'was' : 'were'} refunded`,
-    );
-  }
-  if (cancelled) parts.push(`${cancelled} cancelled and refunded`);
-  return parts.join('. ');
-}
 
 @Component({
   selector: 'app-workspace-page',
@@ -143,6 +96,9 @@ export function announcementFor(changed: GenerationItem[]): string {
       lucideZoomIn,
       lucideZoomOut,
     }),
+    WorkspaceNotices,
+    WorkspaceGenerationActions,
+    WorkspaceBillingActions,
   ],
 })
 export class WorkspacePage {
@@ -153,16 +109,22 @@ export class WorkspacePage {
   /** Public: the plan-change dialog reads subscription state straight from it. */
   readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
-  private readonly billing = inject(BillingService);
-  private readonly checkoutIntent = inject(CheckoutIntent);
   private readonly poller = inject(JobPoller);
   private readonly availability = inject(ModelAvailability);
-  private readonly mediaCache = inject(MediaCache);
-  private readonly notifications = inject(NotificationStore);
   readonly tour = inject(TourService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly confirm = inject(ConfirmService);
+
+  /** Public: the notice banner, suspension flag and live-region announcer —
+   * the template binds to these directly. */
+  readonly notices = inject(WorkspaceNotices);
+  /** Public: submit/retry/upscale/variation/delete/download/AI-edit actions
+   * and the shared per-item busy set — the template binds to these directly. */
+  readonly actions = inject(WorkspaceGenerationActions);
+  /** Public: subscribe/plan-change/checkout-return handling — the template
+   * binds to these directly. */
+  readonly billing = inject(WorkspaceBillingActions);
 
   readonly rail = viewChild.required(LeftPanel);
   readonly viewport = viewChild(CanvasViewport);
@@ -211,52 +173,11 @@ export class WorkspacePage {
     return parentId ? (this.store.byId(parentId) ?? null) : null;
   });
 
-  /** Inline notice banner (errors, phase hints). */
-  readonly notice = signal('');
-
-  /**
-   * Spoken, not shown.
-   *
-   * A generation finishing rewrites a tile in the grid with nothing to mark
-   * the change, so a screen-reader user had no way to know a render they had
-   * been waiting on was done, refunded or lost. This is read out politely, on
-   * its own, without moving focus.
-   */
-  readonly liveMessage = signal('');
-
-  /** Statuses as of the last announcement, so only changes are spoken. */
-  private readonly lastStatus = new Map<string, string>();
-
-  /** Set when 2 strikes suspend the account — blocks the whole workspace. */
-  readonly suspended = signal(false);
-
-  /** True while a Stripe redirect is in flight — the CTA must show progress and
-   * refuse repeat clicks, since the round trip is slow enough to look frozen. */
-  readonly checkoutBusy = signal(false);
-
-  /** Item ids with an action (retry/delete/upscale/variation/download) in flight —
-   * their buttons show a spinner and ignore repeat clicks. */
-  readonly busyIds = signal<Set<string>>(new Set());
-
   /** True while a generate request is in flight — the rail button shows progress. */
   readonly generating = signal(false);
 
   /** Captured once at construction, before the title effect ever touches it. */
   private readonly baseTitle = document.title;
-
-  private async withBusy(id: string, fn: () => Promise<void>): Promise<void> {
-    if (this.busyIds().has(id)) return;
-    this.busyIds.update((s) => new Set(s).add(id));
-    try {
-      await fn();
-    } finally {
-      this.busyIds.update((s) => {
-        const next = new Set(s);
-        next.delete(id);
-        return next;
-      });
-    }
-  }
 
   constructor() {
     // The router guard cannot see a tab close or a reload. This is the only
@@ -272,10 +193,10 @@ export class WorkspacePage {
     // Deep link from the absorbed /app/edit/:id route.
     const editParam = this.route.snapshot.paramMap.get('id');
     void this.refresh().then(() => {
-      this.handleCheckoutReturn();
+      this.billing.handleCheckoutReturn();
       this.poller.watch();
       if (editParam) void this.enterEdit(editParam);
-      else if (!this.resumeCheckoutIntent()) this.maybeStartTour();
+      else if (!this.billing.resumeCheckoutIntent()) this.maybeStartTour();
     });
 
     // Tab title reflects pending video renders while any are in flight.
@@ -285,21 +206,6 @@ export class WorkspacePage {
       onCleanup(() => {
         document.title = this.baseTitle;
       });
-    });
-
-    // Speak completions, failures and refunds as they land.
-    effect(() => {
-      const settled = this.store.items().filter((i) => i.status !== 'pending');
-      const changed = settled.filter((i) => this.lastStatus.get(i.id) !== i.status);
-      for (const item of settled) this.lastStatus.set(item.id, item.status);
-      // First load settles the whole library at once; announcing all of it
-      // would read the page aloud to someone who just arrived.
-      if (!this.announcedOnce) {
-        this.announcedOnce = true;
-        return;
-      }
-      if (changed.length === 0) return;
-      this.liveMessage.set(announcementFor(changed));
     });
 
     // When an AI edit on the open session's chain completes, jump to the result.
@@ -322,10 +228,10 @@ export class WorkspacePage {
       // that is the customer's to decide — the result is in the library
       // either way.
       if (this.editSession.dirty()) {
-        this.notice.set('AI edit ready — it is in your library.');
+        this.notices.notice.set('AI edit ready — it is in your library.');
         return;
       }
-      this.notice.set('AI edit ready — opening the result.');
+      this.notices.notice.set('AI edit ready — opening the result.');
       void this.enterEdit(ready.id);
     });
   }
@@ -333,104 +239,12 @@ export class WorkspacePage {
   /** Last AI-edit result auto-opened, so the effect fires once per result. */
   private aiOpened: string | null = null;
 
-  /** The library's first settle is history, not news. */
-  private announcedOnce = false;
-
-  /**
-   * Resume a plan picked on the pricing page before signing in. Runs after
-   * refresh() so studioActive() is known: someone who subscribed in another tab
-   * must not be sent to checkout again. Returns true when checkout is opening,
-   * so the caller can skip the tour rather than start it under a redirect.
-   */
-  private resumeCheckoutIntent(): boolean {
-    const plan = this.checkoutIntent.take();
-    if (!plan || this.studioActive()) return false;
-    void this.subscribeTo(plan);
-    return true;
-  }
-
-  /** Stripe redirects back with ?checkout=success|canceled; webhook may lag a second. */
-  private handleCheckoutReturn(): void {
-    const result = this.route.snapshot.queryParamMap.get('checkout');
-    if (!result) return;
-    this.router.navigate([], { queryParams: {}, replaceUrl: true });
-    if (result === 'canceled') {
-      this.notice.set('Checkout canceled — nothing was charged.');
-      return;
-    }
-    if (result !== 'success') return;
-    const before = this.totalCredits();
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts += 1;
-      await this.profileStore.load();
-      if (this.totalCredits() !== before) {
-        clearInterval(poll);
-        this.notice.set(`Payment received — ${this.totalCredits().toLocaleString()} credits.`);
-      } else if (attempts >= 6) {
-        clearInterval(poll);
-        this.notice.set(
-          'Payment received — credits are on the way. If they don’t appear, use “Didn’t receive your credits?” in Settings → Subscription.',
-        );
-      }
-    }, 1000);
-  }
-
   private async refresh(): Promise<void> {
     try {
       await Promise.all([this.profileStore.load(), this.store.load(), this.availability.load()]);
     } catch (e) {
-      this.showError(e, 'Could not load your workspace');
+      this.notices.showError(e, 'Could not load your workspace');
     }
-  }
-
-  private showError(e: unknown, fallback: string, personaRun = false): void {
-    if (!(e instanceof ApiError)) {
-      this.notice.set(fallback);
-      return;
-    }
-    if (e.code === 'insufficient_credits') {
-      this.notice.set('Not enough credits — top up with “Add credits” in the top bar.');
-      return;
-    }
-    if (e.code === 'subscription_required') {
-      this.notice.set('An active subscription is required — pick a plan to start creating.');
-      return;
-    }
-    if (e.code === 'pro_required') {
-      this.notice.set('That model needs the Pro plan — upgrade from Settings → Subscription.');
-      return;
-    }
-    if (e.code === 'account_suspended') {
-      this.suspended.set(true);
-      return;
-    }
-    if (e.code === 'content_policy') {
-      this.notice.set(
-        'This request violates our content policy and was blocked. Two violations suspend your account. If this was a mistake, contact support to appeal.',
-      );
-      this.notifications.add({
-        kind: 'blocked',
-        title: 'Blocked by moderation',
-        detail: 'The request violated the content policy — nothing was charged.',
-      });
-      return;
-    }
-    if (e.code === 'model_disabled') {
-      this.notice.set(modelDisabledNotice(personaRun));
-      return;
-    }
-    if (e.code === 'daily_cap') {
-      const parsed = Date.parse(String(e.details['resetsAt'] ?? ''));
-      const h = Number.isFinite(parsed) ? Math.max(1, Math.ceil((parsed - Date.now()) / 3_600_000)) : 24;
-      this.notice.set(`Daily video limit reached, resets in ${h}h`);
-      return;
-    }
-    if (VIDEO_ERROR_COPY[e.code]) {
-      this.notice.set(VIDEO_ERROR_COPY[e.code]);
-      return;
-    }
-    this.notice.set(e.message);
   }
 
   async onGenerate(req: GenerateRequest): Promise<void> {
@@ -438,24 +252,24 @@ export class WorkspacePage {
     const routing = referenceRoutingFor(req);
     this.generating.set(true);
     try {
-      await this.store.create({
-        familyId: req.family.id,
-        op: routing.op,
-        prompt: req.prompt,
-        style: req.style ?? undefined,
-        personaId: req.personaId ?? undefined,
-        trendId: req.trendId ?? undefined,
-        settings: req.settings,
-        batch: req.batch,
-        parentId: routing.parentId,
-        referenceUploadId: routing.referenceUploadId,
-        referencePaths: req.referencePaths,
-      });
-      this.rail().setReference(null);
-      this.notice.set('');
-      this.poller.watch();
+      await this.actions.submit(
+        {
+          familyId: req.family.id,
+          op: routing.op,
+          prompt: req.prompt,
+          style: req.style ?? undefined,
+          personaId: req.personaId ?? undefined,
+          trendId: req.trendId ?? undefined,
+          settings: req.settings,
+          batch: req.batch,
+          parentId: routing.parentId,
+          referenceUploadId: routing.referenceUploadId,
+          referencePaths: req.referencePaths,
+        },
+        () => this.rail().setReference(null),
+      );
     } catch (e) {
-      this.showError(e, 'Generation failed', !!req.personaId);
+      this.notices.showError(e, 'Generation failed', !!req.personaId);
     } finally {
       this.generating.set(false);
     }
@@ -500,10 +314,10 @@ export class WorkspacePage {
     this.uploading.set(true);
     try {
       const item = await this.store.importImage(file);
-      this.notice.set('');
+      this.notices.notice.set('');
       await this.enterEdit(item.id);
     } catch (e) {
-      this.showError(e, 'Upload failed');
+      this.notices.showError(e, 'Upload failed');
     } finally {
       this.uploading.set(false);
     }
@@ -548,81 +362,7 @@ export class WorkspacePage {
   }
 
   async onDeleted(id: string): Promise<void> {
-    await this.withBusy(id, async () => {
-      try {
-        await this.store.remove(id);
-      } catch (e) {
-        this.showError(e, 'Delete failed');
-      }
-      this.openedId.set(null);
-    });
-  }
-
-  /** Library grid delete — one card or a multi-select batch. */
-  async onDeleteMany(ids: string[]): Promise<void> {
-    for (const id of ids) {
-      let failed = false;
-      await this.withBusy(id, async () => {
-        try {
-          await this.store.remove(id);
-        } catch (e) {
-          this.showError(e, 'Delete failed');
-          failed = true;
-        }
-      });
-      if (failed) return;
-    }
-  }
-
-  async onDownload(id: string): Promise<void> {
-    await this.withBusy(id, async () => {
-      const item = await this.store.fetchById(id);
-      if (!item) return;
-      // Images serve from the media cache — an already-viewed image downloads
-      // free. Videos stream straight through: multi-MB clips have no business
-      // in Cache Storage.
-      let blob: Blob;
-      try {
-        blob = item.kind === 'video'
-          ? await fetchBlob(item.mediaUrl)
-          : await this.mediaCache.blob(item.id, item.mediaUrl);
-      } catch {
-        this.notice.set('Download failed — the media link may have expired. Reload and retry.');
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `vansen-${item.id}.${item.kind === 'video' ? 'mp4' : 'jpg'}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    });
-  }
-
-  async onUpscale(id: string): Promise<void> {
-    await this.withBusy(id, async () => {
-      const item = this.store.byId(id);
-      if (!item || item.kind !== 'image') return;
-      try {
-        await this.store.create({
-          op: GenerationOp.Upscale,
-          prompt: item.prompt,
-          settings: item.settings,
-          batch: 1,
-          parentId: item.id,
-        });
-        this.notice.set('');
-        this.poller.watch();
-      } catch (e) {
-        this.showError(e, 'Upscale failed');
-      }
-    });
-  }
-
-  async onVariation(id: string): Promise<void> {
-    await this.rerun(id, () => this.store.variation(id), 'Variation failed');
+    await this.actions.deleteOne(id, () => this.openedId.set(null));
   }
 
   onEdit(id: string): void {
@@ -640,7 +380,7 @@ export class WorkspacePage {
       await this.editSession.open(item);
       this.mode.set('edit');
     } catch {
-      this.notice.set('Could not open this image for editing.');
+      this.notices.notice.set('Could not open this image for editing.');
     }
   }
 
@@ -662,163 +402,9 @@ export class WorkspacePage {
     });
   }
 
-  async onSaveEdit(): Promise<void> {
-    const item = this.editSession.item();
-    if (!item) return;
-    // Captured BEFORE the request leaves: what was saved is the state at this
-    // revision, of this opening.
-    const at = this.editSession.revision();
-    const token = this.editSession.openToken();
-    try {
-      const blob = await this.editSession.exportPngBlob();
-      const saved = await this.store.saveEdit(blob, item.id);
-      const outcome = this.editSession.adoptItem(saved, at, token);
-      if (outcome === 'adopted') {
-        this.notice.set('Saved as a new version.');
-        return;
-      }
-      // Telling them "saved" here would mean their newest strokes are safe.
-      this.notice.set('Saved — you have newer changes still unsaved.');
-    } catch (e) {
-      this.showError(e, 'Save failed');
-    }
-  }
-
-  async onAiTool(req: {
-    toolId: string;
-    prompt: string;
-    maskPngBase64?: string;
-  }): Promise<void> {
-    const item = this.editSession.item();
-    if (!item) return;
-    const tool = editToolById(req.toolId);
-    if (!tool) return;
-
-    try {
-      // Expand: pad the canvas 25% per side; FLUX fill repaints the border mask.
-      if (req.toolId === 'edit-expand') {
-        await this.runExpand(item.id);
-        return;
-      }
-
-      // Ai Select passes its own mask; otherwise the hand-painted mask layer.
-      const mask =
-        req.maskPngBase64 ?? this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
-      if (tool.needsMask && !mask) {
-        this.notice.set('Paint a mask first — the tool needs to know where to work.');
-        return;
-      }
-
-      // Persist the current canvas so the AI works on what the user sees.
-      const at = this.editSession.revision();
-      const token = this.editSession.openToken();
-      const saved = this.editSession.dirty()
-        ? await this.store.saveEdit(await this.editSession.exportPngBlob(), item.id)
-        : item;
-      if (saved.id !== item.id) this.editSession.adoptItem(saved, at, token);
-
-      const prompt =
-        req.toolId === 'edit-fill'
-          ? req.prompt
-          : req.toolId === 'edit-remove'
-            ? 'remove the masked object and seamlessly continue the background'
-            : 'remove background';
-      await this.store.create({
-        familyId: req.toolId,
-        op: GenerationOp.Edit,
-        prompt,
-        settings: saved.settings,
-        batch: 1,
-        parentId: saved.id,
-        maskPngBase64: mask,
-      });
-      this.viewport()?.maskCanvas()?.clear();
-      this.notice.set('');
-      this.poller.watch();
-    } catch (e) {
-      this.showError(e, 'Edit failed');
-    }
-  }
-
-  private async runExpand(parentId: string): Promise<void> {
-    const buf = this.editSession.current();
-    if (!buf) return;
-    const padX = Math.round(buf.width * 0.25);
-    const padY = Math.round(buf.height * 0.25);
-    const w = buf.width + padX * 2;
-    const h = buf.height + padY * 2;
-    const canvas = new OffscreenCanvas(w, h);
-    const ctx = canvas.getContext('2d')!;
-    ctx.putImageData(
-      new ImageData(new Uint8ClampedArray(buf.data), buf.width, buf.height),
-      padX,
-      padY,
-    );
-    const padded = await canvas.convertToBlob({ type: 'image/png' });
-    const maskCanvas = new OffscreenCanvas(w, h);
-    const mctx = maskCanvas.getContext('2d')!;
-    mctx.fillStyle = '#fff';
-    mctx.fillRect(0, 0, w, h);
-    mctx.fillStyle = '#000';
-    mctx.fillRect(padX, padY, buf.width, buf.height);
-    const expandMask = await blobToDataUrl(await maskCanvas.convertToBlob({ type: 'image/png' }));
-
-    const saved = await this.store.saveEdit(padded, parentId);
-    await this.store.create({
-      familyId: 'edit-expand',
-      op: GenerationOp.Edit,
-      prompt: 'continue the image naturally beyond its original edges',
-      settings: saved.settings,
-      batch: 1,
-      parentId: saved.id,
-      maskPngBase64: expandMask,
-    });
-    this.notice.set('');
-    this.poller.watch();
-  }
-
-  /** Re-submit a failed generation with the same settings. */
-  async onRetry(id: string): Promise<void> {
-    await this.rerun(id, () => this.store.retry(id), 'Retry failed');
-  }
-
-  /**
-   * Retry and variation are server operations now: it holds the snapshot of
-   * what was actually asked for, so it rebuilds the request. A 409 means the
-   * server can explain why it cannot, and that explanation is worth more to
-   * the customer than a generic failure.
-   */
-  private async rerun(
-    id: string,
-    run: () => Promise<unknown>,
-    fallback: string,
-  ): Promise<void> {
-    await this.withBusy(id, async () => {
-      try {
-        await run();
-        this.notice.set('');
-        this.poller.watch();
-      } catch (e) {
-        const refusal = refusalMessage(e);
-        if (refusal) {
-          this.notice.set(refusal);
-          return;
-        }
-        this.showError(e, fallback);
-      }
-    });
-  }
-
-  /** Cancel a still-rendering video job from its pending card. */
-  async onCancel(id: string): Promise<void> {
-    try {
-      await this.store.cancel(id);
-      // No refund is promised here: the worker asks the provider, and a render
-      // that has already started keeps going and keeps its credits.
-      this.notice.set('Cancelling — we\'ll refund if it stops in time.');
-    } catch (e) {
-      this.showError(e, 'Could not cancel');
-    }
+  async onAiTool(req: { toolId: string; prompt: string; maskPngBase64?: string }): Promise<void> {
+    const mask = req.maskPngBase64 ?? this.viewport()?.maskCanvas()?.exportMaskPng() ?? undefined;
+    await this.actions.aiTool(req, mask, () => this.viewport()?.maskCanvas()?.clear());
   }
 
   usePrompt(value: string): void {
@@ -830,108 +416,9 @@ export class WorkspacePage {
     void this.router.navigate(['/app/settings'], { queryParams: { tab: 'billing' } });
   }
 
-  /** Grace banner / teaser CTA — start a subscription on the plan the visitor picked. */
-  async subscribeTo(plan: 'studio' | 'pro'): Promise<void> {
-    if (this.checkoutBusy()) return;
-    this.checkoutBusy.set(true);
-    try {
-      await this.billing.subscribe(plan);
-    } catch (e) {
-      // Only clear on failure: success navigates away, and flipping the button
-      // back to idle mid-redirect invites a second click and a second session.
-      this.checkoutBusy.set(false);
-      this.showError(e, 'Could not start checkout');
-    }
-  }
-
-  /**
-   * Studio → Pro. Confirm first: plan credits do not carry across a switch, so
-   * this must never fire straight from a button press.
-   */
-  upgradePlan(): void {
-    this.planChangeError.set('');
-    this.planChange.set('pro');
-  }
-
-  /** Pro → Studio, same dialog — the server holds it to period-end anyway. */
-  downgradePlan(): void {
-    this.planChangeError.set('');
-    this.planChange.set('studio');
-  }
-
-  /** Add-on packs popup, opened from the topbar next to the balance it feeds. */
-  readonly packsOpen = signal(false);
-
-  /** Target plan of the open confirm dialog, or null when closed. */
-  readonly planChange = signal<'studio' | 'pro' | null>(null);
-  readonly planChangeBusy = signal(false);
-  /** Rejection shown inside the dialog — the notice banner sits behind the
-   * backdrop, where an error reads as "the button did nothing". */
-  readonly planChangeError = signal('');
-
-  /** Plan the switch is measured against — the dialog needs both ends. */
-  readonly currentPlan = computed<'studio' | 'pro'>(() =>
-    this.profileStore.subscription()?.plan === 'pro' ? 'pro' : 'studio',
-  );
-
-  async confirmPlanChange(when: 'now' | 'period_end'): Promise<void> {
-    const plan = this.planChange();
-    if (!plan || this.planChangeBusy()) return;
-    this.planChangeBusy.set(true);
-    this.planChangeError.set('');
-    try {
-      const before = this.totalCredits();
-      const { effectiveAt } = await this.billing.changePlan(plan, when);
-      await this.profileStore.load();
-      const label = plan === 'pro' ? 'Pro' : 'Studio';
-      this.notice.set(
-        effectiveAt
-          ? `${label} starts ${new Date(effectiveAt).toLocaleDateString()} — you keep your current plan until then.`
-          : `You're on ${label} now — enjoy your fresh credits.`,
-      );
-      this.planChange.set(null);
-      // The plan mirror updates synchronously, but the fresh grant lands via the
-      // invoice.paid webhook a beat later — poll so the credit chip catches up
-      // without a manual refresh.
-      if (!effectiveAt) this.pollCreditsUntilChanged(before);
-    } catch (e) {
-      this.planChangeError.set(this.planChangeMessage(e));
-    } finally {
-      this.planChangeBusy.set(false);
-    }
-  }
-
-  private pollCreditsUntilChanged(before: number): void {
-    let attempts = 0;
-    const poll = setInterval(async () => {
-      attempts += 1;
-      await this.profileStore.load();
-      if (this.totalCredits() !== before || attempts >= 8) clearInterval(poll);
-    }, 1000);
-  }
-
-  private planChangeMessage(e: unknown): string {
-    if (e instanceof ApiError) {
-      switch (e.code) {
-        case 'subscription_ending':
-          return 'Your subscription is set to end at renewal — resume it from Settings → Subscription first, then change plans.';
-        case 'already_scheduled':
-          return 'This change is already scheduled — it happens automatically at renewal.';
-        case 'downgrade_at_period_end':
-          return 'Downgrades take effect at your renewal date, not immediately.';
-        case 'no_subscription':
-          return 'No active subscription found — pick a plan from the pricing page first.';
-        case 'same_plan':
-          return 'You are already on this plan.';
-      }
-      return e.message;
-    }
-    return 'Could not change your plan — check your connection and try again.';
-  }
-
   /** First-load onboarding: only when the server-synced pref says unseen. */
   private maybeStartTour(): void {
-    if (this.prefsService.prefs().tourSeen || this.suspended()) return;
+    if (this.prefsService.prefs().tourSeen || this.notices.suspended()) return;
     // Let the first frame paint so data-tour targets have settled rects.
     requestAnimationFrame(() => requestAnimationFrame(() => this.tour.start()));
   }
@@ -950,26 +437,4 @@ export class WorkspacePage {
     await this.auth.signOut();
     this.router.navigate(['/']);
   }
-}
-
-/**
- * The server's own explanation for a refused retry or variation.
- *
- * These are 409s with a message written for a customer — "the reference image
- * this used is no longer available" beats "Retry failed", and there is
- * nothing for them to retry, so no generic error banner either.
- */
-function refusalMessage(e: unknown): string | null {
-  if (!(e instanceof ApiError)) return null;
-  if (e.status !== 409) return null;
-  return e.message;
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
 }
