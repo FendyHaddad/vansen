@@ -4,12 +4,16 @@ import {
   CREDIT_PACKS,
   EDIT_TOOLS,
   MODEL_FAMILIES,
+  PERSONA_GEN,
   PLAN_CREDITS,
+  UPSCALER,
   creditCost,
   resolutionsFor,
 } from './model-families';
 import type { GenerationSettings, ModelFamily } from './model-families';
 import { recordedCatalogFingerprint } from './catalog-fingerprint';
+import { buildCatalog } from './build-catalog';
+import type { ModelRow } from './build-catalog';
 
 /**
  * Every settings combination the family actually offers. The price of each one
@@ -41,6 +45,30 @@ function offeredSettings(family: ModelFamily): GenerationSettings[] {
 }
 
 /**
+ * Every row GET /catalog reads, all switched on, so the served body below
+ * carries every family, edit tool, the upscaler and the persona block.
+ */
+function everyRowEnabled(): ModelRow[] {
+  const ids = [
+    ...MODEL_FAMILIES.map((f) => f.id),
+    ...EDIT_TOOLS.map((t) => t.id),
+    UPSCALER.id,
+    PERSONA_GEN.id,
+  ];
+  return ids.map((id) => ({ id, enabled: true, min_plan: 'studio' }));
+}
+
+/**
+ * The whole body GET /catalog serves, minus the version string itself. Clients
+ * cache that body keyed by the version (and the ETag embeds it), so any change
+ * here without a bump would never reach a device that already holds a copy.
+ */
+function servedBody(): unknown {
+  const { catalogVersion: _version, ...body } = buildCatalog(everyRowEnabled());
+  return body;
+}
+
+/**
  * The catalog version is a promise to the Deno `_shared` copy and to every
  * client that sends it back. This fingerprint fails whenever the catalog's
  * shape or its prices change without a bump, so a silent divergence becomes a
@@ -65,6 +93,7 @@ function fingerprint(): string {
     editTools: EDIT_TOOLS.map((t) => ({ id: t.id, credits: t.creditCost })),
     packs: CREDIT_PACKS,
     planCredits: PLAN_CREDITS,
+    served: servedBody(),
   };
   let hash = 0;
   const json = JSON.stringify(shape);
@@ -80,7 +109,7 @@ describe('catalog version', () => {
     // `npm run sync-shared`, regenerate mobile's bundled catalog with
     // `npm run catalog:mobile <path>`, then paste the new fingerprint here.
     expect({ version: CATALOG_VERSION, fingerprint: fingerprint() }).toEqual({
-      version: '2026-09-23.2',
+      version: '2026-09-23.3',
       fingerprint: recordedCatalogFingerprint,
     });
   });
