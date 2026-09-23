@@ -32,6 +32,8 @@ PROJECT_REF="${VANSEN_PROJECT_REF:-bnorhcxhvxydkgvcxjad}"
 NODE_VERSION="22.23.1"
 FUNCTIONS_URL="https://${PROJECT_REF}.supabase.co/functions/v1/api"
 WEB_URL="https://vansen.fendyhaddad-d36.workers.dev/"
+# The OAuth issuer (spec §R1): the web origin that serves the AS metadata.
+ISSUER_URL="https://vansen.vankode.com"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
@@ -216,6 +218,8 @@ tick
 if [ "$SKIP_VERIFY" = "1" ]; then
   progress "building (gates skipped)"
   run "production build failed" npx ng build --configuration production
+  # verify runs this gate itself; a bare build must not skip it.
+  run "MCP static assets missing from the build" npm run check:mcp-assets
 fi
 
 if [ "$SKIP_VERIFY" != "1" ]; then
@@ -307,6 +311,12 @@ done
 check "capabilities"   "$(curl -fsS "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "catalog"        "$(curl -fsS "$FUNCTIONS_URL/catalog" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
 check "web app"        "$(curl -fsS -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
+check "AS metadata"    "$(curl -fsS "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | jq -r '.issuer' 2>>"$LOG" || true)" "$ISSUER_URL"
+check "consent framing" "$(curl -fsSI "$ISSUER_URL/oauth/consent" 2>>"$LOG" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options" {print $2}')" "DENY"
+# Whether _headers can set Content-Type on Workers static assets is unproven;
+# clients parse the body anyway, so this is recorded, not enforced.
+printf '\n$ AS metadata content-type\n%s\n' \
+  "$(curl -fsSI "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | tr -d '\r' | grep -i '^content-type' || true)" >> "$LOG"
 tick
 
 [ -z "$MISMATCH" ] || fail "deployed, but the running system disagrees with what was sent" "$MISMATCH"

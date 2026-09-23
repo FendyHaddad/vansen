@@ -28,8 +28,12 @@ export interface ResolvedGrant {
   grantId: string;
 }
 
-/** What a code redemption or refresh rotation returns. */
-export type GrantOutcome = { grantId: string } | { error: string; reuse?: boolean } | Unavailable;
+/** What a code redemption or refresh rotation returns. A reuse names the
+ * grant it revoked, for the log line. */
+export type GrantOutcome =
+  | { grantId: string }
+  | { error: string; reuse?: boolean; grantId?: string; clientId?: string }
+  | Unavailable;
 
 export interface NewRequest {
   id: string;
@@ -48,13 +52,14 @@ export function createOauthStore(admin: SupabaseClient) {
     name: string,
     redirectUris: string[],
     ipHash: string,
-  ): Promise<"ok" | "rate_limited" | Unavailable> {
+  ): Promise<"ok" | "rate_limited" | "rate_limited_global" | Unavailable> {
     const { error } = await admin.rpc("fn_oauth_register_client", {
       p_id: id,
       p_name: name,
       p_redirect_uris: redirectUris,
       p_ip_hash: ipHash,
     });
+    if (error && /rate_limited_global/.test(error.message)) return "rate_limited_global";
     if (error && /rate_limited/.test(error.message)) return "rate_limited";
     return error ? UNAVAILABLE : "ok";
   }
@@ -163,19 +168,27 @@ export function createOauthStore(admin: SupabaseClient) {
     return (data as ResolvedGrant | null) ?? null;
   }
 
-  async function hasActiveGrant(userId: string, clientId: string): Promise<boolean | Unavailable> {
-    const { data, error } = await admin.from("oauth_grants").select("id")
+  /** The user already approved this exact redirect URI for this client, on an
+   * active grant. Approving one registered URI never approves another. */
+  async function isApproved(userId: string, clientId: string, redirectUri: string): Promise<boolean | Unavailable> {
+    const { data, error } = await admin.from("oauth_grants").select("approved_redirect_uris")
       .eq("user_id", userId).eq("client_id", clientId).is("revoked_at", null);
     if (error) return UNAVAILABLE;
-    return (data ?? []).length > 0;
+    const grants = (data ?? []) as { approved_redirect_uris: string[] | null }[];
+    return grants.some((g) => (g.approved_redirect_uris ?? []).includes(redirectUri));
   }
 
   async function activeGrants(userId: string) {
     const { data, error } = await admin.from("oauth_grants")
-      .select("id,client_id,created_at,last_used_at")
+      .select("id,client_id,approved_redirect_uris,created_at,last_used_at")
       .eq("user_id", userId).is("revoked_at", null).order("created_at", { ascending: false });
     if (error) return UNAVAILABLE;
-    return (data ?? []) as { client_id: string; created_at: string; last_used_at: string | null }[];
+    return (data ?? []) as {
+      client_id: string;
+      approved_redirect_uris: string[] | null;
+      created_at: string;
+      last_used_at: string | null;
+    }[];
   }
 
   async function revokeUserGrant(userId: string, clientId: string): Promise<boolean | Unavailable> {
@@ -198,7 +211,7 @@ export function createOauthStore(admin: SupabaseClient) {
     rotateRefresh,
     revokeToken,
     resolveAccess,
-    hasActiveGrant,
+    isApproved,
     activeGrants,
     revokeUserGrant,
   };

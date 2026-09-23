@@ -51,8 +51,12 @@ export function authorize(app: App, clientId: string, over: Record<string, strin
 }
 
 /** Authorize and return the authorization_id from the consent redirect. */
-export async function startAuthorization(app: App, clientId: string): Promise<string> {
-  const res = await authorize(app, clientId);
+export async function startAuthorization(
+  app: App,
+  clientId: string,
+  over: Record<string, string | null> = {},
+): Promise<string> {
+  const res = await authorize(app, clientId, over);
   const location = res.headers.get("location") ?? "";
   const id = new URL(location).searchParams.get("authorization_id");
   if (res.status !== 302 || !id) throw new Error(`authorize: ${res.status} ${location}`);

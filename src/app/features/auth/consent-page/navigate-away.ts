@@ -1,6 +1,6 @@
 import { InjectionToken } from '@angular/core';
 
-/** Schemes GoTrue already refuses at client registration; refused here too. */
+/** Schemes the gateway's /oauth/register already refuses; refused here too. */
 const DANGEROUS_SCHEMES = new Set(['javascript:', 'data:', 'file:', 'vbscript:', 'about:', 'blob:']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const CUSTOM_SCHEME = /^[a-z][a-z0-9+.-]*:$/;
@@ -25,7 +25,7 @@ export function isAllowedRedirect(raw: string): boolean {
 }
 
 /**
- * Leaves the app for good, to a URL Supabase (or our own sanitizer) has
+ * Leaves the app for good, to a URL the gateway (or our own sanitizer) has
  * already validated, and only when isAllowedRedirect agrees.
  *
  * Behind a token for the same reason `AUTH_CLIENT` is (see auth-service.ts):

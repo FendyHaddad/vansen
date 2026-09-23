@@ -49,6 +49,8 @@ export function installOauthRpcs(db: FakeDb): void {
       c.registered_ip_hash === a.p_ip_hash && new Date(String(c.created_at)).getTime() > since
     );
     if (recent.length >= 20) throw new Error("rate_limited");
+    const lastHour = rows(self, "oauth_clients").filter((c) => new Date(String(c.created_at)).getTime() > since);
+    if (lastHour.length >= 500) throw new Error("rate_limited_global");
     rows(self, "oauth_clients").push({
       id: a.p_id, client_name: a.p_name, redirect_uris: a.p_redirect_uris,
       registered_ip_hash: a.p_ip_hash, created_at: iso(self),
@@ -66,9 +68,14 @@ export function installOauthRpcs(db: FakeDb): void {
       g.user_id === a.p_user && g.client_id === req.client_id && g.revoked_at == null
     );
     if (!grant) {
-      grant = { id: crypto.randomUUID(), user_id: a.p_user, client_id: req.client_id, created_at: iso(self), last_used_at: null, revoked_at: null };
+      grant = {
+        id: crypto.randomUUID(), user_id: a.p_user, client_id: req.client_id, approved_redirect_uris: [],
+        created_at: iso(self), last_used_at: null, revoked_at: null,
+      };
       rows(self, "oauth_grants").push(grant);
     }
+    const approved = (grant.approved_redirect_uris ?? []) as unknown[];
+    if (!approved.includes(req.redirect_uri)) grant.approved_redirect_uris = [...approved, req.redirect_uri];
     rows(self, "oauth_codes").push({
       code_hash: a.p_code_hash, grant_id: grant.id, request_id: req.id, redirect_uri: req.redirect_uri,
       code_challenge: req.code_challenge, resource: req.resource, expires_at: iso(self, 300_000), used_at: null,
@@ -82,7 +89,7 @@ export function installOauthRpcs(db: FakeDb): void {
     if (!code) return { error: "invalid_grant" };
     if (code.used_at != null) {
       revokeGrant(self, code.grant_id);
-      return { error: "invalid_grant", reuse: true };
+      return { error: "invalid_grant", reuse: true, grantId: code.grant_id, clientId: grantOf(self, code.grant_id).client_id };
     }
     const grant = grantOf(self, code.grant_id);
     const refused = grant.revoked_at != null || past(self, code.expires_at) ||
@@ -99,7 +106,7 @@ export function installOauthRpcs(db: FakeDb): void {
     if (!tok) return { error: "invalid_grant" };
     if (tok.replaced_by != null) {
       revokeGrant(self, tok.grant_id);
-      return { error: "invalid_grant", reuse: true };
+      return { error: "invalid_grant", reuse: true, grantId: tok.grant_id, clientId: grantOf(self, tok.grant_id).client_id };
     }
     const grant = grantOf(self, tok.grant_id);
     const refused = tok.revoked_at != null || past(self, tok.expires_at) ||

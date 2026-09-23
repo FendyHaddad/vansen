@@ -44,6 +44,7 @@ export function seedOauthGrant(db: FakeDb, userId = TEST_USER): void {
     id: OAUTH_GRANT,
     user_id: userId,
     client_id: OAUTH_CLIENT,
+    approved_redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
     created_at: db.now().toISOString(),
     last_used_at: null,
     revoked_at: null,

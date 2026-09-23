@@ -40,11 +40,12 @@ This section overrides §0, decision 2 of §1, and §2, §3, §6, §7 and §9 wh
     "code_challenge_methods_supported": ["S256"],
     "token_endpoint_auth_methods_supported": ["none"],
     "revocation_endpoint_auth_methods_supported": ["none"],
-    "scopes_supported": ["vansen"]
+    "scopes_supported": ["vansen"],
+    "authorization_response_iss_parameter_supported": true
   }
   ```
 
-  A `public/_headers` rule gives it `Content-Type: application/json` and `Access-Control-Allow-Origin: *`. `angular.json` must copy `.well-known/` and `_headers` into `dist/vansen/browser`. A build gate fails if either is missing, because the SPA fallback would otherwise answer the metadata URL with `index.html` and a 200.
+  A `public/_headers` rule gives it `Content-Type: application/json` and `Access-Control-Allow-Origin: *`. A site-wide `/*` rule sets `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, so the consent page cannot be framed (RFC 6749 §10.13; final review 2, I1). `angular.json` must copy `.well-known/` and `_headers` into `dist/vansen/browser`. A build gate fails if either is missing or the anti-framing rule is absent, because the SPA fallback would otherwise answer the metadata URL with `index.html` and a 200.
 
 ### R2. Storage (migration `0036_mcp_oauth.sql`)
 
@@ -53,7 +54,8 @@ All tables are RLS deny-all and accessed only by service_role. User FKs are `on 
 - `oauth_clients`:
   - `id text pk` (random, `vsn_client_…`)
   - `client_name text` (≤ 100)
-  - `redirect_uris text[]` (1–5)
+  - `redirect_uris text[]` (1–5, each ≤ 512 characters)
+  - `registered_ip_hash`
   - `created_at`
 - `oauth_requests`, pending authorizations, expiring after 10 min:
   - `id uuid pk` (the `authorization_id`)
@@ -69,6 +71,7 @@ All tables are RLS deny-all and accessed only by service_role. User FKs are `on 
   - `user_id`
   - `client_id`
   - `created_at`
+  - `approved_redirect_uris text[]`: every redirect URI the user approved on the consent screen for this grant (final review 2, C1)
   - `last_used_at`
   - `revoked_at`
   - `unique (user_id, client_id)`
@@ -97,11 +100,13 @@ State transitions happen in `security definer` RPCs so every step is atomic:
 - revoking a grant;
 - resolving an access token, which returns `user_id`, `client_id` and `grant_id` only while the token is unexpired, unrevoked and its grant is active. It updates `last_used_at` at most once every 5 min.
 
-A daily purge (a new cron job, or a step inside the existing purge function) deletes expired requests, codes and tokens older than 1 day.
+A daily purge (cron `purge_oauth`) deletes expired requests, codes and tokens older than 1 day, revoked grants older than 1 day, and clients with no grant row that are older than 30 days.
+
+Lock order: every RPC that locks a grant and its codes or tokens locks the grant first, so a Disconnect racing a redemption or refresh cannot deadlock.
 
 ### R3. HTTP contract
 
-**Public endpoints.** These are registered before auth, like the PRM. They all return 503 `mcp_disabled` when `MCP_ENABLED` is off, except the metadata. Errors follow RFC 6749 and 7591 JSON (`invalid_request`, `invalid_client`, `invalid_grant`, `unsupported_grant_type`, `invalid_redirect_uri`, `invalid_client_metadata`). CORS is `*`, without credentials.
+**Public endpoints.** These are registered before auth, like the PRM. They all return 503 `mcp_disabled` when `MCP_ENABLED` is off, except the metadata and `/oauth/revoke` (revocation only takes access away). Errors follow RFC 6749 and 7591 JSON (`invalid_request`, `invalid_client`, `invalid_grant`, `unsupported_grant_type`, `invalid_redirect_uri`, `invalid_client_metadata`). CORS is `*`, without credentials.
 
 - `POST /oauth/register` (RFC 7591, JSON):
   - Accepts `client_name` and `redirect_uris`. `token_endpoint_auth_method` must be absent or `none`.
@@ -110,19 +115,20 @@ A daily purge (a new cron job, or a step inside the existing purge function) del
     - `http:` on a loopback host;
     - a custom scheme not in `javascript|data|file|vbscript|about|blob`.
   - Returns 201 `{client_id, client_name, redirect_uris, token_endpoint_auth_method:"none", grant_types:["authorization_code","refresh_token"], response_types:["code"]}`.
-  - Rate limit: 20 registrations per hour per client IP (hash of the first `x-forwarded-for` hop).
+  - Rate limit: 20 registrations per hour per client IP, and 500 per hour in total. The IP is `cf-connecting-ip` (Cloudflare overwrites it) when present, else the right-most `x-forwarded-for` hop, the one the nearest proxy appended. Never the first hop: proxies append, so the caller writes it (final review 2, I2). Only its hash is stored.
 - `GET /oauth/authorize`:
   - Parameters: `response_type=code`, `client_id`, `redirect_uri`, `code_challenge`, `code_challenge_method=S256`, `state?`, `scope?`, `resource?`.
-  - An unknown client or a `redirect_uri` that doesn't exactly match a registered one gets a 400 plain page, **never a redirect**.
-  - Other errors redirect to `redirect_uri` with `error` and `state`.
+  - An unknown client, a `redirect_uri` that doesn't exactly match a registered one, or a bad parameter gets a 400 plain page, **never a redirect**. With dynamic registration a registered URI may be the attacker's, so no parameter error is an instant redirect (RFC 9700 §4.11.2). An unknown client's page says to remove and re-add the connector (its registration may have been purged).
+  - Only a storage failure redirects, with `error=temporarily_unavailable`, `state` and `iss`.
   - `resource`, if present, must equal the MCP URL.
-  - On success, stores an `oauth_requests` row and returns a 302 to `https://vansen.vankode.com/oauth/consent?authorization_id=<id>`. The web origin is the existing allowed-origin config.
+  - On success, stores an `oauth_requests` row and returns a 302 to `<issuer>/oauth/consent?authorization_id=<id>`: hosted, always `https://vansen.vankode.com`, whatever order `APP_ORIGIN` lists. Only a local issuer with a path (`<api>/oauth`) falls back to the first `APP_ORIGIN`; with neither, 503, never a localhost guess.
+  - Loopback redirect URIs are matched exactly, port included (RFC 8252 §7.3 would allow any port). Accepted for v1; a CLI client that changes port must re-register.
 - `POST /oauth/token` (form-urlencoded):
   - `grant_type=authorization_code`: `code`, `redirect_uri`, `client_id`, `code_verifier`, `resource?`. The code must be single-use, unexpired, and match its client, redirect and PKCE S256.
-    - A second use of the same code revokes the whole grant.
+    - A second use of the same code revokes the whole grant and logs `oauth_reuse`.
     - Returns `{access_token, token_type:"Bearer", expires_in:3600, refresh_token, scope:"vansen"}`.
   - `grant_type=refresh_token`: `refresh_token`, `client_id`. Rotates, returning a new pair and marking the old one `replaced_by`.
-    - Presenting an already-rotated refresh token revokes the grant (reuse detection).
+    - Presenting an already-rotated refresh token revokes the grant (reuse detection, strict: no grace window). Each reuse logs `{event:"oauth_reuse", kind, grantId, clientId}`, so a client that trips it in normal use is visible before anyone adds a 30 s leeway.
 - `POST /oauth/revoke` (RFC 7009): `token` and `client_id?`. Always 200.
 
 **Session endpoints** (the app's Supabase session, through the normal middleware):
@@ -130,19 +136,19 @@ A daily purge (a new cron job, or a step inside the existing purge function) del
 - `GET /oauth/requests/:id`:
   - Returns `{clientName, redirectUri, redirectHost, scope, alreadyGranted}`.
   - 404 `authorization_not_found` when unknown or expired.
-  - `alreadyGranted` is true when the user has an active grant for that client.
+  - `alreadyGranted` is true only when the user has an active grant for that client **and** the request's `redirect_uri` is already in its `approved_redirect_uris`. A new redirect URI of the same client always shows the consent screen (final review 2, C1).
 - `POST /oauth/requests/:id/approve`:
-  - Creates the grant (or reuses the active one), issues the code, and deletes the request.
-  - Returns `{redirectUrl}`, which is `redirect_uri?code=…&state=…`.
-- `POST /oauth/requests/:id/deny`: returns `{redirectUrl}` with `error=access_denied&state=…`.
-- `GET /oauth/grants`: returns `{grants:[{clientId, clientName, redirectHost, createdAt, lastUsedAt}]}`, active grants only.
+  - Creates the grant (or reuses the active one), appends the request's `redirect_uri` to `approved_redirect_uris`, issues the code, and deletes the request.
+  - Returns `{redirectUrl}`, which is `redirect_uri?code=…&state=…&iss=<issuer>` (RFC 9207).
+- `POST /oauth/requests/:id/deny`: returns `{redirectUrl}` with `error=access_denied&state=…&iss=<issuer>`.
+- `GET /oauth/grants`: returns `{grants:[{clientId, clientName, redirectHost, createdAt, lastUsedAt}]}`, active grants only. `redirectHost` lists every approved host, comma-separated.
 - `DELETE /oauth/grants/:clientId`: revokes the grant and all its tokens. Returns 204, or 404.
 - These two grant endpoints stay available when `MCP_ENABLED` is off, so users can always revoke.
 
 **`/mcp` authentication:**
 - A bearer that starts with `vsn_at_` is resolved through the RPC. On success it sets `userId`, `oauthClientId` and `grantId`, then the age gate and suspension checks run as today.
 - Anything else, including a Supabase session JWT, gets 401 plus `WWW-Authenticate` (with `error="invalid_token"` for an unknown, expired or revoked `vsn_at_`).
-- A `vsn_` token on any other route fails `getUser` and gets the normal 401. Containment is now structural. The claim-based `client_id` middleware from §3 is deleted.
+- A `vsn_` token on any other route gets the normal 401 before `getUser`, so it never reaches GoTrue or its logs. Containment is now structural. The claim-based `client_id` middleware from §3 is deleted.
 - `grantId` joins the tool log line.
 
 ### R4. Web changes
@@ -151,7 +157,7 @@ A daily purge (a new cron job, or a step inside the existing purge function) del
   - `alreadyGranted` auto-approves.
   - Allow and Deny follow `redirectUrl` through the existing `navigateAway` scheme guard.
   - The unverified-app hint and the redirect-host emphasis stay.
-- **The Connected tab** drops `listGrants`/`revokeGrant` from `AuthService` and uses `GET/DELETE /oauth/grants` through the app's api client.
+- **The Connected tab** drops `listGrants`/`revokeGrant` from `AuthService` and uses `GET/DELETE /oauth/grants` through the app's api client. It shows while `MCP_ENABLED` is on, or while the user still has a grant, so Disconnect is always reachable.
 - Sign-out keeps `{ scope: 'local' }`. It's harmless, and it keeps other devices signed in.
 
 ### R5. Tasks (parallel)
@@ -183,12 +189,13 @@ A daily purge (a new cron job, or a step inside the existing purge function) del
 
 1. `db push --linked` for 0035 and 0036, after reading back the live `client` constraint names (final review, Minor 3).
 2. `./deploy.sh --yes` with `MCP_ENABLED` unset, meaning off.
-3. Read back:
-   - the web metadata URL returns JSON;
+3. Read back, with the flag off:
+   - the web metadata URL returns JSON (`deploy.sh` checks it);
+   - `/oauth/consent` carries `X-Frame-Options: DENY` and `frame-ancestors 'none'`;
    - the PRM names `https://vansen.vankode.com`;
-   - `/mcp` returns 401 with `WWW-Authenticate`;
+   - `/mcp` returns 503 `mcp_disabled` (the kill switch runs before auth);
    - `/oauth/register` returns 503.
-4. Owner (paid smoke, ask first): set `MCP_ENABLED=true`, connect Claude and ChatGPT, generate one image each, revoke, and confirm the next call fails. Then keep it on and add the FAQ entry, or turn it off.
+4. Owner (paid smoke, ask first): set `MCP_ENABLED=on` (the exact string, like the other release flags; `true` leaves it off). First check: a bare `POST /mcp` returns 401 with `WWW-Authenticate`. Then connect Claude and ChatGPT, generate one image each, revoke, and confirm the next call fails. Check the logs for `oauth_register` (`ipSource`) and any `oauth_reuse`. Then keep it on and add the FAQ entry (include: a CLI client on a changing loopback port must re-register), or turn it off.
 
 ## 0. Spike result (2026-09-23): GO with Supabase's OAuth 2.1 server — auth part superseded by §R
 

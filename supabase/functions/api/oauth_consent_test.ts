@@ -33,6 +33,44 @@ Deno.test("GET /oauth/requests/:id: what the consent page shows", async () => {
   assertEquals(again.alreadyGranted, true, "an active grant lets the page auto-approve");
 });
 
+// Final review 2, C1: one approval showing a trusted host must not let the
+// same client later take a code to another of its registered hosts silently.
+Deno.test("alreadyGranted is bound to the redirect URI: approving host A never auto-approves host B", async () => {
+  const { app } = mcpApp();
+  const trusted = "https://claude.ai/api/mcp/auth_callback";
+  const evil = "https://evil.example/cb";
+  const clientId = await registerClient(app, [trusted, evil]);
+  await approveCode(app, await startAuthorization(app, clientId, { redirect_uri: trusted }));
+
+  const attack = await startAuthorization(app, clientId, { redirect_uri: evil });
+  const shown = await (await session(app, "GET", `/oauth/requests/${attack}`)).json();
+  assertEquals(shown.alreadyGranted, false, "a new redirect URI always shows the consent screen");
+  assertEquals(shown.redirectHost, "evil.example");
+
+  const again = await startAuthorization(app, clientId, { redirect_uri: trusted });
+  assertEquals((await (await session(app, "GET", `/oauth/requests/${again}`)).json()).alreadyGranted, true);
+
+  await approveCode(app, attack);
+  const later = await startAuthorization(app, clientId, { redirect_uri: evil });
+  assertEquals(
+    (await (await session(app, "GET", `/oauth/requests/${later}`)).json()).alreadyGranted,
+    true,
+    "once the user approved host B on the screen, B reconnects silently too",
+  );
+  const { grants } = await (await session(app, "GET", "/oauth/grants")).json();
+  const mine = grants.find((g: { clientId: string }) => g.clientId === clientId);
+  assertEquals(mine.redirectHost, "claude.ai, evil.example", "the Connected tab names every approved host");
+});
+
+Deno.test("alreadyGranted: a revoked grant's approvals do not carry over", async () => {
+  const { app } = mcpApp();
+  const clientId = await registerClient(app);
+  await approveCode(app, await startAuthorization(app, clientId));
+  await session(app, "DELETE", `/oauth/grants/${clientId}`);
+  const id = await startAuthorization(app, clientId);
+  assertEquals((await (await session(app, "GET", `/oauth/requests/${id}`)).json()).alreadyGranted, false);
+});
+
 Deno.test("GET /oauth/requests/:id: unknown, malformed or expired is 404", async () => {
   const { app, db } = mcpApp();
   const clientId = await registerClient(app);
@@ -57,6 +95,7 @@ Deno.test("approve: a code and the state go back to the client; the request is u
   assertEquals(`${url.origin}${url.pathname}`, REDIRECT);
   assert(url.searchParams.get("code")!.startsWith("vsn_ac_"));
   assertEquals(url.searchParams.get("state"), "st-1");
+  assertEquals(url.searchParams.get("iss"), "https://vansen.vankode.com", "RFC 9207 iss");
   assertEquals(db.tables.oauth_requests.length, 0);
   assertEquals((await session(app, "POST", `/oauth/requests/${id}/approve`)).status, 404);
 });
@@ -71,6 +110,7 @@ Deno.test("deny: access_denied and the state go back to the client", async () =>
   assertEquals(url.searchParams.get("error"), "access_denied");
   assertEquals(url.searchParams.get("state"), "st-1");
   assertEquals(url.searchParams.get("code"), null);
+  assertEquals(url.searchParams.get("iss"), "https://vansen.vankode.com", "RFC 9207 iss");
   assertEquals(db.tables.oauth_requests.length, 0);
   assertEquals((await session(app, "POST", `/oauth/requests/${id}/deny`)).status, 404);
 });

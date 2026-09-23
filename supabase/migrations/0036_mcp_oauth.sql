@@ -10,12 +10,14 @@ create table public.oauth_clients (
   id text primary key check (id ~ '^vsn_client_[A-Za-z0-9_-]{20,64}$'),
   client_name text not null check (char_length(client_name) between 1 and 100),
   redirect_uris text[] not null check (cardinality(redirect_uris) between 1 and 5),
-  -- SHA-256 of the registering IP (first x-forwarded-for hop), for the
-  -- 20-per-hour registration limit. Never the address itself.
+  -- SHA-256 of the registering IP (see clientIp() in oauth/register.ts), for
+  -- the 20-per-hour registration limit. Never the address itself.
   registered_ip_hash text not null,
   created_at timestamptz not null default now()
 );
 create index oauth_clients_ip_recent on public.oauth_clients (registered_ip_hash, created_at);
+-- The global registration cap and the purge of clients that never connected.
+create index oauth_clients_created on public.oauth_clients (created_at);
 
 -- Pending authorizations, between GET /oauth/authorize and the consent page.
 create table public.oauth_requests (
@@ -38,6 +40,10 @@ create table public.oauth_grants (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles on delete cascade,
   client_id text not null references public.oauth_clients on delete cascade,
+  -- Every redirect URI the user approved on the consent screen for this grant.
+  -- Consent auto-approves only a request whose redirect_uri is already here, so
+  -- approving one registered host never approves another silently.
+  approved_redirect_uris text[] not null default '{}',
   created_at timestamptz not null default now(),
   last_used_at timestamptz,
   revoked_at timestamptz
@@ -81,15 +87,20 @@ revoke all on public.oauth_clients, public.oauth_requests, public.oauth_grants,
 
 -- -------------------------------------------------------------------- RPCs
 
--- Dynamic client registration, at most 20 per hour per registering IP.
+-- Dynamic client registration: at most 20 per hour per registering IP and
+-- 500 per hour in total, a backstop in case the IP can be varied. One global
+-- lock serialises registrations (they are rare), so neither count can race.
 create or replace function public.fn_oauth_register_client(
   p_id text, p_name text, p_redirect_uris text[], p_ip_hash text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform pg_advisory_xact_lock(hashtextextended('oauth_register:' || p_ip_hash, 0));
+  perform pg_advisory_xact_lock(hashtextextended('oauth_register', 0));
   if (select count(*) from oauth_clients
        where registered_ip_hash = p_ip_hash and created_at > now() - interval '1 hour') >= 20 then
     raise exception 'rate_limited';
+  end if;
+  if (select count(*) from oauth_clients where created_at > now() - interval '1 hour') >= 500 then
+    raise exception 'rate_limited_global';
   end if;
   insert into oauth_clients (id, client_name, redirect_uris, registered_ip_hash)
   values (p_id, p_name, p_redirect_uris, p_ip_hash);
@@ -108,7 +119,8 @@ begin
 end $$;
 
 -- The consent page's Allow: bind the pending request to the signed-in user,
--- create or reuse the active grant, issue the code, delete the request.
+-- create or reuse the active grant, record the approved redirect URI on it,
+-- issue the code, delete the request.
 create or replace function public.fn_oauth_approve(p_request uuid, p_user uuid, p_code_hash text)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_req oauth_requests; v_grant uuid;
@@ -117,12 +129,17 @@ begin
   if v_req.id is null or v_req.expires_at <= now() then
     raise exception 'authorization_not_found';
   end if;
-  insert into oauth_grants (user_id, client_id) values (p_user, v_req.client_id)
+  insert into oauth_grants (user_id, client_id, approved_redirect_uris)
+  values (p_user, v_req.client_id, array[v_req.redirect_uri])
   on conflict (user_id, client_id) where revoked_at is null do nothing
   returning id into v_grant;
   if v_grant is null then
-    select id into v_grant from oauth_grants
-     where user_id = p_user and client_id = v_req.client_id and revoked_at is null;
+    update oauth_grants
+       set approved_redirect_uris = case
+             when v_req.redirect_uri = any(approved_redirect_uris) then approved_redirect_uris
+             else approved_redirect_uris || v_req.redirect_uri end
+     where user_id = p_user and client_id = v_req.client_id and revoked_at is null
+    returning id into v_grant;
   end if;
   insert into oauth_codes (code_hash, grant_id, request_id, redirect_uri, code_challenge, resource, expires_at)
   values (p_code_hash, v_grant, v_req.id, v_req.redirect_uri, v_req.code_challenge, v_req.resource,
@@ -132,24 +149,31 @@ end $$;
 
 -- authorization_code grant. A second use of a code revokes its whole grant.
 -- p_challenge is BASE64URL(SHA-256(code_verifier)), computed by the gateway.
+-- Locks the grant before the code, the same order as fn_oauth_revoke_grant,
+-- so a Disconnect racing a redemption cannot deadlock.
 create or replace function public.fn_oauth_redeem_code(
   p_code_hash text, p_client_id text, p_redirect_uri text, p_challenge text,
   p_access_hash text, p_refresh_hash text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_code oauth_codes; v_grant oauth_grants;
+declare v_code oauth_codes; v_grant oauth_grants; v_grant_id uuid;
 begin
   if not exists (select 1 from oauth_clients where id = p_client_id) then
     return jsonb_build_object('error', 'invalid_client');
   end if;
+  select grant_id into v_grant_id from oauth_codes where code_hash = p_code_hash;
+  if v_grant_id is null then
+    return jsonb_build_object('error', 'invalid_grant');
+  end if;
+  select * into v_grant from oauth_grants where id = v_grant_id for update;
   select * into v_code from oauth_codes where code_hash = p_code_hash for update;
   if v_code.code_hash is null then
-    return jsonb_build_object('error', 'invalid_grant');
+    return jsonb_build_object('error', 'invalid_grant'); -- purged between the reads
   end if;
   if v_code.used_at is not null then
     perform fn_oauth_revoke_grant(v_code.grant_id);
-    return jsonb_build_object('error', 'invalid_grant', 'reuse', true);
+    return jsonb_build_object('error', 'invalid_grant', 'reuse', true,
+      'grantId', v_grant.id, 'clientId', v_grant.client_id);
   end if;
-  select * into v_grant from oauth_grants where id = v_code.grant_id for update;
   if v_grant.revoked_at is not null or v_code.expires_at <= now()
      or v_grant.client_id <> p_client_id or v_code.redirect_uri <> p_redirect_uri
      or v_code.code_challenge <> p_challenge then
@@ -163,22 +187,29 @@ begin
   return jsonb_build_object('grantId', v_grant.id);
 end $$;
 
--- refresh_token grant: rotate. Presenting a rotated token revokes the grant.
+-- refresh_token grant: rotate. Presenting a rotated token revokes the grant
+-- (strict: no grace window; the gateway logs each reuse). Grant first, then
+-- token, the same lock order as fn_oauth_revoke_grant.
 create or replace function public.fn_oauth_rotate_refresh(
   p_refresh_hash text, p_client_id text, p_access_hash text, p_new_refresh_hash text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_tok oauth_tokens; v_grant oauth_grants;
+declare v_tok oauth_tokens; v_grant oauth_grants; v_grant_id uuid;
 begin
-  select * into v_tok from oauth_tokens
-   where token_hash = p_refresh_hash and kind = 'refresh' for update;
-  if v_tok.token_hash is null then
+  select grant_id into v_grant_id from oauth_tokens
+   where token_hash = p_refresh_hash and kind = 'refresh';
+  if v_grant_id is null then
     return jsonb_build_object('error', 'invalid_grant');
+  end if;
+  select * into v_grant from oauth_grants where id = v_grant_id for update;
+  select * into v_tok from oauth_tokens where token_hash = p_refresh_hash for update;
+  if v_tok.token_hash is null then
+    return jsonb_build_object('error', 'invalid_grant'); -- purged between the reads
   end if;
   if v_tok.replaced_by is not null then
     perform fn_oauth_revoke_grant(v_tok.grant_id);
-    return jsonb_build_object('error', 'invalid_grant', 'reuse', true);
+    return jsonb_build_object('error', 'invalid_grant', 'reuse', true,
+      'grantId', v_grant.id, 'clientId', v_grant.client_id);
   end if;
-  select * into v_grant from oauth_grants where id = v_tok.grant_id for update;
   if v_tok.revoked_at is not null or v_tok.expires_at <= now()
      or v_grant.revoked_at is not null or v_grant.client_id <> p_client_id then
     return jsonb_build_object('error', 'invalid_grant');
@@ -235,10 +266,12 @@ begin
 end $$;
 
 -- Daily purge. Rotated refresh tokens are kept until they expire, so reuse
--- detection lasts as long as the token could have been used.
+-- detection lasts as long as the token could have been used. A client with no
+-- grant row (it never connected, or every grant was revoked and purged) goes
+-- after 30 days; its assistant simply registers again.
 create or replace function public.fn_oauth_purge()
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_requests int; v_codes int; v_tokens int; v_grants int;
+declare v_requests int; v_codes int; v_tokens int; v_grants int; v_clients int;
 begin
   delete from oauth_requests where expires_at < now();
   get diagnostics v_requests = row_count;
@@ -249,7 +282,12 @@ begin
   get diagnostics v_tokens = row_count;
   delete from oauth_grants where revoked_at < now() - interval '1 day';
   get diagnostics v_grants = row_count;
-  return jsonb_build_object('requests', v_requests, 'codes', v_codes, 'tokens', v_tokens, 'grants', v_grants);
+  delete from oauth_clients c
+   where c.created_at < now() - interval '30 days'
+     and not exists (select 1 from oauth_grants g where g.client_id = c.id);
+  get diagnostics v_clients = row_count;
+  return jsonb_build_object('requests', v_requests, 'codes', v_codes, 'tokens', v_tokens,
+    'grants', v_grants, 'clients', v_clients);
 end $$;
 
 do $$

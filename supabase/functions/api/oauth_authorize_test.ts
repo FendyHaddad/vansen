@@ -1,16 +1,12 @@
-// GET /oauth/authorize: an unknown client or an unregistered redirect_uri gets
-// a plain 400 page and is never redirected to; every other problem goes back
-// to the client's redirect_uri; success stores the request and sends the
-// browser to the web consent page.
+// GET /oauth/authorize: an unknown client, an unregistered redirect_uri or a
+// bad parameter gets a plain 400 page and is never redirected to (RFC 9700
+// §4.11.2: no instant redirects to a dynamically registered URI); success
+// stores the request and sends the browser to the consent page on the
+// issuer's origin, whatever order APP_ORIGIN lists.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { createApp } from "./app.ts";
-import { MCP_RESOURCE, mcpApp, mcpDeps } from "./testing/mcp.ts";
+import { MCP_API, MCP_RESOURCE, mcpApp, mcpDeps } from "./testing/mcp.ts";
 import { authorize, CHALLENGE, REDIRECT, registerClient } from "./testing/oauth-flow.ts";
-
-function errorOf(res: Response) {
-  const url = new URL(res.headers.get("location") ?? "about:blank");
-  return { base: `${url.origin}${url.pathname}`, error: url.searchParams.get("error"), state: url.searchParams.get("state") };
-}
 
 Deno.test("authorize: 302 to the consent page with the stored request's id", async () => {
   const { app, db } = mcpApp();
@@ -18,7 +14,7 @@ Deno.test("authorize: 302 to the consent page with the stored request's id", asy
   const res = await authorize(app, clientId);
   assertEquals(res.status, 302);
   const location = new URL(res.headers.get("location")!);
-  assertEquals(`${location.origin}${location.pathname}`, "https://vansen.app/oauth/consent");
+  assertEquals(`${location.origin}${location.pathname}`, "https://vansen.vankode.com/oauth/consent");
   const id = location.searchParams.get("authorization_id");
   const row = db.tables.oauth_requests.find((r) => r.id === id)!;
   assertEquals(row.client_id, clientId);
@@ -49,7 +45,41 @@ Deno.test("authorize: a redirect_uri that is not exactly registered is never red
   }
 });
 
-Deno.test("authorize: other errors go back to the redirect_uri with error and state", async () => {
+Deno.test("authorize: hosted, consent is on the issuer origin whatever APP_ORIGIN lists first", async () => {
+  const deps = mcpDeps();
+  deps.env.appOrigins = ["https://preview.vansen.workers.dev", "https://vansen.vankode.com"];
+  const app = createApp(deps);
+  const res = await authorize(app, await registerClient(app));
+  assert(res.headers.get("location")!.startsWith("https://vansen.vankode.com/oauth/consent?authorization_id="));
+});
+
+Deno.test("authorize: a local issuer with a path falls back to the first APP_ORIGIN", async () => {
+  const deps = mcpDeps();
+  deps.env.mcp = { ...deps.env.mcp!, issuer: `${MCP_API}/oauth` };
+  deps.env.appOrigins = ["http://127.0.0.1:4200"];
+  const app = createApp(deps);
+  const res = await authorize(app, await registerClient(app));
+  assert(res.headers.get("location")!.startsWith("http://127.0.0.1:4200/oauth/consent?authorization_id="));
+});
+
+Deno.test("authorize: no consent origin configured is a 503, never localhost", async () => {
+  const deps = mcpDeps();
+  deps.env.mcp = { ...deps.env.mcp!, issuer: `${MCP_API}/oauth` };
+  deps.env.appOrigins = [];
+  const app = createApp(deps);
+  const res = await authorize(app, await registerClient(app));
+  assertEquals(res.status, 503);
+  assertEquals(res.headers.get("location"), null);
+  await res.body?.cancel();
+});
+
+Deno.test("authorize: an unknown client is told to re-add the connector", async () => {
+  const { app } = mcpApp();
+  const res = await authorize(app, "vsn_client_doesnotexist000000000");
+  assertStringIncludes(await res.text(), "Remove and re-add the connector");
+});
+
+Deno.test("authorize: a bad parameter gets the plain 400 page, not a redirect", async () => {
   const { app, db } = mcpApp();
   const clientId = await registerClient(app);
   const cases: [Record<string, string | null>, string][] = [
@@ -63,11 +93,9 @@ Deno.test("authorize: other errors go back to the redirect_uri with error and st
   ];
   for (const [over, expected] of cases) {
     const res = await authorize(app, clientId, over);
-    assertEquals(res.status, 302, JSON.stringify(over));
-    const got = errorOf(res);
-    assertEquals(got.base, REDIRECT);
-    assertEquals(got.error, expected, JSON.stringify(over));
-    if (!over.state) assertEquals(got.state, "st-1");
+    assertEquals(res.status, 400, JSON.stringify(over));
+    assertEquals(res.headers.get("location"), null, JSON.stringify(over));
+    assertStringIncludes(await res.text(), expected, JSON.stringify(over));
   }
   assertEquals(db.tables.oauth_requests ?? [], [], "no refused request was stored");
 });
@@ -77,7 +105,7 @@ Deno.test("authorize: resource is optional; any scope is narrowed to vansen", as
   const clientId = await registerClient(app);
   const res = await authorize(app, clientId, { resource: null, scope: "openid email offline_access" });
   assertEquals(res.status, 302);
-  assert(res.headers.get("location")!.startsWith("https://vansen.app/oauth/consent"));
+  assert(res.headers.get("location")!.startsWith("https://vansen.vankode.com/oauth/consent"));
   const row = db.tables.oauth_requests[0];
   assertEquals(row.scope, "vansen");
   assertEquals(row.resource, null);

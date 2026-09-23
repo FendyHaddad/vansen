@@ -1,6 +1,6 @@
 // Who is calling. Containment is structural: /mcp accepts only our opaque
 // vsn_at_ tokens (resolved through fn_oauth_resolve_token), and every other
-// route only GoTrue sessions (getUser), which a vsn_ token can never pass.
+// route only GoTrue sessions (getUser); a vsn_ token is refused before it.
 // Each function returns a refusal Response, or null after setting the caller.
 import type { Context } from "jsr:@hono/hono";
 import type { ApiContext, Vars } from "./context.ts";
@@ -8,6 +8,9 @@ import { fail } from "./http.ts";
 import { mcpChallenge } from "./mcp-challenge.ts";
 import { ACCESS_PREFIX, sha256Hex } from "../oauth/secrets.ts";
 import { UNAVAILABLE } from "../oauth/store.ts";
+
+/** Every secret our authorization server issues starts with this. */
+const OUR_TOKEN_PREFIX = "vsn_";
 
 export function bearerOf(c: Context<Vars>): string {
   return c.req.header("authorization")?.replace(/^Bearer /i, "") ?? "";
@@ -17,6 +20,8 @@ export function bearerOf(c: Context<Vars>): string {
 export async function authenticateSession(c: Context<Vars>, ctx: ApiContext): Promise<Response | null> {
   const token = bearerOf(c);
   if (!token) return fail(c, 401, "unauthorized", "Missing token");
+  // Our own tokens are refused here, so none ever reaches GoTrue or its logs.
+  if (token.startsWith(OUR_TOKEN_PREFIX)) return fail(c, 401, "unauthorized", "Invalid token");
   const { data, error } = await ctx.admin.auth.getUser(token);
   if (error || !data.user) return fail(c, 401, "unauthorized", "Invalid token");
   c.set("userId", data.user.id);

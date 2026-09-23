@@ -1,7 +1,9 @@
 -- 0036: the authorization server's RPCs against the real schema. Code reuse and
 -- refresh-token reuse revoke the whole grant; PKCE, redirect, client, expiry and
 -- revocation all refuse; tokens resolve only while live; registration is capped
--- at 20 per hour per IP; deleting the profile ends every grant; the purge.
+-- at 20 per hour per IP and 500 per hour in total; a grant records each
+-- approved redirect URI; deleting the profile ends every grant; the purge
+-- (including clients that never connected).
 begin;
 do $$
 declare
@@ -37,12 +39,26 @@ begin
   end;
   perform public.fn_oauth_register_client('vsn_client_' || repeat('y', 22), 'x', array['https://x.example/cb'], 'ip-c');
 
+  -- Global backstop: 500 per hour whatever the IP (22 so far).
+  insert into public.oauth_clients (id, client_name, redirect_uris, registered_ip_hash)
+  select 'vsn_client_g' || lpad(i::text, 21, '0'), 'g', array['https://g.example/cb'], 'ip-g' || i
+    from generate_series(1, 478) i;
+  begin
+    perform public.fn_oauth_register_client('vsn_client_' || repeat('w', 22), 'x', array['https://x.example/cb'], 'ip-fresh');
+    raise exception 'the 501st registration in an hour was accepted';
+  exception when raise_exception then
+    assert sqlerrm = 'rate_limited_global', 'refused as rate_limited_global, got ' || sqlerrm;
+  end;
+  delete from public.oauth_clients where id like 'vsn_client_g%';
+
   -- Approve: request consumed, grant created, code issued.
   insert into public.oauth_requests (client_id, redirect_uri, state, code_challenge)
   values (cl, 'https://claude.ai/cb', 's1', ch) returning id into req;
   r := public.fn_oauth_approve(req, u, h_code);
   assert r->>'redirectUri' = 'https://claude.ai/cb' and r->>'state' = 's1', 'approve returns where to send the code';
   assert not exists (select 1 from public.oauth_requests where id = req), 'the request is deleted';
+  assert (select approved_redirect_uris from public.oauth_grants where user_id = u and client_id = cl)
+    = array['https://claude.ai/cb'], 'the grant records the approved redirect URI';
   begin
     perform public.fn_oauth_approve(req, u, repeat('9', 64));
     raise exception 'a consumed request was approved twice';
@@ -77,6 +93,7 @@ begin
   assert public.fn_oauth_resolve_token(h_at2) is not null, 'new access token resolves';
   r := public.fn_oauth_rotate_refresh(h_rt, cl, repeat('6', 64), repeat('7', 64));
   assert r->>'error' = 'invalid_grant' and (r->>'reuse')::boolean, 'reuse refused';
+  assert r->>'grantId' = g::text and r->>'clientId' = cl, 'reuse names the grant for the log: ' || r::text;
   assert (select revoked_at is not null from public.oauth_grants where id = g), 'reuse revoked the grant';
   assert public.fn_oauth_resolve_token(h_at2) is null, 'every token of the grant is dead';
   r := public.fn_oauth_rotate_refresh(h_rt2, cl, repeat('6', 64), repeat('7', 64));
@@ -91,6 +108,7 @@ begin
   g := (r->>'grantId')::uuid;
   r := public.fn_oauth_redeem_code(repeat('a', 64), cl, 'https://claude.ai/cb', ch, repeat('f', 64), repeat('0', 64));
   assert r->>'error' = 'invalid_grant' and (r->>'reuse')::boolean, 'second use refused';
+  assert r->>'grantId' = g::text and r->>'clientId' = cl, 'code reuse names the grant: ' || r::text;
   assert (select revoked_at is not null from public.oauth_grants where id = g), 'code reuse revoked the grant';
   assert public.fn_oauth_resolve_token(repeat('b', 64)) is null, 'the first redemption''s token is dead';
 
@@ -129,6 +147,16 @@ begin
   insert into public.oauth_requests (client_id, redirect_uri, code_challenge)
   values (cl, 'https://claude.ai/cb', ch) returning id into req;
   perform public.fn_oauth_approve(req, u, repeat('d', 64));
+  -- Approved redirect URIs accumulate on the active grant, once each.
+  insert into public.oauth_requests (client_id, redirect_uri, code_challenge)
+  values (cl, 'https://evil.example/cb', ch) returning id into req;
+  perform public.fn_oauth_approve(req, u, repeat('9', 63) || 'a');
+  insert into public.oauth_requests (client_id, redirect_uri, code_challenge)
+  values (cl, 'https://claude.ai/cb', ch) returning id into req;
+  perform public.fn_oauth_approve(req, u, repeat('9', 63) || 'b');
+  assert (select approved_redirect_uris from public.oauth_grants
+           where user_id = u and client_id = cl and revoked_at is null)
+    = array['https://claude.ai/cb', 'https://evil.example/cb'], 'each approved URI once, in order';
   assert public.fn_oauth_revoke_user_grant(u, cl), 'disconnect revokes the active grant';
   insert into public.oauth_requests (client_id, redirect_uri, code_challenge)
   values (cl, 'https://claude.ai/cb', ch) returning id into req;
@@ -145,6 +173,16 @@ begin
   assert not exists (select 1 from public.oauth_grants where revoked_at is not null), 'old revoked grants purged';
   assert public.fn_oauth_resolve_token(repeat('c', 63) || 'd') is not null, 'live tokens survive the purge';
   assert exists (select 1 from cron.job where jobname = 'purge_oauth'), 'the purge is scheduled';
+
+  -- Clients: one that never connected goes after 30 days; a recent one, or
+  -- one with a grant, stays.
+  update public.oauth_clients set created_at = now() - interval '31 days'
+   where id in (cl, other, 'vsn_client_' || repeat('y', 22));
+  r := public.fn_oauth_purge();
+  assert (r->>'clients')::int >= 2, 'purge: ' || r::text;
+  assert not exists (select 1 from public.oauth_clients where id = other), 'an old client with no grant is purged';
+  assert exists (select 1 from public.oauth_clients where id = cl), 'a client with a live grant stays';
+  assert exists (select 1 from public.oauth_clients where id = 'vsn_client_' || lpad('1', 22, 'r')), 'a recent client stays';
 
   delete from public.profiles where id = u;
   assert not exists (select 1 from public.oauth_grants where user_id = u), 'account deletion ends every grant';

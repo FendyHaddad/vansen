@@ -1,3 +1,10 @@
+# Cloudflare Workers static assets. Every matching rule applies.
+# The app is never meant to be framed; the OAuth consent page's Allow button in
+# particular must not be clickable inside another site (RFC 6749 §10.13).
+/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+
 /.well-known/oauth-authorization-server
   Content-Type: application/json
   Access-Control-Allow-Origin: *

@@ -109,6 +109,48 @@ Deno.test("refresh: rotates the pair; the old refresh token's reuse revokes the 
   assertEquals((await newest.json()).error, "invalid_grant");
 });
 
+/** Runs fn and returns the JSON log lines it printed. */
+async function logsOf(fn: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (line: unknown) => lines.push(String(line));
+  try {
+    await fn();
+  } finally {
+    console.log = original;
+  }
+  return lines.flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+Deno.test("reuse detection logs one structured line naming the grant (refresh and code)", async () => {
+  const { app, db } = mcpApp();
+  const conn = await connect(app);
+  await (await tokenRequest(app, { grant_type: "refresh_token", refresh_token: conn.refreshToken, client_id: conn.clientId })).body?.cancel();
+  const grantId = db.tables.oauth_grants.find((g) => g.client_id === conn.clientId)!.id;
+  const refreshLogs = await logsOf(async () => {
+    await (await tokenRequest(app, { grant_type: "refresh_token", refresh_token: conn.refreshToken, client_id: conn.clientId })).body?.cancel();
+  });
+  assertEquals(refreshLogs.filter((l) => l.event === "oauth_reuse"), [
+    { event: "oauth_reuse", kind: "refresh", grantId, clientId: conn.clientId },
+  ]);
+  const codeLogs = await logsOf(async () => {
+    await (await redeem(app, conn.clientId, conn.code)).body?.cancel();
+  });
+  assertEquals(codeLogs.filter((l) => l.event === "oauth_reuse"), [
+    { event: "oauth_reuse", kind: "code", grantId, clientId: conn.clientId },
+  ]);
+  const quiet = await logsOf(async () => {
+    await (await tokenRequest(app, { grant_type: "refresh_token", refresh_token: "vsn_rt_unknown", client_id: conn.clientId })).body?.cancel();
+  });
+  assertEquals(quiet.filter((l) => l.event === "oauth_reuse"), [], "a plain invalid_grant is not reuse");
+});
+
 Deno.test("refresh: another client cannot use the refresh token", async () => {
   const { app } = mcpApp();
   const conn = await connect(app);

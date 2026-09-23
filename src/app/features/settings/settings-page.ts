@@ -14,6 +14,8 @@ import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
+import { ApiService } from '../../core/api/api-service';
+import { OAuthGrantsResponse } from '../../core/api/dtos';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { ProfileTab } from './profile-tab/profile-tab';
 import { BillingTab } from './billing-tab/billing-tab';
@@ -81,16 +83,23 @@ export class SettingsPage {
   private readonly router = inject(Router);
   private readonly profileStore = inject(ProfileStore);
   private readonly caps = inject(PublicCapabilitiesService);
+  private readonly api = inject(ApiService);
 
   readonly totalCredits = this.ledger.totalCredits;
   readonly isOwner = this.profileStore.isOwner;
 
   readonly active = signal<SettingsTab>('profile');
 
-  /** Connected assistants only while the deployment has MCP_ENABLED on:
-   * with it off, /mcp answers 503 and the grant list cannot load. */
+  /** The user holds at least one assistant grant (loaded once). */
+  private readonly hasGrants = signal(false);
+
+  /** Connected assistants while the deployment has MCP_ENABLED on, or while
+   * the user still has a grant: the grant endpoints work with the flag off,
+   * and a dormant grant would come back when it is switched on again. */
   readonly tabs = computed(() =>
-    TABS.filter((t) => t.id !== 'connected' || this.caps.assistantConnection()),
+    TABS.filter(
+      (t) => t.id !== 'connected' || this.caps.assistantConnection() || this.hasGrants(),
+    ),
   );
 
   /** The tab actually shown: a hidden tab (a stale deep link) falls back. */
@@ -101,6 +110,7 @@ export class SettingsPage {
 
   constructor() {
     void this.caps.load();
+    void this.loadGrantPresence();
     // Deep link: the workspace "Buy credits" entry points at ?tab=billing.
     const tab = inject(ActivatedRoute).snapshot.queryParamMap.get('tab');
     if (
@@ -111,6 +121,16 @@ export class SettingsPage {
       tab === 'connected'
     ) {
       this.active.set(tab);
+    }
+  }
+
+  /** A failed load leaves the tab to the flag alone; the tab shows its own error. */
+  private async loadGrantPresence(): Promise<void> {
+    try {
+      const res = await this.api.get<OAuthGrantsResponse>('/oauth/grants');
+      this.hasGrants.set(res.grants.length > 0);
+    } catch {
+      this.hasGrants.set(false);
     }
   }
 

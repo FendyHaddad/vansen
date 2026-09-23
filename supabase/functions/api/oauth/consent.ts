@@ -1,7 +1,9 @@
 // The session endpoints behind the web app: the consent page's request details,
 // Allow and Deny, and the Connected tab's grant list and Disconnect. They run
 // after the normal auth middleware, so the caller is a signed-in app session.
-// A code is issued only here, and only its hash is stored.
+// A code is issued only here, and only its hash is stored. alreadyGranted is
+// true only for a redirect URI the user already approved on this grant (C1).
+// Every authorization response carries iss (RFC 9207) against mix-up attacks.
 import type { Context } from "jsr:@hono/hono";
 import type { ApiContext, Vars } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
@@ -24,7 +26,7 @@ export async function getRequest(c: Context<Vars>, ctx: ApiContext): Promise<Res
   if (!request) return notFound(c);
   const [client, granted] = await Promise.all([
     ctx.oauth.clientById(request.client_id),
-    ctx.oauth.hasActiveGrant(c.get("userId"), request.client_id),
+    ctx.oauth.isApproved(c.get("userId"), request.client_id, request.redirect_uri),
   ]);
   if (client === UNAVAILABLE || granted === UNAVAILABLE) return unavailable(c);
   if (!client) return notFound(c);
@@ -44,7 +46,8 @@ export async function approveRequest(c: Context<Vars>, ctx: ApiContext): Promise
   const approved = await ctx.oauth.approve(id, c.get("userId"), await sha256Hex(code));
   if (approved === UNAVAILABLE) return unavailable(c);
   if (!approved) return notFound(c);
-  return c.json({ redirectUrl: withParams(approved.redirectUri, { code, state: approved.state }) });
+  const iss = ctx.deps.env.mcp!.issuer;
+  return c.json({ redirectUrl: withParams(approved.redirectUri, { code, state: approved.state, iss }) });
 }
 
 export async function denyRequest(c: Context<Vars>, ctx: ApiContext): Promise<Response> {
@@ -53,7 +56,13 @@ export async function denyRequest(c: Context<Vars>, ctx: ApiContext): Promise<Re
   const denied = await ctx.oauth.deny(id, ctx.deps.now());
   if (denied === UNAVAILABLE) return unavailable(c);
   if (!denied) return notFound(c);
-  return c.json({ redirectUrl: withParams(denied.redirect_uri, { error: "access_denied", state: denied.state }) });
+  const iss = ctx.deps.env.mcp!.issuer;
+  return c.json({ redirectUrl: withParams(denied.redirect_uri, { error: "access_denied", state: denied.state, iss }) });
+}
+
+/** Every host the user approved for a grant, so none can hide behind another. */
+function approvedHosts(uris: string[] | null): string {
+  return [...new Set((uris ?? []).map(redirectHost).filter(Boolean))].join(", ");
 }
 
 export async function listGrants(c: Context<Vars>, ctx: ApiContext): Promise<Response> {
@@ -68,7 +77,7 @@ export async function listGrants(c: Context<Vars>, ctx: ApiContext): Promise<Res
       return {
         clientId: g.client_id,
         clientName: client?.client_name ?? "Unknown app",
-        redirectHost: client ? redirectHost(client.redirect_uris[0] ?? "") : "",
+        redirectHost: approvedHosts(g.approved_redirect_uris),
         createdAt: g.created_at,
         lastUsedAt: g.last_used_at,
       };

@@ -1,6 +1,7 @@
 // POST /oauth/register (RFC 7591): public clients only (no secret), one to five
 // redirect URIs that pass redirectUriProblem(), an optional name of at most
-// 100 characters, and at most 20 registrations per hour per client IP.
+// 100 characters, at most 20 registrations per hour per client IP (clientIp())
+// and 500 per hour in total.
 import type { Context } from "jsr:@hono/hono";
 import type { ApiContext, Vars } from "../lib/context.ts";
 import { redirectUriProblem } from "./redirects.ts";
@@ -50,10 +51,36 @@ export function parseRegistration(body: unknown): Registration {
   return { name, redirectUris };
 }
 
-/** SHA-256 of the first x-forwarded-for hop: the client, as the edge saw it. */
+interface ClientIp {
+  ip: string;
+  source: "cf-connecting-ip" | "x-forwarded-for:last" | "none";
+  forwardedHops: number;
+}
+
+/**
+ * The caller's IP, from a hop the caller cannot write. Hosted requests reach
+ * the function through Cloudflare and Supabase's gateway, which APPEND to an
+ * incoming x-forwarded-for, so its first hop is whatever the caller sent.
+ * Cloudflare overwrites cf-connecting-ip, so it wins when present; otherwise
+ * the right-most x-forwarded-for hop, the one the nearest proxy appended. At
+ * worst that hop is a proxy address shared by many callers: a tighter limit,
+ * never a bypass, and the global cap in fn_oauth_register_client backs it.
+ */
+export function clientIp(header: (name: string) => string | undefined): ClientIp {
+  const hops = (header("x-forwarded-for") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  const cf = (header("cf-connecting-ip") ?? "").trim();
+  if (cf) return { ip: cf, source: "cf-connecting-ip", forwardedHops: hops.length };
+  const last = hops.at(-1);
+  if (last) return { ip: last, source: "x-forwarded-for:last", forwardedHops: hops.length };
+  return { ip: "unknown", source: "none", forwardedHops: 0 };
+}
+
+/** SHA-256 of the caller's IP. The log line names the header, never the IP,
+ * so the hosted header chain can be confirmed from the function logs. */
 async function clientIpHash(c: Context<Vars>): Promise<string> {
-  const first = (c.req.header("x-forwarded-for") ?? "").split(",")[0].trim();
-  return await sha256Hex(`ip:${first || "unknown"}`);
+  const { ip, source, forwardedHops } = clientIp((name) => c.req.header(name));
+  console.log(JSON.stringify({ event: "oauth_register", ipSource: source, forwardedHops }));
+  return await sha256Hex(`ip:${ip}`);
 }
 
 export async function handleRegister(c: Context<Vars>, ctx: ApiContext): Promise<Response> {
@@ -64,6 +91,9 @@ export async function handleRegister(c: Context<Vars>, ctx: ApiContext): Promise
   const stored = await ctx.oauth.registerClient(clientId, parsed.name, parsed.redirectUris, await clientIpHash(c));
   if (stored === "rate_limited") {
     return oauthError(c, 429, "rate_limited", "Too many registrations from this address. Try again later.");
+  }
+  if (stored === "rate_limited_global") {
+    return oauthError(c, 429, "rate_limited", "Too many registrations right now. Try again later.");
   }
   if (stored === UNAVAILABLE) {
     return oauthError(c, 503, "temporarily_unavailable", "Registration is unavailable right now.");

@@ -23,5 +23,7 @@ export function buildAsMetadata(issuer: string, apiUrl: string) {
     token_endpoint_auth_methods_supported: ["none"],
     revocation_endpoint_auth_methods_supported: ["none"],
     scopes_supported: [OAUTH_SCOPE],
+    // RFC 9207: approve and deny redirects carry iss=<issuer>.
+    authorization_response_iss_parameter_supported: true,
   };
 }

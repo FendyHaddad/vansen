@@ -5,7 +5,8 @@
 
 const BANNED_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "about:", "blob:"]);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
-const MAX_URI_LENGTH = 2000;
+// Real clients use about 60 characters; this bounds what one row can carry.
+const MAX_URI_LENGTH = 512;
 
 function parse(raw: string): URL | null {
   try {

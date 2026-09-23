@@ -62,6 +62,22 @@ Deno.test("a vsn_at_ token is refused on /profile and the other app routes (GoTr
   }
 });
 
+Deno.test("no vsn_ token is ever forwarded to GoTrue (nor lands in its request logs)", async () => {
+  const { app, db } = mcpApp();
+  const seen: string[] = [];
+  const getUser = db.auth.getUser;
+  db.auth.getUser = (token: string) => {
+    seen.push(token);
+    return getUser(token);
+  };
+  for (const token of [OAUTH_TOKEN, `vsn_rt_${"B".repeat(43)}`, `vsn_ac_${"C".repeat(43)}`]) {
+    const res = await app.request("/api/profile", { headers: { authorization: `Bearer ${token}` } });
+    assertEquals(res.status, 401, token.slice(0, 7));
+    await res.body?.cancel();
+  }
+  assertEquals(seen, [], "refused before getUser");
+});
+
 Deno.test("the app's session JWT still works on /profile, and is refused on /mcp", async () => {
   const { app } = mcpApp();
   assertEquals((await app.request("/api/profile", { headers: { authorization: `Bearer ${SESSION_JWT}` } })).status, 200);

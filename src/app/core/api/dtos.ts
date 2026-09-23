@@ -266,7 +266,8 @@ export interface OAuthRequestDto {
   redirectUri: string;
   redirectHost: string;
   scope: string;
-  /** True when the user already has an active grant for this client. */
+  /** True only when the user already approved this exact redirect URI on an
+   * active grant for this client; a new redirect URI always shows the screen. */
   alreadyGranted: boolean;
 }
 
@@ -278,6 +279,7 @@ export interface OAuthDecisionResponse {
 export interface OAuthGrantDto {
   clientId: string;
   clientName: string;
+  /** Every host the user approved for this grant, comma-separated. */
   redirectHost: string;
   createdAt: string;
   lastUsedAt: string | null;

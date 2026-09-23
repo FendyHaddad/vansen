@@ -33,6 +33,14 @@ async function newPair(): Promise<NewPair> {
   return { access, refresh, accessHash: await sha256Hex(access), refreshHash: await sha256Hex(refresh) };
 }
 
+/** Strict rotation revokes the grant on reuse. The log makes each revocation
+ * visible, so a client that trips it (parallel refresh, a retried lost
+ * response) shows up before anyone considers a grace window. */
+function logReuse(kind: "code" | "refresh", outcome: GrantOutcome): void {
+  if (outcome === UNAVAILABLE || !("error" in outcome) || !outcome.reuse) return;
+  console.log(JSON.stringify({ event: "oauth_reuse", kind, grantId: outcome.grantId, clientId: outcome.clientId }));
+}
+
 /** The RFC 6749 answer for an RPC outcome: the new pair, or the error. */
 function answer(c: Context<Vars>, outcome: GrantOutcome, pair: NewPair): Response {
   if (outcome === UNAVAILABLE) {
@@ -72,6 +80,7 @@ async function authorizationCode(c: Context<Vars>, ctx: ApiContext, f: Form): Pr
     accessHash: pair.accessHash,
     refreshHash: pair.refreshHash,
   });
+  logReuse("code", outcome);
   return answer(c, outcome, pair);
 }
 
@@ -89,6 +98,7 @@ async function refreshToken(c: Context<Vars>, ctx: ApiContext, f: Form): Promise
     accessHash: pair.accessHash,
     newRefreshHash: pair.refreshHash,
   });
+  logReuse("refresh", outcome);
   return answer(c, outcome, pair);
 }
 

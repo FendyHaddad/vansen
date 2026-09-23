@@ -9,10 +9,13 @@ import { AuthService } from '../../core/auth/auth-service';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileStore } from '../../core/profile/profile-store';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
+import { ApiService } from '../../core/api/api-service';
 
-/** The Connected assistants tab exists only while MCP_ENABLED is on (I3). */
+/** The Connected assistants tab shows while MCP_ENABLED is on (I3), or while
+ * the user still has a grant, so Disconnect always works (final review 2, M4). */
 describe('SettingsPage: Connected assistants tab', () => {
   let assistantConnection: ReturnType<typeof signal<boolean>>;
+  let grantsGet: ReturnType<typeof vi.fn>;
 
   function make(query: Record<string, string> = {}) {
     TestBed.configureTestingModule({
@@ -27,6 +30,7 @@ describe('SettingsPage: Connected assistants tab', () => {
           provide: PublicCapabilitiesService,
           useValue: { assistantConnection, load: vi.fn(() => Promise.resolve()) },
         },
+        { provide: ApiService, useValue: { get: grantsGet } },
       ],
     });
     // The tabs themselves are not under test: render them as inert elements.
@@ -43,6 +47,24 @@ describe('SettingsPage: Connected assistants tab', () => {
   beforeEach(() => {
     TestBed.resetTestingModule();
     assistantConnection = signal(false);
+    grantsGet = vi.fn(() => Promise.resolve({ grants: [] }));
+  });
+
+  it('shows the tab with the connection off while the user still has a grant to disconnect', async () => {
+    grantsGet = vi.fn(() => Promise.resolve({ grants: [{ clientId: 'vsn_client_x' }] }));
+    const fixture = make();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(grantsGet).toHaveBeenCalledWith('/oauth/grants');
+    expect(navText(fixture.nativeElement)).toContain('Connected assistants');
+  });
+
+  it('keeps the tab hidden with the connection off when the grant list fails to load', async () => {
+    grantsGet = vi.fn(() => Promise.reject(new Error('offline')));
+    const fixture = make();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(navText(fixture.nativeElement)).not.toContain('Connected assistants');
   });
 
   it('hides the tab while the assistant connection is off', () => {

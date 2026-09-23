@@ -14,6 +14,10 @@ Deno.test("the static AS metadata file equals buildAsMetadata for the hosted iss
   assertEquals(onDisk, buildAsMetadata("https://vansen.vankode.com", HOSTED_API));
 });
 
+Deno.test("the metadata advertises the RFC 9207 iss parameter", () => {
+  assertEquals(buildAsMetadata(DEFAULT_ISSUER, HOSTED_API).authorization_response_iss_parameter_supported, true);
+});
+
 Deno.test("the hosted PRM names the web origin as its only authorization server", () => {
   const env = mcpEnvFrom((k) => ({ SUPABASE_URL: "https://bnorhcxhvxydkgvcxjad.supabase.co" })[k]);
   assertEquals(env?.apiUrl, HOSTED_API);

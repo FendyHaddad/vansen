@@ -4,7 +4,7 @@
 // production.
 //
 //   node --test scripts/check-mcp-dist.test.mjs
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -24,9 +24,14 @@ const GOOD_METADATA = {
   token_endpoint_auth_methods_supported: ['none'],
   revocation_endpoint_auth_methods_supported: ['none'],
   scopes_supported: ['vansen'],
+  authorization_response_iss_parameter_supported: true,
 };
 
 const GOOD_HEADERS = [
+  '/*',
+  '  X-Frame-Options: DENY',
+  "  Content-Security-Policy: frame-ancestors 'none'",
+  '',
   '/.well-known/oauth-authorization-server',
   '  Content-Type: application/json',
   '  Access-Control-Allow-Origin: *',
@@ -111,6 +116,45 @@ test('a _headers file with no rule for the metadata path fails', () => {
     writeFileSync(join(dir, '_headers'), '/some/other/path\n  X-Foo: bar\n');
     const problems = checkMcpDist(dir);
     assert.ok(problems.some((p) => p.includes('no rule for')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Final review 2, I1: the consent page's Allow button must not be clickable
+// inside someone else's frame (RFC 6749 §10.13).
+test('a _headers file without the site-wide anti-framing rule fails', () => {
+  const dir = fixtureDir();
+  try {
+    writeGoodTree(dir);
+    const noFraming = GOOD_HEADERS.split('\n').slice(4).join('\n');
+    writeFileSync(join(dir, '_headers'), noFraming);
+    const problems = checkMcpDist(dir);
+    assert.ok(problems.some((p) => p.includes('X-Frame-Options: DENY')));
+    assert.ok(problems.some((p) => p.includes("frame-ancestors 'none'")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('anti-framing headers under a narrower path than /* fail', () => {
+  const dir = fixtureDir();
+  try {
+    writeGoodTree(dir);
+    writeFileSync(join(dir, '_headers'), GOOD_HEADERS.replace('/*', '/oauth/*'));
+    const problems = checkMcpDist(dir);
+    assert.ok(problems.some((p) => p.includes('X-Frame-Options: DENY')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the repo's own public/_headers passes the header checks", () => {
+  const dir = fixtureDir();
+  try {
+    writeGoodTree(dir);
+    writeFileSync(join(dir, '_headers'), readFileSync(new URL('../public/_headers', import.meta.url), 'utf8'));
+    assert.deepEqual(checkMcpDist(dir), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

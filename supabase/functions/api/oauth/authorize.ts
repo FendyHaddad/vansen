@@ -1,7 +1,9 @@
-// GET /oauth/authorize. The client and the exact redirect_uri are checked first:
-// failing either gets a plain 400 page, because redirecting would hand an error
-// (and the user) to an address nobody registered. Every later problem goes back
-// to the redirect_uri. Success stores a 10-minute request and opens consent.
+// GET /oauth/authorize. The client, the exact redirect_uri and the parameters
+// are checked first; failing any gets a plain 400 page. An unregistered address
+// must never receive the user, and with dynamic registration a registered one
+// may be the attacker's, so a bad parameter is not an instant redirect either
+// (RFC 9700 §4.11.2). Success stores a 10-minute request and opens consent on
+// the issuer's origin.
 import type { Context } from "jsr:@hono/hono";
 import type { ApiContext, Vars } from "../lib/context.ts";
 import { OAUTH_SCOPE } from "./metadata.ts";
@@ -23,24 +25,41 @@ function paramProblem(q: Record<string, string>, resourceUrl: string): [string, 
   return null;
 }
 
-/** Where the browser goes to approve: the web app's consent page. */
-function consentUrl(ctx: ApiContext, authorizationId: string): string {
-  const origin = ctx.APP_ORIGINS[0] ?? "http://localhost:4200";
-  return `${origin}/oauth/consent?authorization_id=${authorizationId}`;
+/** The issuer when it is an origin root (hosted: always https://vansen.vankode.com). */
+function issuerOrigin(issuer: string): string | null {
+  try {
+    const url = new URL(issuer);
+    return url.pathname === "/" && !url.search ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The web origin that hosts the consent page: the issuer, which is where the
+ * user's session lives. Only a local run whose issuer is `<api>/oauth` falls
+ * back to the first APP_ORIGIN. Nothing configured is null (a 503), never a
+ * localhost guess that any local process could answer.
+ */
+export function consentOrigin(issuer: string, appOrigins: string[]): string | null {
+  return issuerOrigin(issuer) ?? appOrigins[0] ?? null;
 }
 
 export async function handleAuthorize(c: Context<Vars>, ctx: ApiContext): Promise<Response> {
   const q = c.req.query();
+  const mcp = ctx.deps.env.mcp!;
+  const origin = consentOrigin(mcp.issuer, ctx.APP_ORIGINS);
+  if (!origin) return c.text("Sign-in is not configured on this server.\n", 503);
   const client = await ctx.oauth.clientById(q.client_id ?? "");
   if (client === UNAVAILABLE) return c.text("Sign-in is unavailable right now. Try again shortly.\n", 503);
-  if (!client) return refusalPage(c, "this app is not registered with Vansen.");
+  if (!client) {
+    return refusalPage(c, "this app is not registered with Vansen. Remove and re-add the connector in your assistant.");
+  }
   if (!q.redirect_uri || !client.redirect_uris.includes(q.redirect_uri)) {
     return refusalPage(c, "the redirect address does not match what this app registered.");
   }
-  const back = (error: string, description: string) =>
-    c.redirect(withParams(q.redirect_uri, { error, error_description: description, state: q.state }), 302);
-  const problem = paramProblem(q, ctx.deps.env.mcp!.resourceUrl);
-  if (problem) return back(...problem);
+  const problem = paramProblem(q, mcp.resourceUrl);
+  if (problem) return refusalPage(c, `${problem[1]} (${problem[0]})`);
 
   const id = crypto.randomUUID();
   const stored = await ctx.oauth.createRequest({
@@ -53,6 +72,13 @@ export async function handleAuthorize(c: Context<Vars>, ctx: ApiContext): Promis
     resource: q.resource || null,
     expires_at: new Date(ctx.deps.now().getTime() + REQUEST_TTL_MS).toISOString(),
   });
-  if (!stored) return back("temporarily_unavailable", "Vansen could not start the sign-in. Try again.");
-  return c.redirect(consentUrl(ctx, id), 302);
+  if (!stored) {
+    return c.redirect(withParams(q.redirect_uri, {
+      error: "temporarily_unavailable",
+      error_description: "Vansen could not start the sign-in. Try again.",
+      state: q.state,
+      iss: mcp.issuer,
+    }), 302);
+  }
+  return c.redirect(`${origin}/oauth/consent?authorization_id=${id}`, 302);
 }

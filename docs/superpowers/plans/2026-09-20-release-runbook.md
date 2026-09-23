@@ -344,24 +344,48 @@ OAuth server stays **off** (no dashboard step, no ES256 step).
   Worker; a Deno drift test keeps it equal to `buildAsMetadata()`.
 - **Migrations:** `0035_mcp_client.sql` (client tag `mcp`, request bucket `mcp`
   at 10 per minute) and `0036_mcp_oauth.sql` (the five `oauth_*` tables, the
-  RPCs, and the daily cron job `purge_oauth` at 03:20 UTC).
-- **Flag:** Edge Function secret `MCP_ENABLED`; only the exact string `on`
-  enables `/mcp`, `/oauth/register`, `/oauth/authorize`, `/oauth/token` and the
+  RPCs, and the daily cron job `purge_oauth` at 03:20 UTC, which also deletes
+  clients with no grant after 30 days).
+- **Registration limits:** 20 per hour per client IP and 500 per hour in total
+  (429 `rate_limited`). The IP is `cf-connecting-ip` when present, else the
+  right-most `x-forwarded-for` hop (never the first, which the caller writes).
+  Each registration logs `{"event":"oauth_register","ipSource":…,"forwardedHops":…}`
+  without the address: after the first hosted registration, check the
+  function logs that `ipSource` is `cf-connecting-ip`. If it is
+  `x-forwarded-for:last`, the limit is per proxy hop (stricter, still safe).
+- **Refresh reuse:** strict rotation; each reuse revokes the grant and logs
+  `{"event":"oauth_reuse","kind":"refresh"|"code","grantId":…,"clientId":…}`.
+  If assistants trip it in normal use, consider a 30 s grace window.
+- **Flag:** Edge Function secret `MCP_ENABLED=on`, the same value as the other
+  release flags (`RELEASE_BACKGROUND_COMPLETION=on`). Only the exact string
+  `on` enables (`true`, `1` or `yes` leave it off) `/mcp`, `/oauth/register`, `/oauth/authorize`, `/oauth/token` and the
   consent endpoints. Anything else answers 503 `mcp_disabled`. The PRM, the
   metadata, `/oauth/revoke` and the grant endpoints keep working, so users can
   always disconnect. This is also the kill switch.
 - **Consent redirect:** `/oauth/authorize` sends the browser to
-  `<first APP_ORIGIN>/oauth/consent`. `APP_ORIGIN`'s first entry must be
-  `https://vansen.vankode.com`.
-- **Read back after deploy:**
+  `<issuer>/oauth/consent`, hosted always `https://vansen.vankode.com`, so the
+  order of `APP_ORIGIN` does not matter. Only a local run whose issuer has a
+  path (`<api>/oauth`) uses the first `APP_ORIGIN`; with neither, authorize
+  answers 503.
+- **Anti-framing:** `public/_headers` sets `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'` on `/*`;
+  `npm run check:mcp-assets` fails a build without them.
+- **Read back after deploy, flag off** (`deploy.sh` checks the first item):
   - `https://vansen.vankode.com/.well-known/oauth-authorization-server`
-    answers JSON (not `index.html`);
+    answers JSON (not `index.html`) whose `issuer` is
+    `https://vansen.vankode.com`;
+  - `curl -sI https://vansen.vankode.com/oauth/consent` shows
+    `x-frame-options: DENY` and `frame-ancestors 'none'` (the SPA fallback
+    path, not only a real file);
   - the PRM answers 200 with
     `resource = https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/mcp`
     and `authorization_servers = ["https://vansen.vankode.com"]`;
-  - a bare `POST /api/mcp` answers 401 with a `WWW-Authenticate` header that
-    names the PRM;
-  - with the flag off, `POST /api/oauth/register` answers 503.
+  - a bare `POST /api/mcp` answers **503 `mcp_disabled`** (the kill switch
+    runs before auth);
+  - `POST /api/oauth/register` answers 503 `mcp_disabled`.
+- **First check after setting `MCP_ENABLED=on`:** a bare `POST /api/mcp`
+  answers 401 with a `WWW-Authenticate` header that names the PRM. Then the
+  owner smoke (spec §R6.4).
 - **`MCP_PUBLIC_SUPABASE_URL` and `MCP_ISSUER` are for `supabase functions
   serve` only** (where `SUPABASE_URL` is `http://kong:8000`, which no client
   resolves). `MCP_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321` gives the public
