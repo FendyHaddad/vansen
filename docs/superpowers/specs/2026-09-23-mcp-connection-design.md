@@ -6,7 +6,191 @@ Date: 2026-09-23. Checklist item "MCP connection" in `plans/post-implementation-
 
 Research: `.superpowers/sdd/mcp/research-external.md` (MCP and OAuth landscape, client requirements) and the codebase survey in the session record.
 
-## 0. Spike result (2026-09-23): GO with Supabase's OAuth 2.1 server
+## R. Revision (2026-09-23): our own authorization server
+
+The final review's C1 was reproduced on the local stack (`.superpowers/sdd/mcp/c1-repro.md`, GoTrue v2.197.0). A token from Supabase's OAuth 2.1 server is a full GoTrue session. Whoever holds it can:
+- set the account password, which silently adds one to a Google-only account;
+- start an email change;
+- enroll MFA;
+- sign the user out everywhere;
+- delete the user's other grants.
+
+Nothing in GoTrue can scope it. **Owner decision:** the gateway issues its own opaque tokens that only `/mcp` accepts, so GoTrue never sees an assistant token.
+
+This section overrides §0, decision 2 of §1, and §2, §3, §6, §7 and §9 wherever they talk about Supabase's OAuth server. Supabase's OAuth server is **never enabled**: remove `[auth.oauth_server]` from `config.toml`. The owner steps for the dashboard and ES256 are gone.
+
+### R1. Shape
+
+- **Issuer:** `https://vansen.vankode.com`, the web origin, which we control at the root. Its metadata is a static file served by the web Worker at `https://vansen.vankode.com/.well-known/oauth-authorization-server`. That satisfies RFC 8414 discovery without path insertion.
+- **Endpoints:** the endpoints named in that metadata live in the `api` function, under `<api>/oauth/*`. The metadata may point to another host.
+- **Local runs:** the `api` also serves the same JSON at `<api>/oauth/.well-known/oauth-authorization-server`, built from `MCP_ISSUER`. Locally, `MCP_ISSUER = <local api>/oauth`, and clients use the path-appended fallback as the Inspector did in the spike. On the hosted project `MCP_ISSUER` is unset and defaults to `https://vansen.vankode.com`.
+- **Drift gate:** a Deno test asserts that the static file equals `buildAsMetadata("https://vansen.vankode.com", "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api")`.
+- **PRM:** `authorization_servers: [MCP_ISSUER]`, `scopes_supported: ["vansen"]`.
+- **Static metadata file** (`public/.well-known/oauth-authorization-server`, exact content; `<api>` = `https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api`):
+
+  ```json
+  {
+    "issuer": "https://vansen.vankode.com",
+    "authorization_endpoint": "<api>/oauth/authorize",
+    "token_endpoint": "<api>/oauth/token",
+    "registration_endpoint": "<api>/oauth/register",
+    "revocation_endpoint": "<api>/oauth/revoke",
+    "response_types_supported": ["code"],
+    "grant_types_supported": ["authorization_code", "refresh_token"],
+    "code_challenge_methods_supported": ["S256"],
+    "token_endpoint_auth_methods_supported": ["none"],
+    "revocation_endpoint_auth_methods_supported": ["none"],
+    "scopes_supported": ["vansen"]
+  }
+  ```
+
+  A `public/_headers` rule gives it `Content-Type: application/json` and `Access-Control-Allow-Origin: *`. `angular.json` must copy `.well-known/` and `_headers` into `dist/vansen/browser`. A build gate fails if either is missing, because the SPA fallback would otherwise answer the metadata URL with `index.html` and a 200.
+
+### R2. Storage (migration `0036_mcp_oauth.sql`)
+
+All tables are RLS deny-all and accessed only by service_role. User FKs are `on delete cascade`, so account deletion ends every grant and token.
+
+- `oauth_clients`:
+  - `id text pk` (random, `vsn_client_…`)
+  - `client_name text` (≤ 100)
+  - `redirect_uris text[]` (1–5)
+  - `created_at`
+- `oauth_requests`, pending authorizations, expiring after 10 min:
+  - `id uuid pk` (the `authorization_id`)
+  - `client_id`
+  - `redirect_uri`
+  - `state`
+  - `code_challenge`
+  - `scope`
+  - `resource`
+  - `expires_at`
+- `oauth_grants`:
+  - `id uuid pk`
+  - `user_id`
+  - `client_id`
+  - `created_at`
+  - `last_used_at`
+  - `revoked_at`
+  - `unique (user_id, client_id)`
+- `oauth_codes`:
+  - `code_hash text pk`
+  - `grant_id`
+  - `request_id`
+  - `redirect_uri`
+  - `code_challenge`
+  - `resource`
+  - `expires_at` (5 min)
+  - `used_at`
+- `oauth_tokens`:
+  - `token_hash text pk`
+  - `grant_id`
+  - `kind` (`access`/`refresh`)
+  - `expires_at` (access 1 h, refresh 30 d)
+  - `revoked_at`
+  - `replaced_by text null`
+
+Tokens and codes are 32 random bytes, base64url, prefixed `vsn_at_`, `vsn_rt_` and `vsn_ac_`. Only SHA-256 hashes are stored.
+
+State transitions happen in `security definer` RPCs so every step is atomic:
+- redeeming a code;
+- rotating a refresh token;
+- revoking a grant;
+- resolving an access token, which returns `user_id`, `client_id` and `grant_id` only while the token is unexpired, unrevoked and its grant is active. It updates `last_used_at` at most once every 5 min.
+
+A daily purge (a new cron job, or a step inside the existing purge function) deletes expired requests, codes and tokens older than 1 day.
+
+### R3. HTTP contract
+
+**Public endpoints.** These are registered before auth, like the PRM. They all return 503 `mcp_disabled` when `MCP_ENABLED` is off, except the metadata. Errors follow RFC 6749 and 7591 JSON (`invalid_request`, `invalid_client`, `invalid_grant`, `unsupported_grant_type`, `invalid_redirect_uri`, `invalid_client_metadata`). CORS is `*`, without credentials.
+
+- `POST /oauth/register` (RFC 7591, JSON):
+  - Accepts `client_name` and `redirect_uris`. `token_endpoint_auth_method` must be absent or `none`.
+  - Each redirect URI must be one of:
+    - `https:`;
+    - `http:` on a loopback host;
+    - a custom scheme not in `javascript|data|file|vbscript|about|blob`.
+  - Returns 201 `{client_id, client_name, redirect_uris, token_endpoint_auth_method:"none", grant_types:["authorization_code","refresh_token"], response_types:["code"]}`.
+  - Rate limit: 20 registrations per hour per client IP (hash of the first `x-forwarded-for` hop).
+- `GET /oauth/authorize`:
+  - Parameters: `response_type=code`, `client_id`, `redirect_uri`, `code_challenge`, `code_challenge_method=S256`, `state?`, `scope?`, `resource?`.
+  - An unknown client or a `redirect_uri` that doesn't exactly match a registered one gets a 400 plain page, **never a redirect**.
+  - Other errors redirect to `redirect_uri` with `error` and `state`.
+  - `resource`, if present, must equal the MCP URL.
+  - On success, stores an `oauth_requests` row and returns a 302 to `https://vansen.vankode.com/oauth/consent?authorization_id=<id>`. The web origin is the existing allowed-origin config.
+- `POST /oauth/token` (form-urlencoded):
+  - `grant_type=authorization_code`: `code`, `redirect_uri`, `client_id`, `code_verifier`, `resource?`. The code must be single-use, unexpired, and match its client, redirect and PKCE S256.
+    - A second use of the same code revokes the whole grant.
+    - Returns `{access_token, token_type:"Bearer", expires_in:3600, refresh_token, scope:"vansen"}`.
+  - `grant_type=refresh_token`: `refresh_token`, `client_id`. Rotates, returning a new pair and marking the old one `replaced_by`.
+    - Presenting an already-rotated refresh token revokes the grant (reuse detection).
+- `POST /oauth/revoke` (RFC 7009): `token` and `client_id?`. Always 200.
+
+**Session endpoints** (the app's Supabase session, through the normal middleware):
+
+- `GET /oauth/requests/:id`:
+  - Returns `{clientName, redirectUri, redirectHost, scope, alreadyGranted}`.
+  - 404 `authorization_not_found` when unknown or expired.
+  - `alreadyGranted` is true when the user has an active grant for that client.
+- `POST /oauth/requests/:id/approve`:
+  - Creates the grant (or reuses the active one), issues the code, and deletes the request.
+  - Returns `{redirectUrl}`, which is `redirect_uri?code=…&state=…`.
+- `POST /oauth/requests/:id/deny`: returns `{redirectUrl}` with `error=access_denied&state=…`.
+- `GET /oauth/grants`: returns `{grants:[{clientId, clientName, redirectHost, createdAt, lastUsedAt}]}`, active grants only.
+- `DELETE /oauth/grants/:clientId`: revokes the grant and all its tokens. Returns 204, or 404.
+- These two grant endpoints stay available when `MCP_ENABLED` is off, so users can always revoke.
+
+**`/mcp` authentication:**
+- A bearer that starts with `vsn_at_` is resolved through the RPC. On success it sets `userId`, `oauthClientId` and `grantId`, then the age gate and suspension checks run as today.
+- Anything else, including a Supabase session JWT, gets 401 plus `WWW-Authenticate` (with `error="invalid_token"` for an unknown, expired or revoked `vsn_at_`).
+- A `vsn_` token on any other route fails `getUser` and gets the normal 401. Containment is now structural. The claim-based `client_id` middleware from §3 is deleted.
+- `grantId` joins the tool log line.
+
+### R4. Web changes
+
+- **The consent page** drops `auth.oauth.*` and uses the session endpoints above.
+  - `alreadyGranted` auto-approves.
+  - Allow and Deny follow `redirectUrl` through the existing `navigateAway` scheme guard.
+  - The unverified-app hint and the redirect-host emphasis stay.
+- **The Connected tab** drops `listGrants`/`revokeGrant` from `AuthService` and uses `GET/DELETE /oauth/grants` through the app's api client.
+- Sign-out keeps `{ scope: 'local' }`. It's harmless, and it keeps other devices signed in.
+
+### R5. Tasks (parallel)
+
+- **Task 5 — backend AS** (worktree `vansen-mcp-as`):
+  - migration 0036 and the bootstrap manifest;
+  - the RPCs and the purge;
+  - `/oauth/*` routes in `api/routes/oauth.ts`, plus `api/oauth/*` split by concern;
+  - `/mcp` opaque-token auth and removal of the claim middleware;
+  - `MCP_ISSUER`, the PRM and the drift test;
+  - removal of `config.toml` `[auth.oauth_server]`.
+
+  Security tests:
+  - PKCE mismatch;
+  - code reuse revoking the grant;
+  - redirect mismatch not redirecting;
+  - refresh rotation, and reuse revoking the grant;
+  - expired and revoked tokens;
+  - a `vsn_at_` token refused on `/profile`;
+  - a JWT refused on `/mcp`;
+  - an OAuth token that cannot reach `/auth/v1` (it isn't a JWT);
+  - register validation and rate limit;
+  - `MCP_ENABLED` off returning 503 on issuance while the grant endpoints still work.
+
+  Gates: `npm run verify`, plus the Inspector end to end against `functions serve`. Review: final review only, on the most capable model.
+- **Task 6 — web** (worktree `vansen-mcp-web2`): R4, plus the static metadata file, `_headers`, the `angular.json` assets, and the build gate for them. Gates: `npm test`, `ng build`, and the dist assertion.
+
+### R6. Rollout (replaces §9)
+
+1. `db push --linked` for 0035 and 0036, after reading back the live `client` constraint names (final review, Minor 3).
+2. `./deploy.sh --yes` with `MCP_ENABLED` unset, meaning off.
+3. Read back:
+   - the web metadata URL returns JSON;
+   - the PRM names `https://vansen.vankode.com`;
+   - `/mcp` returns 401 with `WWW-Authenticate`;
+   - `/oauth/register` returns 503.
+4. Owner (paid smoke, ask first): set `MCP_ENABLED=true`, connect Claude and ChatGPT, generate one image each, revoke, and confirm the next call fails. Then keep it on and add the FAQ entry, or turn it off.
+
+## 0. Spike result (2026-09-23): GO with Supabase's OAuth 2.1 server — auth part superseded by §R
 
 Full report: `.superpowers/sdd/mcp/spike-report.md`. The MCP Inspector, acting as the OAuth client, went end to end on the local stack:
 a bare 401, then PRM discovery at the `/mcp` sub-path, DCR, PKCE, consent, token, and a tool call.
