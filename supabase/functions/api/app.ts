@@ -1637,7 +1637,10 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     }
 
     const { data, error } = await query;
-    if (error) return fail(c, 400, "query_failed", error.message);
+    if (error) {
+      logError(c, "ledger_read_failed", new Error(error.message));
+      return fail(c, 503, "ledger_unavailable", "Could not load your usage. Try again.");
+    }
 
     // The old `.limit(100)` was not a page, it was a truncation: an account
     // with more history than that could never see its oldest charges.

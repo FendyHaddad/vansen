@@ -21,7 +21,7 @@ export class UsageTab {
   private readonly ledger = inject(LedgerService);
 
   constructor() {
-    if (!this.ledger.entriesLoaded()) void this.ledger.loadEntries();
+    void this.ledger.loadCurrentMonth();
   }
 
   private readonly monthDebits = computed(() => {

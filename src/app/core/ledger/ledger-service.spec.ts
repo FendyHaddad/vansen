@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiService } from '../api/api-service';
-import { LedgerService } from './ledger-service';
+import { LedgerService, MAX_MONTH_PAGES } from './ledger-service';
 
 describe('LedgerService', () => {
   const apiMock = { get: vi.fn() };
@@ -109,5 +109,86 @@ describe('LedgerService paging', () => {
 
     await ledger.loadMoreEntries();
     expect(apiMock.get).not.toHaveBeenCalled();
+  });
+});
+
+/** The usage tab sums this month; one 50-entry page undercounts a busy month. */
+describe('LedgerService current month', () => {
+  const apiMock = { get: vi.fn() };
+  const now = new Date(2026, 8, 15);
+
+  function entry(id: string, createdAt: Date) {
+    return {
+      id,
+      type: 'generate',
+      amountCredits: -10,
+      bucket: 'plan',
+      familyId: 'flux',
+      note: null,
+      createdAt: createdAt.toISOString(),
+    };
+  }
+
+  function make(): LedgerService {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: ApiService, useValue: apiMock }],
+    });
+    return TestBed.inject(LedgerService);
+  }
+
+  beforeEach(() => apiMock.get.mockReset());
+
+  it('pages until an entry predates the start of the month', async () => {
+    apiMock.get
+      .mockResolvedValueOnce({ entries: [entry('a', new Date(2026, 8, 14))], nextCursor: 'c1' })
+      .mockResolvedValueOnce({ entries: [entry('b', new Date(2026, 8, 3))], nextCursor: 'c2' })
+      .mockResolvedValueOnce({
+        entries: [entry('c', new Date(2026, 8, 1, 0, 5)), entry('d', new Date(2026, 7, 31))],
+        nextCursor: 'c3',
+      });
+    const ledger = make();
+    await ledger.loadCurrentMonth(now);
+    expect(apiMock.get).toHaveBeenCalledTimes(3);
+    expect(ledger.entries().map((e) => e.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('stops when the server has no more pages', async () => {
+    apiMock.get.mockResolvedValueOnce({
+      entries: [entry('a', new Date(2026, 8, 14))],
+      nextCursor: null,
+    });
+    const ledger = make();
+    await ledger.loadCurrentMonth(now);
+    expect(apiMock.get).toHaveBeenCalledTimes(1);
+    expect(ledger.entriesLoaded()).toBe(true);
+  });
+
+  it('continues from entries another tab already loaded', async () => {
+    apiMock.get.mockResolvedValueOnce({
+      entries: [entry('a', new Date(2026, 8, 14))],
+      nextCursor: 'c1',
+    });
+    const ledger = make();
+    await ledger.loadEntries();
+    apiMock.get.mockClear();
+    apiMock.get.mockResolvedValueOnce({
+      entries: [entry('b', new Date(2026, 7, 20))],
+      nextCursor: 'c2',
+    });
+    await ledger.loadCurrentMonth(now);
+    expect(apiMock.get).toHaveBeenCalledTimes(1);
+    expect(apiMock.get).toHaveBeenCalledWith('/ledger?limit=50&cursor=c1');
+  });
+
+  it('caps pages defensively against a server that never stops', async () => {
+    let page = 0;
+    apiMock.get.mockImplementation(async () => {
+      page += 1;
+      return { entries: [entry(`e${page}`, new Date(2026, 8, 14))], nextCursor: `n${page}` };
+    });
+    const ledger = make();
+    await ledger.loadCurrentMonth(now);
+    expect(apiMock.get).toHaveBeenCalledTimes(MAX_MONTH_PAGES);
   });
 });

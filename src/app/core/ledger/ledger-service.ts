@@ -10,6 +10,9 @@ export type LedgerEntry = LedgerEntryDto;
 /** Matches the gateway's own default; the server clamps anything larger. */
 export const PAGE_SIZE = 50;
 
+/** Same cap as the mobile client: a cursor that never ends cannot loop the usage tab. */
+export const MAX_MONTH_PAGES = 20;
+
 /**
  * API-backed money view. Balance is whatever the server last said —
  * no client-side money math anywhere.
@@ -71,6 +74,28 @@ export class LedgerService {
     } finally {
       this.loadingMoreSig.set(false);
     }
+  }
+
+  /**
+   * Every entry of the current month, for the usage tab.
+   *
+   * One page of 50 undercounted a busy month. Pages until the oldest loaded
+   * entry predates the first of the month, the server runs out, or the cap.
+   */
+  async loadCurrentMonth(now = new Date()): Promise<void> {
+    if (!this.entriesLoadedSig()) await this.loadEntries();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    for (let page = 1; page < MAX_MONTH_PAGES; page += 1) {
+      if (!this.hasMore()) return;
+      if (this.oldestPredates(monthStart)) return;
+      await this.loadMoreEntries();
+    }
+  }
+
+  private oldestPredates(start: Date): boolean {
+    const oldest = this.entriesSig().at(-1);
+    if (!oldest) return false;
+    return new Date(oldest.createdAt) < start;
   }
 
   reset(): void {

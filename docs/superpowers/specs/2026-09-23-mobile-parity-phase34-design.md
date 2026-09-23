@@ -117,7 +117,10 @@ Each task's tests cover the behaviour listed above. The gates are:
 - backend: `npm run verify` (with `VANSEN_LOCAL_DB`);
 - mobile: `flutter analyze --no-pub` and `flutter test --no-pub`.
 
-Deploy is `./deploy.sh --yes`, then read back `/catalog` `.4` with thumbs.
+Deploy order (the user runs each step):
+1. `supabase db push --linked` applies `0034` (AI edit tools Pro). Migration first: it only updates `models.min_plan`, which the live gateway already enforces.
+2. `./deploy.sh --yes` ships the functions and the web.
+3. Read back `/catalog`: `catalogVersion` is `2026-09-23.4`, styles and trends carry `thumb`, every `flat.editTools[].plan` is `pro`, and `flat.upscale.plan` is `studio`.
 
 ## 5. Owner items (not blocking)
 

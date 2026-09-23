@@ -141,6 +141,13 @@ describe('public surfaces never advertise what is switched off', () => {
     expect(text).toContain(`${PRO_SAVING_PERCENT}% less`);
   });
 
+  it('the pricing FAQ promises no grace after the paid period (retention D2)', async () => {
+    const fixture = await render(PlansPage, ALL_IDS);
+    const text = textOf(fixture);
+    expect(text).not.toContain('30-day grace');
+    expect(text).toContain('permanently deleted the day the paid period ends');
+  });
+
   it('the pricing page drops the video perk when no video family is live', async () => {
     const fixture = await render(PlansPage, ['flux']);
     expect(textOf(fixture)).not.toContain('Video models');

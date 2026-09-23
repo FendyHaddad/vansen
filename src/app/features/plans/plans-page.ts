@@ -228,7 +228,7 @@ export class PlansPage {
     {
       question: 'What happens if I cancel?',
       answer:
-        'You keep access until the end of the paid period. Pack credits expire 30 days after your subscription ends, and after the same 30-day grace your library is permanently deleted — download anything you want to keep.',
+        'You keep access until the end of the paid period. Your library is permanently deleted the day the paid period ends, so download anything you want to keep before then. Pack credits expire separately, 30 days after your subscription ends.',
     },
   ];
 }

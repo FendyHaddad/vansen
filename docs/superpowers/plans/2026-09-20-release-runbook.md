@@ -356,10 +356,13 @@ There is no global switch: "disable all" is `update public.models set enabled
 live now. Migrations are forward-only.** A migration is never reverted to suit
 old code.
 
-Against schema `0033`:
+Against schema `0034`. `0034` only updates data (`models.min_plan = 'pro'` for
+the four AI edit tools) and drops nothing, so every verdict that held against
+`0033` still holds:
 
-| Revision | Against `0033` |
+| Revision | Against `0034` |
 |---|---|
+| `4588a10` (live before the phase 3+4 deploy, api v71) | **Safe.** Knows schema `0033`. The only thing `0034` changes is `models.min_plan`, which this revision already reads: its `modelGate` refuses a Studio caller with 403 `pro_required` on the four AI edit tools and its catalog serves them as `editTools[].plan` `pro`, the intended policy. It lacks `flat.upscale.plan` and style/trend thumbs (catalog `.3`) |
 | `723fddd`, `e2af5be`, `73cd5cb` | **Safe.** Function code identical (`git diff 73cd5cb 723fddd -- supabase/functions` is empty); a rollback changes only the stamp |
 | `76bc2a0` and everything older | **Unsafe.** Its job-worker calls `fn_claim_training_jobs` (dropped by 0032): every tick returns 500 after settling image jobs, so the notification drain never runs. Its persona create answers 400 `create_failed` (the insert omits `consent_attested_at`, NOT NULL since 0032) and its persona generation reads `personas.lora_url` (dropped) |
 
