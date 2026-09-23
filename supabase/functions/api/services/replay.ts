@@ -1,0 +1,153 @@
+// Retry and variation as gateway operations, shared by the HTTP routes
+// (POST /generations/:id/retry|variation, GET .../retryable) and the MCP
+// vary_image tool. Each rebuilds the request from its snapshot (planRetry /
+// planVariation in retry.ts) and re-enters submitGeneration. Entry: createReplay.
+import type { Context } from "jsr:@hono/hono";
+import {
+  editToolById,
+  familyById,
+  PERSONA_GEN,
+  UPSCALER,
+} from "../_shared/model-families.ts";
+import type { GenerationRequestSnapshotV1 } from "../_shared/request-snapshot.ts";
+import { readyPersona } from "../personas.ts";
+import {
+  planRetry,
+  planVariation,
+  REFUSAL_MESSAGE,
+  REFUSAL_STATUS,
+  type RetryContext,
+  type RetryDecision,
+} from "./retry.ts";
+import { validateSettings } from "./request-validation.ts";
+import type { Services } from "../lib/context.ts";
+import { fail } from "../lib/http.ts";
+import type { SubmitGeneration } from "./submit-generation.ts";
+
+export function createReplay(
+  ctx: Pick<Services, "admin" | "activePlan" | "modelGate"> & {
+    submitGeneration: SubmitGeneration;
+  },
+) {
+  const { admin, activePlan, modelGate, submitGeneration } = ctx;
+
+  /**
+   * Rebuild the decision context for one generation.
+   *
+   * Everything `planRetry` needs, read once. `expressible` is the interesting
+   * one: a price move is NOT a refusal (the retry is re-quoted and the
+   * customer pays today's price), but a request that today's catalog can no
+   * longer express — a withdrawn family, an option that no longer exists —
+   * has no honest replay.
+   */
+  async function retryContextOf(
+    userId: string,
+    snapshotId: string | null,
+  ): Promise<RetryContext> {
+    const empty: RetryContext = {
+      snapshot: null,
+      liveUploadPaths: new Set<string>(),
+      familyEnabled: false,
+      entitled: false,
+      expressible: false,
+      personaUnavailable: false,
+    };
+    if (!snapshotId) return empty;
+
+    const { data: row } = await admin.from("request_snapshots")
+      .select("body").eq("id", snapshotId).eq("user_id", userId).maybeSingle();
+    const snapshot = (row?.body ?? null) as GenerationRequestSnapshotV1 | null;
+    if (!snapshot) return empty;
+
+    const wanted = [...(snapshot.referenceUploadIds ?? [])];
+    if (snapshot.maskUploadId) wanted.push(snapshot.maskUploadId);
+    const live = new Set<string>();
+    if (wanted.length) {
+      const { data: uploads } = await admin.from("uploads")
+        .select("path").eq("user_id", userId).in("path", wanted);
+      for (const upload of uploads ?? []) live.add(upload.path as string);
+    }
+
+    // A persona run is gated by the persona kill switch, not its render family's.
+    const gate = await modelGate(snapshot.personaId ? PERSONA_GEN.id : snapshot.familyId);
+    const plan = await activePlan(userId);
+    const persona = snapshot.personaId
+      ? await readyPersona(admin, userId, snapshot.personaId)
+      : null;
+    const family = familyById(snapshot.familyId);
+    // A fixed-price edit tool or the upscaler has no catalog family to
+    // validate against; its options are the tool itself.
+    const expressible = family
+      ? validateSettings(family, snapshot.settings) === null
+      : !!(editToolById(snapshot.familyId) || snapshot.familyId === UPSCALER.id ||
+        snapshot.familyId === PERSONA_GEN.id);
+
+    return {
+      snapshot,
+      liveUploadPaths: live,
+      familyEnabled: gate.enabled,
+      entitled: !(gate.minPlan === "pro" && plan === "studio"),
+      expressible,
+      personaUnavailable: persona === "unavailable",
+    };
+  }
+
+  /** The generation, or a 404 — a stranger learns nothing either way. */
+  async function ownedGeneration(
+    c: Context,
+    id: string,
+  ): Promise<{ id: string; snapshot_id: string | null } | Response> {
+    const { data } = await admin.from("generations")
+      .select("id,snapshot_id")
+      .eq("id", id).eq("user_id", c.get("userId"))
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!data) return fail(c, 404, "not_found", "Generation not found");
+    return data as { id: string; snapshot_id: string | null };
+  }
+
+  function refuse(c: Context, decision: Extract<RetryDecision, { ok: false }>): Response {
+    const status = REFUSAL_STATUS[decision.refusal] ?? 409;
+    return fail(c, status, decision.refusal, REFUSAL_MESSAGE[decision.refusal]);
+  }
+
+  /** Re-run what the customer actually asked for, re-quoted at today's price. */
+  async function retryGeneration(c: Context, id: string): Promise<Response> {
+    const generation = await ownedGeneration(c, id);
+    if (generation instanceof Response) return generation;
+    const decision = planRetry(await retryContextOf(c.get("userId"), generation.snapshot_id));
+    if (!decision.ok) return refuse(c, decision);
+    return await submitGeneration(c, decision.body);
+  }
+
+  /** Another take on the same prompt, hung off the original as its parent. */
+  async function varyGeneration(
+    c: Context,
+    id: string,
+    opts: { idempotencyKey?: string } = {},
+  ): Promise<Response> {
+    const generation = await ownedGeneration(c, id);
+    if (generation instanceof Response) return generation;
+    const context = await retryContextOf(c.get("userId"), generation.snapshot_id);
+    const decision = planVariation(context, generation.id);
+    if (!decision.ok) return refuse(c, decision);
+    return await submitGeneration(c, decision.body, opts);
+  }
+
+  /** What the UI should enable, with the reason when retry is blocked. */
+  async function retryability(c: Context, id: string): Promise<Response> {
+    const generation = await ownedGeneration(c, id);
+    if (generation instanceof Response) return generation;
+    const context = await retryContextOf(c.get("userId"), generation.snapshot_id);
+    const retry = planRetry(context);
+    const variation = planVariation(context, generation.id);
+    const blocked = retry.ok ? null : retry.refusal;
+    return c.json({
+      retry: retry.ok,
+      variation: variation.ok,
+      reason: blocked ? REFUSAL_MESSAGE[blocked] : undefined,
+    });
+  }
+
+  return { retryGeneration, varyGeneration, retryability };
+}

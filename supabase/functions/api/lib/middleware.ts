@@ -1,11 +1,15 @@
 // Global middleware, in two phases so the public routes sit between them.
 // registerRequestMiddleware: CORS, the request id, the unhandled-error answer.
-// registerAuthMiddleware: bearer auth, the 18+ age gate (memoised per app)
-// and the shared per-user request budgets. Hono runs these in order.
+// registerAuthMiddleware: bearer auth, OAuth token containment (assistant
+// tokens only on /mcp, app sessions never there), the 18+ age gate (memoised
+// per app) and the shared per-user request budgets. Hono runs these in order.
 import type { Context } from "jsr:@hono/hono";
 import { cors } from "jsr:@hono/hono/cors";
 import type { ApiContext, App, Vars } from "./context.ts";
 import { fail } from "./http.ts";
+import { oauthClientIdOf } from "./token-claims.ts";
+import { MCP_PATH, wwwAuthenticate } from "../mcp/metadata.ts";
+import { type RequestBucket, takeRequestSlot } from "../services/request-slots.ts";
 
 export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
   const { allowedOrigin, logError } = ctx;
@@ -51,50 +55,65 @@ export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
 }
 
 export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
-  const { admin, ageOkMemo } = ctx;
+  const { admin, ageConfirmed, deps } = ctx;
+
+  const isMcp = (c: Context<Vars>) => new URL(c.req.url).pathname === MCP_PATH;
+
+  /** A 401 an MCP client can act on: the header names our PRM. */
+  function mcpChallenge(c: Context<Vars>, message: string, invalid = false): Response {
+    const res = fail(c, 401, "unauthorized", message);
+    res.headers.set("www-authenticate", wwwAuthenticate(deps.env.mcp, invalid));
+    return res;
+  }
 
   app.use("*", async (c, next) => {
     const token = c.req.header("authorization")?.replace(/^Bearer /i, "");
+    if (!token && isMcp(c)) return mcpChallenge(c, "Missing token");
     if (!token) return fail(c, 401, "unauthorized", "Missing token");
     const { data, error } = await admin.auth.getUser(token);
+    if ((error || !data.user) && isMcp(c)) return mcpChallenge(c, "Invalid token", true);
     if (error || !data.user) {
       return fail(c, 401, "unauthorized", "Invalid token");
     }
+    // Containment (spec §3). An assistant's OAuth token is a full Supabase JWT
+    // for the user; `client_id` is the only thing that tells it apart, and
+    // Supabase stamps no audience we could bind to instead. So: OAuth tokens
+    // only on /mcp, and the app's own session never on /mcp.
+    const oauthClientId = oauthClientIdOf(token);
+    if (oauthClientId && !isMcp(c)) {
+      return fail(c, 403, "token_not_allowed", "This token only works for the assistant connection.");
+    }
+    if (!oauthClientId && isMcp(c)) {
+      return mcpChallenge(c, "Connect through your assistant's sign-in, not an app session.");
+    }
     c.set("userId", data.user.id);
     c.set("email", data.user.email ?? "");
+    if (oauthClientId) c.set("oauthClientId", oauthClientId);
     await next();
   });
 
   /** Routes reachable before the gate: read your profile, pass the gate, or
-   * delete the account. Everything else requires a confirmed 18+ DOB. */
+   * delete the account. Everything else requires a confirmed 18+ DOB.
+   * /mcp is gated per tool instead, so an assistant gets a readable tool
+   * error ("confirm your date of birth") rather than a broken connection. */
   const AGE_EXEMPT = new Set([
     "GET /api/profile",
     "POST /api/profile/age",
     "DELETE /api/profile",
+    `POST ${MCP_PATH}`,
   ]);
 
   /** The age-gate refusal for this request, or null when it may continue. */
   async function ageGateRefusal(c: Context<Vars>): Promise<Response | null> {
     const key = `${c.req.method} ${new URL(c.req.url).pathname}`;
     if (AGE_EXEMPT.has(key)) return null;
-    const userId = c.get("userId");
-    if (ageOkMemo.has(userId)) return null;
-    const { data } = await admin
-      .from("profiles")
-      .select("birth_date")
-      .eq("id", userId)
-      .single();
-    if (!data?.birth_date) {
-      return fail(
-        c,
-        403,
-        "age_unconfirmed",
-        "Confirm your date of birth to continue",
-      );
-    }
-    if (ageOkMemo.size > 10_000) ageOkMemo.clear();
-    ageOkMemo.add(userId);
-    return null;
+    if (await ageConfirmed(c.get("userId"))) return null;
+    return fail(
+      c,
+      403,
+      "age_unconfirmed",
+      "Confirm your date of birth to continue",
+    );
   }
 
   app.use("*", async (c, next) => {
@@ -103,8 +122,9 @@ export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
     await next();
   });
 
-  /** Which shared budget this request draws on, if any. */
-  function requestBucket(c: Context<Vars>): "generation" | "upload" | null {
+  /** Which shared budget this request draws on, if any. The `mcp` bucket is
+   * taken per generate-type tool call inside /mcp, not per HTTP request. */
+  function requestBucket(c: Context<Vars>): RequestBucket | null {
     const path = new URL(c.req.url).pathname;
     return c.req.method !== "POST" ? null
       : path === "/api/generations" || /^\/api\/generations\/[^/]+\/retry$/.test(path)
@@ -115,17 +135,15 @@ export function registerAuthMiddleware(app: App, ctx: ApiContext): void {
   /** Take one slot from the bucket: a refusal Response, or null to continue. */
   async function requestSlotRefusal(
     c: Context<Vars>,
-    bucket: "generation" | "upload",
+    bucket: RequestBucket,
   ): Promise<Response | null> {
-    const { data, error } = await admin.rpc("fn_take_request_slot", {
-      p_user: c.get("userId"), p_bucket: bucket,
-    });
-    if (error || !data) {
+    const slot = await takeRequestSlot(admin, c.get("userId"), bucket);
+    if ("unavailable" in slot) {
       return fail(c, 503, "request_limit_unavailable", "Requests are temporarily unavailable. Please try again shortly.");
     }
-    if (!data.allowed) {
+    if (!slot.allowed) {
       const res = fail(c, 429, "rate_limited", "Too many requests. Please wait a moment and try again.");
-      res.headers.set("retry-after", String(data.retryAfterSeconds));
+      res.headers.set("retry-after", String(slot.retryAfterSeconds));
       return res;
     }
     return null;

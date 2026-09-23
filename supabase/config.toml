@@ -28,6 +28,16 @@ additional_redirect_urls = [
 jwt_expiry = 3600
 enable_signup = true
 
+# The OAuth 2.1 server assistants (Claude, ChatGPT, other MCP clients) sign in
+# through; the gateway's /mcp accepts its tokens and nothing else does. The
+# consent URL is site_url + authorization_url_path (the web app's consent
+# page). Hosted, the same three settings are an owner step in the dashboard.
+# Spec: docs/superpowers/specs/2026-09-23-mcp-connection-design.md.
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true
+
 [auth.email]
 # On, so the confirmation link is actually issued and lands in Inbucket. With
 # this off the signup flow cannot be tested at all.

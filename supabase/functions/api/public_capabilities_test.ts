@@ -14,7 +14,7 @@ import {
 } from './services/public-capabilities.ts';
 import { CATALOG_VERSION } from '../_shared/model-families.ts';
 
-const OFF = { backgroundCompletion: false, completionNotifications: false };
+const OFF = { backgroundCompletion: false, completionNotifications: false, mcpEnabled: false };
 
 function withModels(rows: { id: string; enabled: boolean }[]) {
   const deps = testDeps();
@@ -81,7 +81,7 @@ Deno.test('release flags default off and are reported off', async () => {
 
 Deno.test('a verified flag is reported on', async () => {
   const deps = withModels([]);
-  deps.env.releaseFlags = { backgroundCompletion: true, completionNotifications: true };
+  deps.env.releaseFlags = { backgroundCompletion: true, completionNotifications: true, mcpEnabled: false };
   const res = await createApp(deps).request('/api/capabilities');
   const body = await res.json();
   assertEquals(body.backgroundCompletion, true);
@@ -94,6 +94,7 @@ Deno.test('notifications cannot be promised without background completion', () =
   const caps = publicCapabilities([], {
     backgroundCompletion: false,
     completionNotifications: true,
+    mcpEnabled: false,
   });
   assertEquals(caps.completionNotifications, false);
 });
@@ -102,12 +103,20 @@ Deno.test('only the exact string "on" enables a flag', () => {
   const env: Record<string, string> = {
     RELEASE_BACKGROUND_COMPLETION: 'true',
     RELEASE_COMPLETION_NOTIFICATIONS: '1',
+    MCP_ENABLED: 'yes',
   };
   const flags = releaseFlagsFromEnv((k) => env[k]);
   assertEquals(flags, OFF);
 
   env.RELEASE_BACKGROUND_COMPLETION = 'on';
   assertEquals(releaseFlagsFromEnv((k) => env[k]).backgroundCompletion, true);
+  env.MCP_ENABLED = 'on';
+  assertEquals(releaseFlagsFromEnv((k) => env[k]).mcpEnabled, true);
+});
+
+Deno.test('the MCP flag is never published to anonymous visitors', () => {
+  const caps = publicCapabilities([], { ...OFF, mcpEnabled: true });
+  assertEquals('mcpEnabled' in caps, false);
 });
 
 Deno.test('a missing or broken models read advertises nothing', () => {

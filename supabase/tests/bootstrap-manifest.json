@@ -142,6 +142,10 @@
     {
       "file": "0034_edit_tools_pro.sql",
       "sha256": "a33c038a589f"
+    },
+    {
+      "file": "0035_mcp_client.sql",
+      "sha256": "fd722892919c"
     }
   ]
 }
