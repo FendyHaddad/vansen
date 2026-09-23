@@ -102,8 +102,12 @@ a nullable column nothing writes — but they mean **a database rebuilt from thi
 repository is not byte-identical to production**, which is exactly the
 condition Task 2 Step 4 exists to detect.
 
-**Proposed action: none yet.** Dropping them is destructive and is the owner's
-call; codifying them in a migration would enshrine something nothing uses.
+**Decided 2026-09-23: drop both.** `0033_drop_schema_drift.sql` drops them
+(`if exists`, since a database built from the migrations never had them).
+Production had 0 `admins` rows, no policies or dependents, and no
+`monthly_budget` values. Applied to production 2026-09-23; the diff now shows
+no table or column differences, only the grant noise below and the hosted
+`pg_net` extension record sitting in schema `public`.
 Recorded here so the difference is known rather than discovered during a
 restore. See the open decision at the bottom.
 
@@ -181,6 +185,6 @@ uses this table, not the plan's.
 
 | Decision | Owner | Blocking |
 |---|---|---|
-| Drop `public.admins` and `profiles.monthly_budget`, or codify them in a migration, or leave the drift recorded | owner | no — they are unused and inert |
+| ~~Drop `public.admins` and `profiles.monthly_budget`~~ — decided 2026-09-23: drop (`0033`) | owner | no |
 | Create a staging project, or accept Gate A and the restore rehearsal as permanently BLOCKED for this release | owner | yes, for Gate A |
 | FLUX price: per-megapixel (P3) or the flat tiers | owner | yes, before `flux` is re-qualified |

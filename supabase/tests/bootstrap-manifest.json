@@ -134,6 +134,10 @@
     {
       "file": "0032_persona_references.sql",
       "sha256": "70014e0b2021"
+    },
+    {
+      "file": "0033_drop_schema_drift.sql",
+      "sha256": "41bcb80043d5"
     }
   ]
 }

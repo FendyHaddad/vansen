@@ -181,6 +181,7 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | `stripe-webhook` v32, `appstore-webhook` v22, `job-worker` v21, `cleanup-worker` v18 | deployed and attested with `73cd5cb`. See §10 |
 | `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `73cd5cb` / `v21`, schema `0032` |
 | `0032_persona_references.sql` | **applied to production 2026-09-22.** The `persona` family ships `enabled = false`. See §10 |
+| `0033_drop_schema_drift.sql` | **applied to production 2026-09-23.** Dropped the hand-made `public.admins` (0 rows) and `profiles.monthly_budget` (all null). Read-back: both gone, latest migration `0033`. `supabase db diff --linked --schema public` now shows only the platform default grants (inert, inventory §2) and the `pg_net` extension record living in `public` on the hosted project; no tables or columns differ |
 | `RUNWAY_API_KEY` | unset |
 | R2 CORS policy, `storage_config.r2_bucket` row | not created |
 | FLUX retail price | deferred by owner decision 2026-09-22; decide before enabling `flux` |
