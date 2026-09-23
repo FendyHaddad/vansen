@@ -123,8 +123,8 @@ happened, so "We'll notify you" stays hidden. The permitted wording remains
 | Policy and retention review (D2) | **DECIDED**, owner review PENDING | `docs/superpowers/specs/2026-09-20-retention-policy.md` |
 | Alerts exist and fire | **PASS** | `0025_release_telemetry.sql`, 11 assertions in `supabase/tests/alerts.sql`, 8 alert kinds |
 | Alert **delivery** to a destination | **DEFERRED** | owner decision 2026-09-22: database rows only. No outbox, no worker, no webhook. **Nothing pages anyone.** A person must look |
-| Backup restore rehearsal | PENDING | needs synthetic staging data — blocked with Gate A |
-| Rollback rehearsal | PENDING | Task 7 Step 9 |
+| Backup restore rehearsal | **BLOCKED — no backups exist** | checked 2026-09-23: `supabase backups list` returns `backups: []`, `pitr_enabled: false` (Free plan). Nothing to restore until the Pro upgrade (daily backups, 7-day retention); the only fallback is a manual `supabase db dump --linked` |
+| Rollback rehearsal | **PASS (local stack) 2026-09-23**, production PENDING | kill switch, drain, function rollback and re-enable rehearsed locally; rollback to any revision before `73cd5cb` FAILS on schema `0033`. Production rollback and `wrangler rollback` never executed. See §10, 2026-09-23 |
 | Cohort rollout record | PENDING | Task 7 Step 8 |
 
 ### Trend assets — closed 2026-09-22
@@ -177,9 +177,9 @@ Earlier R-items are closed in their own plans' verification logs, linked from
 | Item | State |
 |---|---|
 | `0025_release_telemetry.sql` | **applied to production 2026-09-22.** See §10 |
-| `api` | **v66**, revision `73cd5cb`, stamped 2026-09-22T23:14:58Z. See §10 |
-| `stripe-webhook` v32, `appstore-webhook` v22, `job-worker` v21, `cleanup-worker` v18 | deployed and attested with `73cd5cb`. See §10 |
-| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `73cd5cb` / `v21`, schema `0032` |
+| `api` | **v67**, revision `723fddd`, stamped 2026-09-23T00:09:56Z. See §10 |
+| `stripe-webhook` v33, `appstore-webhook` v23, `job-worker` v22, `cleanup-worker` v19 | deployed and attested with `723fddd`. See §10 |
+| `GIT_REVISION`, `DEPLOYED_AT`, `WORKER_VERSION` | set; the manifest reports `723fddd` / `v22`, schema `0033` |
 | `0032_persona_references.sql` | **applied to production 2026-09-22.** The `persona` family ships `enabled = false`. See §10 |
 | `0033_drop_schema_drift.sql` | **applied to production 2026-09-23.** Dropped the hand-made `public.admins` (0 rows) and `profiles.monthly_budget` (all null). Read-back: both gone, latest migration `0033`. `supabase db diff --linked --schema public` now shows only the platform default grants (inert, inventory §2) and the `pg_net` extension record living in `public` on the hosted project; no tables or columns differ |
 | `RUNWAY_API_KEY` | unset |
@@ -548,3 +548,174 @@ Not yet done: enabling `persona`, the persona smoke, the Nano Banana
 reference-edit smoke (the Google adapter now sends the prompt after the
 images), and the two owner-run scripts. Still a deployed candidate, not a
 qualified release.
+
+### 2026-09-23 — schema drift dropped (`723fddd`)
+
+`0033_drop_schema_drift.sql` was applied first (`supabase db push --linked`),
+then `./deploy.sh --yes` exited 0: `DEPLOYED 723fddd · catalog 2026-09-23.2 · api v67`.
+No function code changed; the redeploy restamps the manifest.
+
+| Component | Version | Revision |
+|---|---|---|
+| `api` | v67 | `723fddd` |
+| `job-worker` | v22 | `723fddd` |
+| `cleanup-worker` | v19 | `723fddd` |
+| `stripe-webhook` | v33 | `723fddd` |
+| `appstore-webhook` | v23 | `723fddd` |
+
+```
+gitRevision    723fddd
+workerVersion  v22
+schemaVersion  0033
+catalogVersion 2026-09-23.2
+```
+
+### 2026-09-23 — rollback rehearsal (local stack)
+
+Runbook §8, rehearsed against `npm run db:test:start` (CLI 2.114.0, 34
+migrations, `fn_schema_version()` = `0033`) and `npm run stage:seed`, with the
+production flag set mirrored locally from a select-only `supabase db query
+--linked` (on: the four `edit-*`, `flux`, `gpt-image`, `nano-banana`,
+`seedream`, `upscaler`). `supabase/.env.staging` had every provider key blank,
+so no provider was called and nothing was spent. Moderation (OpenAI) is
+therefore unavailable locally: an enabled family is refused *after* the kill
+switch with `moderation_unavailable`, uncharged. In-flight work was created
+with `fn_reserve_generation`, the RPC and argument shapes the gateway sends,
+as the `studio@` / `pro@` staging accounts, and driven by the real job-worker
+(`POST /functions/v1/job-worker`). A provider's "failed" answer was
+simulated by calling `fn_settle_job`, the RPC the worker's poll path calls.
+Raw logs: session scratchpad `rollback/`.
+
+**1. Disable one family mid-flight — PASS.** Four jobs in flight (flux: input
+deleted while queued, cancel requested while queued, already at the provider;
+nano-banana: input deleted).
+
+```
+$ POST /api/generations flux   (flux enabled)
+{"error":{"code":"moderation_unavailable",...}} http=503
+$ update public.models set enabled = false where id = 'flux';
+$ POST /api/generations flux
+{"error":{"code":"model_disabled","message":"This model is temporarily unavailable."}} http=503
+$ POST /api/generations nano-banana
+{"error":{"code":"moderation_unavailable",...}} http=503
+studio balance 1458, ledger rows 5          -- unchanged by the three requests
+$ job-worker tick
+{"claimed":3,"ran":3,"failed":0,"notifications":0} http=200
+flux        failed  generation_failed  charged 10  refund rows 1  refunded 10
+flux        failed  cancelled          charged 10  refund rows 1  refunded 10
+flux        pending submitted          charged 10  refund rows 0
+nano-banana failed  generation_failed  charged 12  refund rows 1  refunded 12
+$ fn_settle_job(<flux at provider>, 'failed', ...)
+{"settled": true, "previous": "pending", "refunded": 10}
+$ fn_settle_job replayed on two settled jobs; tick again
+{"settled": false, "previous": "failed", "refunded": 0}   (x2)
+{"claimed":0,"ran":0,"failed":0,"notifications":0} http=200
+studio balance 1500, ledger rows 9          -- every charge refunded exactly once
+```
+
+**2. Disable all submissions — PASS.** Three more in flight (seedream and
+gpt-image queued, nano-banana at the provider; two users).
+
+```
+$ update public.models set enabled = false;          -- UPDATE 15
+$ POST generate nano-banana / gpt-image / seedream / flux (studio), nano-banana (pro)
+model_disabled http=503                              (x5)
+$ POST /api/generations/<failed nano-banana>/retry
+{"error":{"code":"family_disabled","message":"That model is temporarily unavailable."}} http=409
+$ GET /api/capabilities
+{"enabledFamilyIds":[],...}
+all ledger rows 16 before and after the requests
+$ tick → {"claimed":2,"ran":2,...} ; fn_settle_job(<at provider>) → {"settled": true, "refunded": 12}
+pending generations 0, jobs not done 0, charges since the switch 0
+```
+
+The first retry answered 500: the hand-built snapshot lacked `settings`
+(`validateSettings` read `undefined`). A rehearsal artefact, not a product
+path — a real snapshot always carries settings. With the snapshot completed
+the retry answered 409 as above.
+
+**3. Redeploy the previous functions — PASS for `73cd5cb`, FAIL for `76bc2a0`.**
+Served from `git archive <rev> supabase/functions supabase/config.toml`
+(extracted under `$HOME`; Docker mounts `/private/tmp` empty and the runtime
+fails with "failed to determine entrypoint") with `supabase functions serve
+--workdir <tree>`, two jobs queued under `723fddd` before each switch.
+
+```
+-- 73cd5cb (git diff 73cd5cb 723fddd -- supabase/functions: empty)
+manifest   {"schemaVersion":"0033","catalogVersion":"2026-09-23.2",...}
+tick       {"claimed":2,"ran":2,"failed":0,"notifications":0} http=200
+           flux failed/refunded 10, nano-banana cancelled/refunded 12
+POST flux  model_disabled http=503
+GET /api/personas  {"items":[],"slots":{"used":0,"max":2}} http=200
+
+-- 76bc2a0 (last migration it knew: 0031)
+manifest   {"schemaVersion":"0033","catalogVersion":"2026-09-23.1",...}
+tick #1    Internal Server Error http=500   -- the two queued jobs DID settle and refund first
+tick #2    Internal Server Error http=500   -- every tick, with nothing queued
+log        fn_claim_training_jobs: Could not find the function public.fn_claim_training_jobs(p_limit) in the schema cache
+POST /api/personas {"name":"rehearsal","attested":true}
+           {"error":{"code":"create_failed",...}} http=400
+notification_outbox: the failure created under 76bc2a0 sat at attempts 0 until 723fddd ticked again
+```
+
+`76bc2a0` and every older revision carry the same training code
+(`_shared/jobs/training.ts`, `fn_reserve_training`, `lora_url`,
+`photo_paths`), so all of them fail the same way. No revision checked reads
+`public.admins` or `profiles.monthly_budget` (0033), or `fn_cycle_reset` /
+`fn_grant_pack` (0030).
+
+Manifest after a function-only rollback, with the secrets the 723fddd deploy
+stamped:
+
+```
+{"gitRevision":"723fddd","workerVersion":"v22","deployedAt":"2026-09-23T00:09:56Z","schemaVersion":"0033","catalogVersion":"2026-09-23.1"}
+```
+
+It names the old revision. Only `catalogVersion` comes from the code. The
+restamp step in runbook §8 is required after any rollback.
+
+**4. Re-enable — PASS.** Back on the working tree (`723fddd`).
+
+```
+ledger before   cycle_reset 2 / 5250   generate 11 / -121   refund 11 / 121
+$ update public.models set enabled = true where id in (<the nine>);   -- UPDATE 9
+$ tick x2 → {"claimed":0,...} http=200 (x2)    -- nothing settled is re-dispatched
+$ POST flux → moderation_unavailable http=503  -- past the kill switch, uncharged
+$ fn_settle_job replayed on all 11 rehearsal jobs → settled_again 0, refunded_again 0
+$ fn_apply_fulfillment('stripe','seed:studio@staging.vansen', ...) replayed
+{"replay": true, "applied": false, ..., "ledgerDelta": 1500}
+ledger after    cycle_reset 2 / 5250   generate 11 / -121   refund 11 / 121
+refund notes appearing twice: 0; 11 of 11 generations refunded in full exactly once
+cycle_reset rows per user: 1 and 1; balances free 0, studio 1500, pro 3750
+```
+
+The replayed grant reports `ledgerDelta: 1500` while writing no row
+(`applied: false`); the ledger is the evidence, not that field.
+
+Existing gates re-run on the same database: `dispatch.sql`,
+`job_settlement.sql`, `job_resolution.sql` exit 0, and
+`settlement_concurrency.sh` prints "OK: single terminal transition (failed,
+refunded 40, notifications 0)". `npm run test:sql` stopped at `alerts.sql` ("a
+healthy system must be silent") because the rehearsal's `moderation_unavailable`
+alerts were still open; `npm run verify` resets the database first and is
+unaffected.
+
+Read-only production checks the same day: `supabase functions list` → `api`
+v67, `job-worker` v22, `cleanup-worker` v19, `stripe-webhook` v33,
+`appstore-webhook` v23, all `verify_jwt=false`; `/manifest` → `723fddd`, `v22`,
+schema `0033`, catalog `2026-09-23.2`; `npx wrangler deployments list` → latest
+version `a5b95faa` (2026-09-23T00:09:51Z), before it `029ca6d3` (23:14:53Z) and
+`b55be9fd` (18:21:52Z), none with a message or tag.
+
+**Not proven:**
+
+- any rollback on production: no function was redeployed and no secret set
+- `wrangler rollback`: only the read-only list was run
+- the poll path of a job at a provider under a rolled-back worker, and a
+  `done` settlement with real media: no provider key, so provider answers were
+  simulated with `fn_settle_job`. `job_settlement.sql` covers the `done` path
+- push delivery: no FCM account locally, every outbox row ends `push_not_configured`
+- cron-driven ticks: the local worker was ticked by hand
+- `cleanup-worker` under a rolled-back tree (it needs `CLEANUP_WORKER_SECRET`,
+  absent locally); its directory is unchanged since `5b5ddca`, but its bundled
+  `_shared` is not

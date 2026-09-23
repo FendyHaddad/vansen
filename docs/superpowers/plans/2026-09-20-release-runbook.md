@@ -165,13 +165,15 @@ cd /Users/user/IdeaProjects/vansen && supabase functions deploy job-worker --no-
 ```
 
 ```bash
-cd /Users/user/IdeaProjects/vansen && supabase functions deploy stripe-webhook --project-ref bnorhcxhvxydkgvcxjad && supabase functions deploy appstore-webhook --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad
+cd /Users/user/IdeaProjects/vansen && supabase functions deploy stripe-webhook --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad && supabase functions deploy appstore-webhook --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad
 ```
 
 `stripe-webhook` and `appstore-webhook` have **not been redeployed since P2
 rewrote them**. The live ones are the old ones. Do not skip that third command.
-`stripe-webhook` keeps JWT verification on — Stripe authenticates by signature,
-and the function is the only writer of `topup` ledger rows.
+All five functions run with JWT verification off (`deploy.sh` passes
+`--no-verify-jwt`; production shows `verify_jwt=false`). `stripe-webhook`
+authenticates Stripe by signature instead, and is the only writer of `topup`
+ledger rows.
 
 Verify the deploy actually landed:
 
@@ -204,7 +206,6 @@ names three jobs that do not exist, under names 0020 and 0021 renamed:
 | `purge_lapsed` | daily 03:00 UTC | lapse purge — **named `purge_lapsed`, not `purge_lapsed_libraries`** |
 | `reap_deleted_content` | | |
 | `reconcile_stale_jobs` | every 5 min | includes lease expiry via `fn_expire_leases()` — there is no separate `release_expired_leases` job |
-| `reconcile_stale_trainings` | | **not** `reconcile_stale_persona_trainings` |
 
 Active is not running. Check that they actually ran:
 
@@ -328,19 +329,129 @@ hands out.
 
 ## 8. Rollback
 
-Rehearse locally first. There is no staging to rehearse on — that is recorded
-as BLOCKED in the evidence document, and it means the first real rehearsal of
-these mechanics is on production.
+**Rehearsed 2026-09-23 on the local stack (§7b)** — commands and output in
+the evidence document, §10 "2026-09-23 — rollback rehearsal (local stack)".
+Rehearse there again before any real rollback. A production rollback has never
+been run; neither has `wrangler rollback`.
 
-| Step | Expected |
-|---|---|
-| Disable one family mid-flight | New submissions refused; queued jobs still settle and refund correctly |
-| Disable all submissions | Existing work drains; no new charges |
-| Redeploy the previous `api` | Queued jobs still settle; no column a queued job reads has been dropped |
-| Re-enable | No duplicate charge, no duplicate grant, no double refund |
+| Step | Expected | Local 2026-09-23 |
+|---|---|---|
+| Disable one family mid-flight | New submissions refused; queued jobs still settle and refund correctly | PASS |
+| Disable all submissions | Existing work drains; no new charges | PASS |
+| Redeploy the previous `api` | Queued jobs still settle; no column a queued job reads has been dropped | PASS for `73cd5cb`; **FAIL for `76bc2a0` and older** |
+| Re-enable | No duplicate charge, no duplicate grant, no double refund | PASS |
 
 **The rule:** disable new submissions first, let existing work settle, and never
 drop a column while a queued job depends on it.
+
+The switch is `models.enabled`, read on every request (no cache; a missing row
+is off). The worker never reads it, which is why in-flight work still settles.
+There is no global switch: "disable all" is `update public.models set enabled
+= false;`. **Re-enable by explicit id list** from the §7 export — a blanket
+`set enabled = true` also turns on the five video families.
+
+### The rollback-target rule
+
+**Functions roll back only to a revision whose code works on the schema that is
+live now. Migrations are forward-only.** A migration is never reverted to suit
+old code.
+
+Against schema `0033`:
+
+| Revision | Against `0033` |
+|---|---|
+| `723fddd`, `e2af5be`, `73cd5cb` | **Safe.** Function code identical (`git diff 73cd5cb 723fddd -- supabase/functions` is empty); a rollback changes only the stamp |
+| `76bc2a0` and everything older | **Unsafe.** Its job-worker calls `fn_claim_training_jobs` (dropped by 0032): every tick returns 500 after settling image jobs, so the notification drain never runs. Its persona create answers 400 `create_failed` (the insert omits `consent_attested_at`, NOT NULL since 0032) and its persona generation reads `personas.lora_url` (dropped) |
+
+So today there is no safe rollback target that behaves differently from what is
+live. Before each deploy, write down the live revision: that is the rollback
+target, and it stays safe only until the next migration drops something it
+reads.
+
+Checking a candidate `$REV`:
+
+```bash
+cd /Users/user/IdeaProjects/vansen && git diff --stat $REV HEAD -- supabase/functions | tail -1 && git ls-tree --name-only $REV supabase/migrations/ | tail -1
+```
+
+Empty diff: safe. Otherwise, grep `$REV`'s functions for every object dropped
+by a migration newer than the one it last knew, then serve it on the local
+stack (below). The job-worker tick must return 200.
+
+### Rolling back each component
+
+`./deploy.sh` cannot roll back: it deploys the working tree at HEAD and refuses
+a dirty tree. Supabase has no function-rollback command either (`supabase
+functions` offers list/delete/download/deploy/new). A rollback is a redeploy
+from an archived tree. Extract it under `$HOME`, not `/tmp`: Docker on this Mac
+mounts `/private/tmp` as an empty directory and the runtime fails with "failed
+to determine entrypoint".
+
+```bash
+cd /Users/user/IdeaProjects/vansen && REV=73cd5cb && W="$HOME/vansen-rollback/$REV" && mkdir -p "$W" && git archive $REV supabase/functions supabase/config.toml | tar -x -C "$W"
+```
+
+Rehearse it locally first (§7b stack, `npm run db:test:start && npm run stage:seed`):
+
+```bash
+cd /Users/user/IdeaProjects/vansen && supabase functions serve --workdir "$W" --no-verify-jwt --env-file supabase/.env.staging
+```
+
+Then `curl -s http://127.0.0.1:54321/functions/v1/api/manifest` (its
+`catalogVersion` is the archived code's) and one job-worker tick, which must
+return 200.
+
+Production — the user runs these, one at a time. All five functions go back
+together: they share `_shared` (catalog, settlement), and deploy.sh ships and
+attests them as one revision. Flags as `scripts/deploy-backend.mjs` uses them;
+`supabase functions list` shows all five live with `verify_jwt=false`.
+
+```bash
+cd /Users/user/IdeaProjects/vansen && for f in api job-worker cleanup-worker stripe-webhook appstore-webhook; do supabase functions deploy $f --no-verify-jwt --project-ref bnorhcxhvxydkgvcxjad --workdir "$W" || break; done
+```
+
+**Restamp the manifest.** A function deploy does not touch secrets, so
+`/manifest` keeps reporting the old `GIT_REVISION`. Rehearsed: `76bc2a0` code
+with the 723fddd stamp reported `gitRevision 723fddd` next to `catalogVersion
+2026-09-23.1`. Setting secrets bumps every function's version by one, as in
+deploy.sh step 6:
+
+```bash
+cd /Users/user/IdeaProjects/vansen && supabase secrets set GIT_REVISION=$REV DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) WORKER_VERSION=v<job-worker version from functions list, plus one> --project-ref bnorhcxhvxydkgvcxjad
+```
+
+Verify: `gitRevision` is `$REV` and `catalogVersion` matches
+`git show $REV:src/app/core/catalog/model-families.ts`. A function's version
+number is not a code identity: secrets bump it.
+
+**Web (Cloudflare Worker `vansen`).**
+
+```bash
+cd /Users/user/IdeaProjects/vansen && npx wrangler deployments list
+```
+
+```bash
+cd /Users/user/IdeaProjects/vansen && npx wrangler rollback <version-id> --message "rollback to <rev>"
+```
+
+Versions carry no message or tag, so match them to revisions by timestamp
+against `DEPLOYED_AT` and §10 of the evidence: `a5b95faa` (2026-09-23 00:09Z) =
+`723fddd`, `029ca6d3` (2026-09-22 23:14Z) = `73cd5cb`, `b55be9fd` (18:21Z) =
+`c16b7fd`. `src/` is unchanged from `73cd5cb` to `723fddd`. When the catalog
+differs, **roll the web back first, then the functions**: this is deploy.sh's
+order reversed. A stale browser against a newer server shows a stale price; a
+newer browser against an older server makes broken requests.
+
+**Migrations.** Forward-only. A bad migration is fixed by a new migration
+(`00NN_*.sql`, re-record `supabase/tests/bootstrap-manifest.json`, `supabase db
+push --linked`). Recent destructive migrations, whose data cannot be restored
+by recreating the objects:
+
+| Migration | Destroys |
+|---|---|
+| `0030` | `fn_cycle_reset`, `fn_grant_pack` |
+| `0032` | every persona (deleted through `fn_delete_persona`), `training_jobs`, eight training/persona functions, nine `personas` columns, the `reconcile_stale_trainings` cron, four `dispatch_limits` rows |
+| `0033` | `public.admins` (0 rows), `profiles.monthly_budget` (all null) |
 
 ### The three-in-the-morning command
 
