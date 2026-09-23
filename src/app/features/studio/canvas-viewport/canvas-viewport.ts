@@ -11,20 +11,24 @@ import {
   viewChild,
 } from '@angular/core';
 import { EditSession } from '../../../core/editing/edit-session';
-import { CropRect } from '../../../core/editing/ops/crop';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
 import { RetouchMode } from '../../../core/editing/ops/retouch';
 import { MaskCanvas } from '../mask-canvas/mask-canvas';
 import { DRAG_TOOLS, StudioTool } from '../studio-tool';
+import { BrushStrokes } from './brush-strokes';
+import { CropHandle, MIN_CROP_PX, CropGesture } from './crop-geometry';
+import { ViewportPanZoom } from './pan-zoom';
+import { clamp } from './viewport-math';
 
-/** Crop drag intent: draw a new box, move it, or resize from an edge/corner. */
-type CropHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
-type CropMode = 'new' | 'move' | CropHandle;
-
-const MIN_CROP_PX = 8;
-const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-
-/** Center stage in edit mode: the working image + paintable mask overlay. */
+/**
+ * Center stage in edit mode: the working image + paintable mask overlay.
+ *
+ * Pan/zoom gesture state lives in `ViewportPanZoom`, crop-box gesture state
+ * in `CropGesture`, and heal/liquify/clone/retouch stroke bookkeeping in
+ * `BrushStrokes` (all beside this file). This component owns the DOM/pointer
+ * wiring, the tool input signals, and the screen-space overlay computeds that
+ * combine them.
+ */
 @Component({
   selector: 'app-canvas-viewport',
   templateUrl: './canvas-viewport.html',
@@ -55,16 +59,14 @@ export class CanvasViewport {
   private readonly previewCanvas = viewChild<ElementRef<HTMLCanvasElement>>('previewCanvas');
   private readonly cloneCanvas = viewChild<ElementRef<HTMLCanvasElement>>('cloneCanvas');
 
-  /** Crop rectangle in image pixels, null = none. */
-  readonly cropRect = signal<CropRect | null>(null);
+  private readonly panZoom = new ViewportPanZoom();
+  private readonly crop = new CropGesture();
+  private readonly strokes = new BrushStrokes(this.session);
+
   /** Bumped on resize/layout so screen-space computeds re-measure the DOM. */
   private readonly viewTick = signal(0);
   /** Pointer position relative to the viewport, for the brush cursor ring. */
   readonly cursorPos = signal<{ x: number; y: number } | null>(null);
-  /** View offset in CSS px while zoomed in — wheel/trackpad pans the image. */
-  private readonly panSig = signal({ x: 0, y: 0 });
-  /** Active click-drag pan gesture (mouse users), null = none. */
-  private readonly panDrag = signal<{ startX: number; startY: number; origin: { x: number; y: number } } | null>(null);
 
   /** Grab cursor: zoomed in and the active tool leaves left-drag free. */
   readonly pannable = computed(() => {
@@ -72,13 +74,13 @@ export class CanvasViewport {
     const t = this.tool();
     return t === null || !DRAG_TOOLS.has(t);
   });
-  readonly panning = computed(() => this.panDrag() !== null);
+  readonly panning = computed(() => this.panZoom.isDragging());
 
   /** Zoom + pan applied to the stage. Overlay math needs no special casing —
    * it measures the transformed DOM rects. */
   readonly stageTransform = computed(() => {
     const z = this.session.zoom();
-    const p = this.panSig();
+    const p = this.panZoom.pan();
     return z === 1 && p.x === 0 && p.y === 0
       ? ''
       : `translate(${p.x}px, ${p.y}px) scale(${z})`;
@@ -105,7 +107,7 @@ export class CanvasViewport {
   /** Crop box in viewport-relative CSS pixels (image may be letterboxed). */
   readonly cropCss = computed(() => {
     this.viewTick();
-    const r = this.cropRect();
+    const r = this.crop.rect();
     const buf = this.session.current();
     if (!r || !buf) return null;
     const img = this.imgRect();
@@ -123,7 +125,7 @@ export class CanvasViewport {
 
   /** Live crop size caption (image pixels), e.g. "512 × 384". */
   readonly cropSize = computed(() => {
-    const r = this.cropRect();
+    const r = this.crop.rect();
     return r ? `${Math.round(r.width)} × ${Math.round(r.height)}` : '';
   });
 
@@ -206,22 +208,6 @@ export class CanvasViewport {
     return this.brushSize() * 2 * (img.width / buf.width);
   });
 
-  private cropDrag: { mode: CropMode; startPt: { x: number; y: number }; startRect: CropRect } | null = null;
-  private healStroke: { x: number; y: number }[] = [];
-  private liquifyLast: { x: number; y: number } | null = null;
-  /** True once the current liquify drag posted a step — commit on release. */
-  private liquifyStroked = false;
-  /** Steps queued but not yet rendered — backpressure for fast drags. */
-  private liquifyPending = 0;
-  /** Fixed source − stroke-start offset while a clone drag is active. */
-  private cloneOffset: { x: number; y: number } | null = null;
-  private cloneLast: { x: number; y: number } | null = null;
-  private cloneStroked = false;
-  private clonePending = 0;
-  private retouchLast: { x: number; y: number } | null = null;
-  private retouchStroked = false;
-  private retouchPending = 0;
-
   constructor() {
     // Entering crop shows a ready-made centered box; preset changes re-fit it.
     effect(() => {
@@ -229,7 +215,7 @@ export class CanvasViewport {
       const aspect = this.cropAspect();
       this.session.previewUrl(); // re-init after loads / rotations change dims
       if (t === 'crop') this.initCropBox(aspect);
-      else this.cropRect.set(null);
+      else this.crop.clear();
     });
     // The mask layer keeps its own brush size — mirror the panel's slider.
     effect(() => {
@@ -255,7 +241,7 @@ export class CanvasViewport {
     // transform has painted so every overlay lands on the moved image.
     effect(() => {
       const z = this.session.zoom();
-      if (z <= 1) this.panSig.set({ x: 0, y: 0 });
+      if (z <= 1) this.panZoom.reset();
       if (typeof requestAnimationFrame !== 'undefined') {
         requestAnimationFrame(() => {
           this.clampPan();
@@ -266,7 +252,7 @@ export class CanvasViewport {
     // New image = fresh framing.
     effect(() => {
       this.session.previewUrl();
-      this.panSig.set({ x: 0, y: 0 });
+      this.panZoom.reset();
     });
     // Any tool switch or image swap forgets the clone source mark.
     effect(() => {
@@ -333,41 +319,23 @@ export class CanvasViewport {
     }
     if (this.session.zoom() <= 1) return;
     e.preventDefault();
-    this.panSig.update((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    this.panZoom.panBy(e.deltaX, e.deltaY);
     this.clampPan();
     this.viewTick.update((n) => n + 1);
   }
 
-  /** The image is centered; panning may shift it at most until the far edge
-   * reaches the viewport edge (no gap can open on the opposite side). */
   private clampPan(): void {
     const img = this.imgRect();
     const vp = this.vpRect();
     if (!img || !vp) return;
-    const maxX = Math.max(0, (img.width - vp.width) / 2);
-    const maxY = Math.max(0, (img.height - vp.height) / 2);
-    this.panSig.update((p) => {
-      const x = clamp(p.x, -maxX, maxX);
-      const y = clamp(p.y, -maxY, maxY);
-      return x === p.x && y === p.y ? p : { x, y };
-    });
+    this.panZoom.clamp(img.width, img.height, vp.width, vp.height);
   }
 
-  /** Largest centered box for the ratio (whole image when free-form). */
   private initCropBox(aspect: number | null): void {
     const buf = this.session.current();
-    if (!buf) {
-      this.cropRect.set(null);
-      return;
-    }
-    let w = buf.width;
-    let h = buf.height;
-    if (aspect) {
-      if (w / h > aspect) w = h * aspect;
-      else h = w / aspect;
-    }
-    this.cropRect.set({ x: (buf.width - w) / 2, y: (buf.height - h) / 2, width: w, height: h });
+    this.crop.initBox(buf, aspect);
     // The <img> may not be laid out yet — re-measure once it is.
+    if (!buf) return;
     if (typeof requestAnimationFrame !== 'undefined') {
       requestAnimationFrame(() => this.viewTick.update((n) => n + 1));
     }
@@ -400,10 +368,9 @@ export class CanvasViewport {
     if (e.button !== 0) return; // middle-drag bubbles up to the viewport pan
     e.stopPropagation();
     const p = this.toImagePoint(e);
-    const r = this.cropRect();
-    if (!p || !r) return;
+    if (!p) return;
+    if (!this.crop.beginHandleDrag(mode, p)) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    this.cropDrag = { mode, startPt: p, startRect: { ...r } };
   }
 
   onPointerDown(e: PointerEvent): void {
@@ -412,7 +379,7 @@ export class CanvasViewport {
     if (this.session.zoom() > 1 && (e.button === 1 || (e.button === 0 && this.pannable()))) {
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-      this.panDrag.set({ startX: e.clientX, startY: e.clientY, origin: this.panSig() });
+      this.panZoom.startDrag(e.clientX, e.clientY);
       return;
     }
     const p = this.toImagePoint(e);
@@ -420,20 +387,15 @@ export class CanvasViewport {
     const t = this.tool();
     if (t === 'crop') {
       // Click on empty canvas draws a fresh box.
-      this.cropDrag = { mode: 'new', startPt: p, startRect: { x: p.x, y: p.y, width: 0, height: 0 } };
-      this.cropRect.set({ x: p.x, y: p.y, width: 0, height: 0 });
+      this.crop.beginNew(p);
     }
     if (t === 'heal' || t === 'liquify' || t === 'clone' || t === 'retouch') {
       const cp = this.cursorPos();
       this.strokeTrail.set(cp ? [cp] : []);
     }
-    if (t === 'heal') this.healStroke = [p];
+    if (t === 'heal') this.strokes.beginHeal(p);
     if (t === 'liquify') {
-      this.liquifyLast = p;
-      // Pinch/bulge act on click too — no drag needed to see the effect.
-      if (this.liquifyMode() !== 'push') {
-        this.postLiquifyStep({ cx: p.x, cy: p.y, dx: 0, dy: 0 });
-      }
+      this.strokes.beginLiquify(p, this.liquifyMode(), this.brushSize(), this.liquifyStrength());
     }
     if (t === 'clone' && e.button === 0) {
       // First click (or alt-click any time) marks the sample spot; painting
@@ -444,14 +406,11 @@ export class CanvasViewport {
         this.strokeTrail.set([]);
         return;
       }
-      this.cloneOffset = { x: src.x - p.x, y: src.y - p.y };
-      this.cloneLast = p;
       this.cloneDragging.set(true);
-      this.postCloneStamp(p);
+      this.strokes.beginClone(src, p, this.brushSize(), this.cloneStrength());
     }
     if (t === 'retouch' && e.button === 0) {
-      this.retouchLast = p;
-      this.postRetouchDab(p);
+      this.strokes.beginRetouch(p, this.brushSize(), this.retouchMode(), this.retouchStrength(), this.retouchFeather());
     }
     // Point-pick tools: bokeh focus, smart select, magic erase. Tool options react.
     if ((t === 'bokeh' || t === 'select' || t === 'erase') && e.button === 0) {
@@ -459,61 +418,10 @@ export class CanvasViewport {
     }
   }
 
-  private postCloneStamp(q: { x: number; y: number }): void {
-    const off = this.cloneOffset;
-    if (!off) return;
-    this.cloneStroked = true;
-    this.clonePending++;
-    void this.session
-      .strokeOp('clone', {
-        sx: q.x + off.x,
-        sy: q.y + off.y,
-        tx: q.x,
-        ty: q.y,
-        radius: this.brushSize(),
-        strength: this.cloneStrength() / 100,
-      })
-      .finally(() => this.clonePending--);
-  }
-
-  private postRetouchDab(q: { x: number; y: number }): void {
-    this.retouchStroked = true;
-    this.retouchPending++;
-    void this.session
-      .strokeOp('retouch', {
-        cx: q.x,
-        cy: q.y,
-        radius: this.brushSize(),
-        mode: this.retouchMode(),
-        // Half-scaled per dab so a slow pass builds up instead of slamming.
-        strength: (this.retouchStrength() / 100) * 0.5,
-        feather: this.retouchFeather() / 100,
-      })
-      .finally(() => this.retouchPending--);
-  }
-
-  /** Preview-only liquify step: instant feedback, one undo entry per stroke. */
-  private postLiquifyStep(step: { cx: number; cy: number; dx: number; dy: number }): void {
-    this.liquifyStroked = true;
-    this.liquifyPending++;
-    void this.session
-      .strokeOp('liquify', {
-        ...step,
-        radius: this.brushSize(),
-        mode: this.liquifyMode(),
-        strength: this.liquifyStrength() / 100,
-      })
-      .finally(() => this.liquifyPending--);
-  }
-
   onPointerMove(e: PointerEvent): void {
     this.updateCursor(e);
-    const drag = this.panDrag();
-    if (drag) {
-      this.panSig.set({
-        x: drag.origin.x + e.clientX - drag.startX,
-        y: drag.origin.y + e.clientY - drag.startY,
-      });
+    if (this.panZoom.isDragging()) {
+      this.panZoom.updateDrag(e.clientX, e.clientY);
       this.clampPan();
       this.viewTick.update((n) => n + 1);
       return;
@@ -521,71 +429,26 @@ export class CanvasViewport {
     const p = this.toImagePoint(e);
     if (!p) return;
     const t = this.tool();
-    if (t === 'crop' && this.cropDrag) {
-      this.cropRect.set(this.resolveCrop(this.cropDrag, p));
+    if (t === 'crop' && this.crop.dragging) {
+      const buf = this.session.current();
+      this.crop.update(p, { w: buf?.width ?? 0, h: buf?.height ?? 0 }, this.cropAspect());
       return;
     }
     const dragging =
-      (t === 'heal' && this.healStroke.length > 0) ||
-      (t === 'liquify' && !!this.liquifyLast) ||
-      (t === 'clone' && !!this.cloneLast) ||
-      (t === 'retouch' && !!this.retouchLast);
+      (t === 'heal' && this.strokes.healActive) ||
+      (t === 'liquify' && this.strokes.liquifyDragging) ||
+      (t === 'clone' && this.strokes.cloneStrokeDragging) ||
+      (t === 'retouch' && this.strokes.retouchDragging);
     if (dragging) {
       const cp = this.cursorPos();
       if (cp) this.strokeTrail.update((trail) => [...trail, cp]);
     }
-    if (t === 'clone' && this.cloneLast) {
-      if (this.clonePending > 2) return;
-      this.stampAlong(this.cloneLast, p, this.brushSize() * 0.35, (q) => this.postCloneStamp(q));
-      this.cloneLast = p;
+    if (t === 'clone') this.strokes.dragClone(p, this.brushSize(), this.cloneStrength());
+    if (t === 'retouch') {
+      this.strokes.dragRetouch(p, this.brushSize(), this.retouchMode(), this.retouchStrength(), this.retouchFeather());
     }
-    if (t === 'retouch' && this.retouchLast) {
-      if (this.retouchPending > 2) return;
-      this.stampAlong(this.retouchLast, p, this.brushSize() * 0.4, (q) => this.postRetouchDab(q));
-      this.retouchLast = p;
-    }
-    if (t === 'heal' && this.healStroke.length) this.healStroke.push(p);
-    if (t === 'liquify' && this.liquifyLast) {
-      // Backpressure: if the worker is behind, let displacement accumulate
-      // into the next event instead of queueing an ever-growing backlog.
-      if (this.liquifyPending > 2) return;
-      const dx = p.x - this.liquifyLast.x;
-      const dy = p.y - this.liquifyLast.y;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) return;
-      // Split fast pointer jumps into capped sub-steps along the segment —
-      // one violent step was the "jitter"; several gentle ones read smooth.
-      const maxStep = this.brushSize() * 0.35;
-      const n = Math.min(4, Math.max(1, Math.ceil(len / maxStep)));
-      const sx = dx / n;
-      const sy = dy / n;
-      const sLen = Math.hypot(sx, sy);
-      const k = sLen > maxStep ? maxStep / sLen : 1;
-      for (let i = 0; i < n; i++) {
-        this.postLiquifyStep({
-          cx: this.liquifyLast.x + sx * i,
-          cy: this.liquifyLast.y + sy * i,
-          dx: sx * k,
-          dy: sy * k,
-        });
-      }
-      this.liquifyLast = p;
-    }
-  }
-
-  /** Evenly spaced dabs from a (exclusive) to b (inclusive), capped per event. */
-  private stampAlong(
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-    spacing: number,
-    dab: (q: { x: number; y: number }) => void,
-  ): void {
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (len === 0) return;
-    const n = Math.min(6, Math.max(1, Math.round(len / Math.max(2, spacing))));
-    for (let i = 1; i <= n; i++) {
-      dab({ x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n });
-    }
+    if (t === 'heal') this.strokes.dragHeal(p);
+    if (t === 'liquify') this.strokes.dragLiquify(p, this.brushSize(), this.liquifyMode(), this.liquifyStrength());
   }
 
   private updateCursor(e: PointerEvent): void {
@@ -596,168 +459,33 @@ export class CanvasViewport {
     this.altHeld.set(e.altKey);
   }
 
-  /** Apply a drag delta to the start rectangle per gesture mode, clamped to the image. */
-  private resolveCrop(
-    drag: { mode: CropMode; startPt: { x: number; y: number }; startRect: CropRect },
-    p: { x: number; y: number },
-  ): CropRect {
-    const buf = this.session.current();
-    const w = buf?.width ?? 0;
-    const h = buf?.height ?? 0;
-    const a = this.cropAspect();
-    const dx = p.x - drag.startPt.x;
-    const dy = p.y - drag.startPt.y;
-    const s = drag.startRect;
-
-    if (drag.mode === 'new') {
-      if (a) {
-        // Ratio-locked draw: dominant axis wins, scale to fit the image.
-        const sx = p.x >= drag.startPt.x ? 1 : -1;
-        const sy = p.y >= drag.startPt.y ? 1 : -1;
-        let rw = Math.abs(dx);
-        let rh = rw / a;
-        if (Math.abs(dy) > rh) {
-          rh = Math.abs(dy);
-          rw = rh * a;
-        }
-        const maxW = sx > 0 ? w - drag.startPt.x : drag.startPt.x;
-        const maxH = sy > 0 ? h - drag.startPt.y : drag.startPt.y;
-        const k = Math.min(1, maxW / Math.max(rw, 1e-6), maxH / Math.max(rh, 1e-6));
-        rw *= k;
-        rh *= k;
-        return {
-          x: sx > 0 ? drag.startPt.x : drag.startPt.x - rw,
-          y: sy > 0 ? drag.startPt.y : drag.startPt.y - rh,
-          width: rw,
-          height: rh,
-        };
-      }
-      return {
-        x: Math.min(drag.startPt.x, p.x),
-        y: Math.min(drag.startPt.y, p.y),
-        width: Math.abs(dx),
-        height: Math.abs(dy),
-      };
-    }
-    if (drag.mode === 'move') {
-      return {
-        x: clamp(s.x + dx, 0, w - s.width),
-        y: clamp(s.y + dy, 0, h - s.height),
-        width: s.width,
-        height: s.height,
-      };
-    }
-    // Edge/corner resize: move only the touched sides.
-    let left = s.x;
-    let top = s.y;
-    let right = s.x + s.width;
-    let bottom = s.y + s.height;
-    if (drag.mode.includes('w')) left = clamp(s.x + dx, 0, right - MIN_CROP_PX);
-    if (drag.mode.includes('e')) right = clamp(s.x + s.width + dx, left + MIN_CROP_PX, w);
-    if (drag.mode.includes('n')) top = clamp(s.y + dy, 0, bottom - MIN_CROP_PX);
-    if (drag.mode.includes('s')) bottom = clamp(s.y + s.height + dy, top + MIN_CROP_PX, h);
-
-    if (a) {
-      const m = drag.mode;
-      if (m === 'e' || m === 'w') {
-        // Width drives height, anchored at the vertical center.
-        const cy = s.y + s.height / 2;
-        let nw = right - left;
-        let nh = nw / a;
-        const maxH = 2 * Math.min(cy, h - cy);
-        if (nh > maxH) {
-          nh = maxH;
-          nw = nh * a;
-        }
-        if (m === 'w') left = right - nw;
-        else right = left + nw;
-        top = cy - nh / 2;
-        bottom = cy + nh / 2;
-      } else if (m === 'n' || m === 's') {
-        // Height drives width, anchored at the horizontal center.
-        const cx = s.x + s.width / 2;
-        let nh = bottom - top;
-        let nw = nh * a;
-        const maxW = 2 * Math.min(cx, w - cx);
-        if (nw > maxW) {
-          nw = maxW;
-          nh = nw / a;
-        }
-        if (m === 'n') top = bottom - nh;
-        else bottom = top + nh;
-        left = cx - nw / 2;
-        right = cx + nw / 2;
-      } else {
-        // Corners: the opposite corner stays fixed.
-        const ax = m.includes('w') ? s.x + s.width : s.x;
-        const ay = m.includes('n') ? s.y + s.height : s.y;
-        let nw = m.includes('w') ? ax - left : right - ax;
-        let nh = nw / a;
-        const maxW = m.includes('w') ? ax : w - ax;
-        const maxH = m.includes('n') ? ay : h - ay;
-        if (nw > maxW) {
-          nw = maxW;
-          nh = nw / a;
-        }
-        if (nh > maxH) {
-          nh = maxH;
-          nw = nh * a;
-        }
-        left = m.includes('w') ? ax - nw : ax;
-        right = left + nw;
-        top = m.includes('n') ? ay - nh : ay;
-        bottom = top + nh;
-      }
-    }
-    return { x: left, y: top, width: right - left, height: bottom - top };
-  }
-
   async onPointerUp(): Promise<void> {
-    this.panDrag.set(null);
+    this.panZoom.endDrag();
     const t = this.tool();
-    if (t === 'liquify' && this.liquifyStroked) {
-      this.liquifyStroked = false;
-      this.liquifyLast = null;
+    if (t === 'liquify' && this.strokes.liquifyStrokedFlag) {
       this.strokeTrail.set([]);
-      await this.session.commitStroke();
+      await this.strokes.commitLiquify();
     }
-    if (t === 'clone' && this.cloneStroked) {
-      this.cloneStroked = false;
-      this.cloneOffset = null;
-      this.cloneLast = null;
+    if (t === 'clone' && this.strokes.cloneStrokedFlag) {
       this.cloneDragging.set(false);
       this.strokeTrail.set([]);
-      await this.session.commitStroke();
+      await this.strokes.commitClone();
     }
-    if (t === 'retouch' && this.retouchStroked) {
-      this.retouchStroked = false;
-      this.retouchLast = null;
+    if (t === 'retouch' && this.strokes.retouchStrokedFlag) {
       this.strokeTrail.set([]);
-      await this.session.commitStroke();
+      await this.strokes.commitRetouch();
     }
-    if (t === 'heal' && this.healStroke.length) {
-      const buf = this.session.current();
-      if (buf) {
-        const mask = new Uint8Array(buf.width * buf.height);
-        for (const pt of this.healStroke) {
-          stampCircle(mask, buf.width, buf.height, pt, this.brushSize());
-        }
-        this.healStroke = [];
-        await this.session.applyHeal(mask);
-      }
+    if (t === 'heal' && this.strokes.healActive) {
+      await this.strokes.commitHeal(this.brushSize());
     }
     // A stray click (no real drag) leaves a zero-size box — restore the full box.
-    const r = this.cropRect();
-    if (r && (r.width < MIN_CROP_PX || r.height < MIN_CROP_PX) && this.cropDrag?.mode === 'new') {
+    const r = this.crop.rect();
+    if (r && (r.width < MIN_CROP_PX || r.height < MIN_CROP_PX) && this.crop.dragMode === 'new') {
       this.initCropBox(this.cropAspect());
     }
-    this.healStroke = [];
-    this.cropDrag = null;
-    this.liquifyLast = null;
-    this.cloneOffset = null;
-    this.cloneLast = null;
+    this.strokes.resetAll();
+    this.crop.end();
     this.cloneDragging.set(false);
-    this.retouchLast = null;
     this.strokeTrail.set([]);
   }
 
@@ -767,7 +495,7 @@ export class CanvasViewport {
   }
 
   async applyCrop(): Promise<void> {
-    const r = this.cropRect();
+    const r = this.crop.rect();
     if (!r || r.width < MIN_CROP_PX || r.height < MIN_CROP_PX) return;
     await this.session.apply('crop', {
       x: Math.round(r.x),
@@ -775,30 +503,11 @@ export class CanvasViewport {
       width: Math.round(r.width),
       height: Math.round(r.height),
     });
-    this.cropRect.set(null);
+    this.crop.clear();
   }
 
   cancelCrop(): void {
     this.initCropBox(this.cropAspect());
-    this.cropDrag = null;
-  }
-}
-
-function stampCircle(
-  mask: Uint8Array,
-  w: number,
-  h: number,
-  p: { x: number; y: number },
-  radius: number,
-): void {
-  const r2 = radius * radius;
-  const x0 = Math.max(0, Math.floor(p.x - radius));
-  const x1 = Math.min(w - 1, Math.ceil(p.x + radius));
-  const y0 = Math.max(0, Math.floor(p.y - radius));
-  const y1 = Math.min(h - 1, Math.ceil(p.y + radius));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      if ((x - p.x) ** 2 + (y - p.y) ** 2 <= r2) mask[y * w + x] = 255;
-    }
+    this.crop.end();
   }
 }
