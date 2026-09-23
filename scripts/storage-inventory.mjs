@@ -26,7 +26,7 @@
 /** The only safe identity for an object: one key can exist in many buckets. */
 export const objectKey = ({ backend, bucket, path }) => JSON.stringify([backend, bucket, path]);
 
-/** Buckets this deployment writes to on Supabase. Mirrors api/app.ts. */
+/** Buckets this deployment writes to on Supabase. Mirrors api/services/object-storage.ts. */
 export const SUPABASE_BUCKETS = ['media', 'uploads'];
 
 const TABLE_PAGE = 1000;
