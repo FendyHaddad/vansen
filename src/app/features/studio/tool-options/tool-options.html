@@ -10,8 +10,8 @@
               type="number"
               min="-100"
               max="100"
-              [value]="brightness()"
-              (input)="brightness.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+              [value]="ops.brightness()"
+              (input)="ops.brightness.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -19,8 +19,8 @@
           type="range"
           min="-100"
           max="100"
-          [value]="brightness()"
-          (input)="brightness.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.brightness()"
+          (input)="ops.brightness.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
@@ -32,8 +32,8 @@
               type="number"
               min="-100"
               max="100"
-              [value]="contrast()"
-              (input)="contrast.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+              [value]="ops.contrast()"
+              (input)="ops.contrast.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -41,8 +41,8 @@
           type="range"
           min="-100"
           max="100"
-          [value]="contrast()"
-          (input)="contrast.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.contrast()"
+          (input)="ops.contrast.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
@@ -54,8 +54,8 @@
               type="number"
               min="-100"
               max="100"
-              [value]="saturation()"
-              (input)="saturation.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+              [value]="ops.saturation()"
+              (input)="ops.saturation.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -63,12 +63,12 @@
           type="range"
           min="-100"
           max="100"
-          [value]="saturation()"
-          (input)="saturation.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.saturation()"
+          (input)="ops.saturation.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
-      <button type="button" class="apply-btn" (click)="applyAdjust()">Apply</button>
+      <button type="button" class="apply-btn" (click)="ops.applyAdjust()">Apply</button>
     </div>
   }
   @case ('sharpen') {
@@ -82,8 +82,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="amount()"
-              (input)="amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.amount()"
+              (input)="ops.amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -91,12 +91,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="amount()"
-          (input)="amount.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.amount()"
+          (input)="ops.amount.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
-      <button type="button" class="apply-btn" (click)="applySharpen()">Apply sharpen</button>
+      <button type="button" class="apply-btn" (click)="ops.applySharpen()">Apply sharpen</button>
     </div>
   }
   @case ('smooth') {
@@ -110,8 +110,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="amount()"
-              (input)="amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.amount()"
+              (input)="ops.amount.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -119,12 +119,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="amount()"
-          (input)="amount.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.amount()"
+          (input)="ops.amount.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Changes preview live — Apply makes them permanent.</p>
-      <button type="button" class="apply-btn" (click)="applySmooth()">Apply smooth</button>
+      <button type="button" class="apply-btn" (click)="ops.applySmooth()">Apply smooth</button>
     </div>
   }
   @case ('crop') {
@@ -135,19 +135,19 @@
             type="button"
             class="preset-btn"
             [class.preset-active]="cropAspect() === p.value"
-            (click)="selectPreset(p.value)"
+            (click)="ops.selectPreset(p.value)"
           >
             {{ p.label }}
           </button>
         }
-        <button type="button" class="preset-btn" (click)="selectOriginal()">Original</button>
+        <button type="button" class="preset-btn" (click)="ops.selectOriginal()">Original</button>
       </div>
       <p class="opt-hint">Drag the box or its handles to fine-tune the crop.</p>
       <div class="preset-grid">
-        <button type="button" class="preset-btn" (click)="applyRotate()">Rotate 90° ↻</button>
-        <button type="button" class="preset-btn" (click)="applyRotateCcw()">Rotate 90° ↺</button>
-        <button type="button" class="preset-btn" (click)="applyFlip('h')">Flip horizontal</button>
-        <button type="button" class="preset-btn" (click)="applyFlip('v')">Flip vertical</button>
+        <button type="button" class="preset-btn" (click)="ops.applyRotate()">Rotate 90° ↻</button>
+        <button type="button" class="preset-btn" (click)="ops.applyRotateCcw()">Rotate 90° ↺</button>
+        <button type="button" class="preset-btn" (click)="ops.applyFlip('h')">Flip horizontal</button>
+        <button type="button" class="preset-btn" (click)="ops.applyFlip('v')">Flip vertical</button>
       </div>
       <label>
         <span class="opt-row">
@@ -158,8 +158,8 @@
               type="number"
               min="-45"
               max="45"
-              [value]="straightenDeg()"
-              (input)="straightenDeg.set(toNum($any($event.target).value, -45, 45)); schedulePreview()"
+              [value]="ops.straightenDeg()"
+              (input)="ops.straightenDeg.set(toNum($any($event.target).value, -45, 45)); schedulePreview()"
             />°
           </span>
         </span>
@@ -167,13 +167,13 @@
           type="range"
           min="-45"
           max="45"
-          [value]="straightenDeg()"
-          (input)="straightenDeg.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.straightenDeg()"
+          (input)="ops.straightenDeg.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Rotate and flip apply instantly. Straighten trims the edges to keep the frame full.</p>
-      @if (straightenDeg() !== 0) {
-        <button type="button" class="apply-btn" (click)="applyStraighten()">
+      @if (ops.straightenDeg() !== 0) {
+        <button type="button" class="apply-btn" (click)="ops.applyStraighten()">
           Apply straighten
         </button>
       }
@@ -186,29 +186,29 @@
           <button
             type="button"
             class="preset-btn"
-            [class.preset-active]="filterPreset() === f.id"
-            (click)="selectFilter(f.id)"
+            [class.preset-active]="ops.filterPreset() === f.id"
+            (click)="ops.selectFilter(f.id)"
           >
             {{ f.label }}
           </button>
         }
       </div>
-      @if (filterPreset() === 'duotone') {
+      @if (ops.filterPreset() === 'duotone') {
         <div class="duotone-row">
           <label class="duotone-swatch">
             Shadows
             <input
               type="color"
-              [value]="rgbToHex(duotoneA())"
-              (input)="setDuotone('a', $any($event.target).value)"
+              [value]="ops.rgbToHex(ops.duotoneA())"
+              (input)="ops.setDuotone('a', $any($event.target).value)"
             />
           </label>
           <label class="duotone-swatch">
             Highlights
             <input
               type="color"
-              [value]="rgbToHex(duotoneB())"
-              (input)="setDuotone('b', $any($event.target).value)"
+              [value]="ops.rgbToHex(ops.duotoneB())"
+              (input)="ops.setDuotone('b', $any($event.target).value)"
             />
           </label>
         </div>
@@ -222,8 +222,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="filterIntensity()"
-              (input)="filterIntensity.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.filterIntensity()"
+              (input)="ops.filterIntensity.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -231,12 +231,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="filterIntensity()"
-          (input)="filterIntensity.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.filterIntensity()"
+          (input)="ops.filterIntensity.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Pick a look, dial in how strong — Apply makes it permanent.</p>
-      <button type="button" class="apply-btn" (click)="applyFilter()">Apply filter</button>
+      <button type="button" class="apply-btn" (click)="ops.applyFilter()">Apply filter</button>
     </div>
   }
   @case ('enhance') {
@@ -250,8 +250,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="enhanceStrength()"
-              (input)="enhanceStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.enhanceStrength()"
+              (input)="ops.enhanceStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -259,12 +259,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="enhanceStrength()"
-          (input)="enhanceStrength.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.enhanceStrength()"
+          (input)="ops.enhanceStrength.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Auto contrast and white balance — previewing already, tune the strength to taste.</p>
-      <button type="button" class="apply-btn" (click)="applyEnhance()">Apply enhance</button>
+      <button type="button" class="apply-btn" (click)="ops.applyEnhance()">Apply enhance</button>
     </div>
   }
   @case ('dehaze') {
@@ -278,8 +278,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="dehazeStrength()"
-              (input)="dehazeStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.dehazeStrength()"
+              (input)="ops.dehazeStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -287,12 +287,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="dehazeStrength()"
-          (input)="dehazeStrength.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.dehazeStrength()"
+          (input)="ops.dehazeStrength.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Cuts fog and haze to bring back contrast and color — great on misty or underwater shots.</p>
-      <button type="button" class="apply-btn" (click)="applyDehaze()">Apply dehaze</button>
+      <button type="button" class="apply-btn" (click)="ops.applyDehaze()">Apply dehaze</button>
     </div>
   }
   @case ('portraitsmooth') {
@@ -306,8 +306,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="portraitStrength()"
-              (input)="portraitStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
+              [value]="ops.portraitStrength()"
+              (input)="ops.portraitStrength.set(toNum($any($event.target).value, 0, 100)); schedulePreview()"
             />%
           </span>
         </span>
@@ -315,12 +315,12 @@
           type="range"
           min="0"
           max="100"
-          [value]="portraitStrength()"
-          (input)="portraitStrength.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.portraitStrength()"
+          (input)="ops.portraitStrength.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Softens pores and blemishes on skin while keeping eyes, hair and edges sharp.</p>
-      <button type="button" class="apply-btn" (click)="applyPortrait()">Apply smoothing</button>
+      <button type="button" class="apply-btn" (click)="ops.applyPortrait()">Apply smoothing</button>
     </div>
   }
   @case ('erase') {
@@ -329,23 +329,23 @@
         Tap the thing you want gone — we select it and fill the space behind it.
         Runs on your device — free, nothing leaves your browser.
       </p>
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download,
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
       }
-      @if (healPct() !== null) {
+      @if (engineTools.healPct() !== null) {
         <p class="opt-hint">
           Preparing fill engine — one-time download,
-          <span class="num">{{ healPct() }}%</span>
+          <span class="num">{{ engineTools.healPct() }}%</span>
         </p>
       }
-      @if (engineBusy()) {
+      @if (engineTools.engineBusy()) {
         <p class="opt-hint">Working…</p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
       <p class="opt-hint">Every tap removes one object. Undo brings it back.</p>
     </div>
@@ -362,8 +362,8 @@
               type="number"
               min="0"
               max="254"
-              [value]="levelsBlack()"
-              (input)="levelsBlack.set(toNum($any($event.target).value, 0, 254)); schedulePreview()"
+              [value]="ops.levelsBlack()"
+              (input)="ops.levelsBlack.set(toNum($any($event.target).value, 0, 254)); schedulePreview()"
             />
           </span>
         </span>
@@ -371,8 +371,8 @@
           type="range"
           min="0"
           max="254"
-          [value]="levelsBlack()"
-          (input)="levelsBlack.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.levelsBlack()"
+          (input)="ops.levelsBlack.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
@@ -384,8 +384,8 @@
               type="number"
               min="1"
               max="255"
-              [value]="levelsWhite()"
-              (input)="levelsWhite.set(toNum($any($event.target).value, 1, 255)); schedulePreview()"
+              [value]="ops.levelsWhite()"
+              (input)="ops.levelsWhite.set(toNum($any($event.target).value, 1, 255)); schedulePreview()"
             />
           </span>
         </span>
@@ -393,25 +393,25 @@
           type="range"
           min="1"
           max="255"
-          [value]="levelsWhite()"
-          (input)="levelsWhite.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.levelsWhite()"
+          (input)="ops.levelsWhite.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
         <span class="opt-row">
           Midtones
-          <span class="num-wrap"><span class="num num-ro">{{ gammaLabel() }}</span></span>
+          <span class="num-wrap"><span class="num num-ro">{{ ops.gammaLabel() }}</span></span>
         </span>
         <input
           type="range"
           min="20"
           max="300"
-          [value]="levelsGamma()"
-          (input)="levelsGamma.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.levelsGamma()"
+          (input)="ops.levelsGamma.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Pull Blacks and Whites toward the ends of the histogram; Midtones brightens or darkens between them.</p>
-      <button type="button" class="apply-btn" (click)="applyLevels()">Apply levels</button>
+      <button type="button" class="apply-btn" (click)="ops.applyLevels()">Apply levels</button>
     </div>
   }
   @case ('clone') {
@@ -556,17 +556,17 @@
         Strips the background and leaves a soft-edged transparent cut-out.
         Runs on your device — free, nothing leaves your browser.
       </p>
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download,
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
-      <button type="button" class="apply-btn" [disabled]="engineBusy()" (click)="runCutout()">
-        {{ engineBusy() ? 'Working…' : 'Remove background' }}
+      <button type="button" class="apply-btn" [disabled]="engineTools.engineBusy()" (click)="engineTools.runCutout()">
+        {{ engineTools.engineBusy() ? 'Working…' : 'Remove background' }}
       </button>
       <p class="opt-hint">Export as PNG or WebP to keep the transparency.</p>
     </div>
@@ -582,8 +582,8 @@
               type="number"
               min="0"
               max="100"
-              [value]="bokehStrength()"
-              (input)="onBokehStrength(toNum($any($event.target).value, 0, 100))"
+              [value]="engineTools.bokehStrength()"
+              (input)="engineTools.onBokehStrength(toNum($any($event.target).value, 0, 100))"
             />%
           </span>
         </span>
@@ -591,14 +591,14 @@
           type="range"
           min="0"
           max="100"
-          [value]="bokehStrength()"
-          (input)="onBokehStrength(+$any($event.target).value)"
+          [value]="engineTools.bokehStrength()"
+          (input)="engineTools.onBokehStrength(+$any($event.target).value)"
         />
       </label>
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download,
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
       } @else {
         <p class="opt-hint">
@@ -606,41 +606,41 @@
           like a wide-open lens.
         </p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
-      <button type="button" class="apply-btn" [disabled]="engineBusy()" (click)="applyBokeh()">
-        {{ engineBusy() ? 'Working…' : 'Apply bokeh' }}
+      <button type="button" class="apply-btn" [disabled]="engineTools.engineBusy()" (click)="engineTools.applyBokeh()">
+        {{ engineTools.engineBusy() ? 'Working…' : 'Apply bokeh' }}
       </button>
     </div>
   }
   @case ('upscale') {
     <div class="opts">
-      @if (imageSize(); as s) {
+      @if (engineTools.imageSize(); as s) {
         <p class="opt-hint">
           <span class="num">{{ s.w }}×{{ s.h }}</span> →
           <span class="num">{{ s.w * 2 }}×{{ s.h * 2 }}</span> — sharper edges and detail,
           on your device, free.
         </p>
       }
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download,
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
       }
-      @if (upscalePct() !== null) {
+      @if (engineTools.upscalePct() !== null) {
         <p class="opt-hint">
           Upscaling —
-          <span class="num">{{ upscalePct() }}%</span>
+          <span class="num">{{ engineTools.upscalePct() }}%</span>
         </p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
-      @if (upscaleTooLarge()) {
+      @if (engineTools.upscaleTooLarge()) {
         <p class="opt-hint">Image too large for on-device upscaling — the limit is 16 MP (4096×4096).</p>
-      } @else if (imageSize(); as s) {
+      } @else if (engineTools.imageSize(); as s) {
         @if (s.w * s.h > 4000000) {
           <p class="opt-hint">Big image — this can take a few minutes on-device.</p>
         }
@@ -648,10 +648,10 @@
       <button
         type="button"
         class="apply-btn"
-        [disabled]="engineBusy() || upscaleTooLarge()"
-        (click)="runUpscale()"
+        [disabled]="engineTools.engineBusy() || engineTools.upscaleTooLarge()"
+        (click)="engineTools.runUpscale()"
       >
-        {{ engineBusy() ? 'Working…' : 'Upscale 2×' }}
+        {{ engineTools.engineBusy() ? 'Working…' : 'Upscale 2×' }}
       </button>
     </div>
   }
@@ -661,24 +661,24 @@
         Fixes motion and lens blur with NAFNet — a real deblur model, not an unsharp
         mask. Runs on your device, free.
       </p>
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download (~88 MB),
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
       }
-      @if (deblurPct() !== null) {
+      @if (engineTools.deblurPct() !== null) {
         <p class="opt-hint">
           Sharpening —
-          <span class="num">{{ deblurPct() }}%</span>
+          <span class="num">{{ engineTools.deblurPct() }}%</span>
         </p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
-      @if (deblurTooLarge()) {
+      @if (engineTools.deblurTooLarge()) {
         <p class="opt-hint">Image too large for on-device sharpening — the limit is 16 MP (4096×4096).</p>
-      } @else if (imageSize(); as s) {
+      } @else if (engineTools.imageSize(); as s) {
         @if (s.w * s.h > 4000000) {
           <p class="opt-hint">Big image — this can take a few minutes on-device.</p>
         }
@@ -686,23 +686,23 @@
       <button
         type="button"
         class="apply-btn"
-        [disabled]="engineBusy() || deblurTooLarge()"
-        (click)="runAiSharpen()"
+        [disabled]="engineTools.engineBusy() || engineTools.deblurTooLarge()"
+        (click)="engineTools.runAiSharpen()"
       >
-        {{ engineBusy() ? 'Working…' : 'Sharpen with AI' }}
+        {{ engineTools.engineBusy() ? 'Working…' : 'Sharpen with AI' }}
       </button>
     </div>
   }
   @case ('select') {
     <div class="opts">
-      @if (enginePct() !== null) {
+      @if (engineTools.enginePct() !== null) {
         <p class="opt-hint">
           Preparing engine — one-time download,
-          <span class="num">{{ enginePct() }}%</span>
+          <span class="num">{{ engineTools.enginePct() }}%</span>
         </p>
-      } @else if (engineBusy()) {
+      } @else if (engineTools.engineBusy()) {
         <p class="opt-hint">Finding the object…</p>
-      } @else if (!selMask()) {
+      } @else if (!engineTools.selMask()) {
         <p class="opt-hint">
           Click any object in the image — it gets outlined automatically. Then refine
           the selection, remove it, cut it out, or edit it with AI.
@@ -713,58 +713,58 @@
           parts it grabbed by mistake.
         </p>
       }
-      @if (engineError()) {
-        <p class="opt-hint opt-error">{{ engineError() }}</p>
+      @if (engineTools.engineError()) {
+        <p class="opt-hint opt-error">{{ engineTools.engineError() }}</p>
       }
-      @if (selMask()) {
+      @if (engineTools.selMask()) {
         <div class="preset-grid">
           <button
             type="button"
             class="preset-btn"
-            [class.preset-active]="selMode() === 'add'"
-            (click)="selMode.set('add')"
+            [class.preset-active]="engineTools.selMode() === 'add'"
+            (click)="engineTools.selMode.set('add')"
           >
             + Add
           </button>
           <button
             type="button"
             class="preset-btn"
-            [class.preset-active]="selMode() === 'subtract'"
-            (click)="selMode.set('subtract')"
+            [class.preset-active]="engineTools.selMode() === 'subtract'"
+            (click)="engineTools.selMode.set('subtract')"
           >
             − Subtract
           </button>
         </div>
-        <button type="button" class="apply-btn" [disabled]="engineBusy()" (click)="selectRemove()">
+        <button type="button" class="apply-btn" [disabled]="engineTools.engineBusy()" (click)="engineTools.selectRemove()">
           Remove object
         </button>
         <div class="preset-grid">
-          <button type="button" class="preset-btn" [disabled]="engineBusy()" (click)="selectCutout()">
+          <button type="button" class="preset-btn" [disabled]="engineTools.engineBusy()" (click)="engineTools.selectCutout()">
             Cut out object
           </button>
-          <button type="button" class="preset-btn" (click)="selectClear()">Clear</button>
+          <button type="button" class="preset-btn" (click)="engineTools.selectClear()">Clear</button>
         </div>
         <p class="opt-hint">
           AI on the selection — changes ONLY the selected area, the rest of the image
           stays untouched.
         </p>
-        <button type="button" class="apply-btn" [disabled]="engineBusy()" (click)="selectAiRemove()">
-          AI Remove · {{ aiRemovePrice }} cr
+        <button type="button" class="apply-btn" [disabled]="engineTools.engineBusy()" (click)="engineTools.selectAiRemove()">
+          AI Remove · {{ engineTools.aiRemovePrice }} cr
         </button>
         <input
           class="fill-prompt"
           type="text"
           placeholder="What should replace the selection?"
-          [value]="selPrompt()"
-          (input)="selPrompt.set($any($event.target).value)"
+          [value]="engineTools.selPrompt()"
+          (input)="engineTools.selPrompt.set($any($event.target).value)"
         />
         <button
           type="button"
           class="apply-btn"
-          [disabled]="engineBusy() || !selPrompt().trim()"
-          (click)="selectAiFill()"
+          [disabled]="engineTools.engineBusy() || !engineTools.selPrompt().trim()"
+          (click)="engineTools.selectAiFill()"
         >
-          AI Fill · {{ aiFillPrice }} cr
+          AI Fill · {{ engineTools.aiFillPrice }} cr
         </button>
       }
     </div>
@@ -780,8 +780,8 @@
               type="number"
               min="-100"
               max="100"
-              [value]="perspV()"
-              (input)="perspV.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+              [value]="ops.perspV()"
+              (input)="ops.perspV.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
             />
           </span>
         </span>
@@ -789,8 +789,8 @@
           type="range"
           min="-100"
           max="100"
-          [value]="perspV()"
-          (input)="perspV.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.perspV()"
+          (input)="ops.perspV.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <label>
@@ -802,8 +802,8 @@
               type="number"
               min="-100"
               max="100"
-              [value]="perspH()"
-              (input)="perspH.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
+              [value]="ops.perspH()"
+              (input)="ops.perspH.set(toNum($any($event.target).value, -100, 100)); schedulePreview()"
             />
           </span>
         </span>
@@ -811,16 +811,16 @@
           type="range"
           min="-100"
           max="100"
-          [value]="perspH()"
-          (input)="perspH.set(+$any($event.target).value); schedulePreview()"
+          [value]="ops.perspH()"
+          (input)="ops.perspH.set(+$any($event.target).value); schedulePreview()"
         />
       </label>
       <p class="opt-hint">Straightens leaning buildings and skewed shots — drag until the lines stand upright.</p>
       <button
         type="button"
         class="apply-btn"
-        [disabled]="perspV() === 0 && perspH() === 0"
-        (click)="applyPerspective()"
+        [disabled]="ops.perspV() === 0 && ops.perspH() === 0"
+        (click)="ops.applyPerspective()"
       >
         Apply perspective
       </button>
@@ -915,10 +915,10 @@
           (input)="brushSize.set(+$any($event.target).value)"
         />
       </label>
-      @if (healPct() !== null) {
+      @if (engineTools.healPct() !== null) {
         <p class="opt-hint">
           Preparing heal engine — one-time download,
-          <span class="num">{{ healPct() }}%</span>
+          <span class="num">{{ engineTools.healPct() }}%</span>
         </p>
       } @else {
         <p class="opt-hint">Paint over a blemish, then release to heal.</p>
