@@ -6,6 +6,7 @@ import {
   lucideActivity,
   lucideArrowLeft,
   lucideCreditCard,
+  lucidePlugZap,
   lucideSlidersHorizontal,
   lucideUser,
 } from '@ng-icons/lucide';
@@ -17,8 +18,9 @@ import { ProfileTab } from './profile-tab/profile-tab';
 import { BillingTab } from './billing-tab/billing-tab';
 import { UsageTab } from './usage-tab/usage-tab';
 import { PreferencesTab } from './preferences-tab/preferences-tab';
+import { ConnectedTab } from './connected-tab/connected-tab';
 
-type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
+type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences' | 'connected';
 
 @Component({
   selector: 'app-settings-page',
@@ -34,6 +36,7 @@ type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
     BillingTab,
     UsageTab,
     PreferencesTab,
+    ConnectedTab,
   ],
   providers: [
     provideIcons({
@@ -42,6 +45,7 @@ type SettingsTab = 'profile' | 'billing' | 'usage' | 'preferences';
       lucideCreditCard,
       lucideActivity,
       lucideSlidersHorizontal,
+      lucidePlugZap,
     }),
   ],
 })
@@ -70,12 +74,24 @@ export class SettingsPage {
       icon: 'lucideSlidersHorizontal',
       hint: 'Defaults for the workspace',
     },
+    {
+      id: 'connected',
+      label: 'Connected assistants',
+      icon: 'lucidePlugZap',
+      hint: 'Claude, ChatGPT and MCP',
+    },
   ];
 
   constructor() {
     // Deep link: the workspace "Buy credits" entry points at ?tab=billing.
     const tab = inject(ActivatedRoute).snapshot.queryParamMap.get('tab');
-    if (tab === 'billing' || tab === 'usage' || tab === 'preferences' || tab === 'profile') {
+    if (
+      tab === 'billing' ||
+      tab === 'usage' ||
+      tab === 'preferences' ||
+      tab === 'profile' ||
+      tab === 'connected'
+    ) {
       this.active.set(tab);
     }
   }
