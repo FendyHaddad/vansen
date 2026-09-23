@@ -35,7 +35,7 @@ import type {
   ModelKind,
   PersonaSlot,
 } from './model-families';
-import { STYLE_PRESETS } from './style-presets';
+import { STYLE_CATEGORY_TITLES, STYLE_PRESETS } from './style-presets';
 import { TREND_PRESETS } from './trend-presets';
 import { ENTITLEMENTS } from './entitlements';
 
@@ -106,10 +106,10 @@ export interface Catalog {
   families: CatalogFamily[];
   flat: {
     editTools: CatalogEditTool[];
-    upscale: { credits: number; enabled: boolean };
+    upscale: { credits: number; enabled: boolean; plan: CatalogPlan };
     persona: CatalogPersona;
   };
-  styles: { id: string; label: string; category: string; thumb: string }[];
+  styles: { id: string; label: string; category: string; categoryLabel: string; thumb: string }[];
   trends: { id: string; label: string; prompt: string; aspectRatio: string | null; thumb: string }[];
   toolPlans: Record<string, CatalogPlan>;
 }
@@ -271,10 +271,20 @@ export function buildCatalog(rows: ModelRow[], families: ModelFamily[] = MODEL_F
         enabled: byId.get(tool.id)?.enabled === true,
         plan: planOf(byId.get(tool.id)),
       })),
-      upscale: { credits: upscaleCreditCost(), enabled: byId.get(UPSCALER.id)?.enabled === true },
+      upscale: {
+        credits: upscaleCreditCost(),
+        enabled: byId.get(UPSCALER.id)?.enabled === true,
+        plan: planOf(byId.get(UPSCALER.id)),
+      },
       persona: personaEntry(byId.get(PERSONA_GEN.id)),
     },
-    styles: STYLE_PRESETS.map((s) => ({ id: s.id, label: s.name, category: s.category, thumb: s.thumb })),
+    styles: STYLE_PRESETS.map((s) => ({
+      id: s.id,
+      label: s.name,
+      category: s.category,
+      categoryLabel: STYLE_CATEGORY_TITLES[s.category],
+      thumb: s.thumb,
+    })),
     trends: TREND_PRESETS.map((t) => ({
       id: t.id,
       label: t.name,

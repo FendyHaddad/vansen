@@ -1789,20 +1789,26 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
     // Read-only. Progress used to be produced by polling providers from inside
     // this request, which meant a closed tab stranded the job until a timeout
     // refunded it. The worker drives every job now; this only reports.
-    const { data: freshJobs } = await admin
+    // An empty list on a failed read tells the client its pending work
+    // vanished, so it stops watching. A failure has to say it failed.
+    const jobsUnavailable = (error: { message: string }) => {
+      logError(c, "jobs_read_failed", new Error(error.message));
+      return fail(c, 503, "jobs_unavailable", "Could not check your jobs. Try again.");
+    };
+    const { data: freshJobs, error: jobsError } = await admin
       .from("jobs")
       .select(
         "id,generation_id,progress,phase,claimed_at,created_at,queue_position",
       )
       .eq("user_id", userId)
       .in("generation_id", ids);
+    if (jobsError) return jobsUnavailable(jobsError);
     const jobsByGen = new Map<string, JobRow>(
       (freshJobs ?? []).map((j) => [j.generation_id, j as JobRow]),
     );
-    const { data: gens } = await admin.from("generations").select("*").eq(
-      "user_id",
-      userId,
-    ).in("id", ids).is("deleted_at", null);
+    const { data: gens, error: gensError } = await admin.from("generations")
+      .select("*").eq("user_id", userId).in("id", ids).is("deleted_at", null);
+    if (gensError) return jobsUnavailable(gensError);
     return c.json({ items: await toGenerationDtos(gens ?? [], jobsByGen) });
   });
 

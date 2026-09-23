@@ -10,7 +10,7 @@ import { CATALOG_VERSION, creditCost, familyById, MODEL_FAMILIES } from './_shar
 import type { ModelFamily } from './_shared/model-families.ts';
 import { normalizeGenerationRequest, quote } from './_shared/generation-request.ts';
 import { validateSettings } from './services/request-validation.ts';
-import { STYLE_PRESETS } from './_shared/style-presets.ts';
+import { STYLE_CATEGORY_TITLES, STYLE_PRESETS } from './_shared/style-presets.ts';
 import { TREND_PRESETS } from './_shared/trend-presets.ts';
 
 const ALL_ON = MODEL_FAMILIES.map((f) => ({ id: f.id, enabled: true, min_plan: 'studio' }));
@@ -127,6 +127,14 @@ Deno.test('the models table decides enabled and plan; a missing row is off', () 
   assertEquals(catalog.flat.persona.enabled, false);
 });
 
+Deno.test('cloud upscale carries the upscaler row plan; a missing row is studio', () => {
+  const pro = buildCatalog([{ id: 'upscaler', enabled: true, min_plan: 'pro' }]);
+  assertEquals(pro.flat.upscale, { credits: 7, enabled: true, plan: 'pro' });
+  const studio = buildCatalog([{ id: 'upscaler', enabled: true, min_plan: 'studio' }]);
+  assertEquals(studio.flat.upscale.plan, 'studio');
+  assertEquals(buildCatalog([]).flat.upscale.plan, 'studio');
+});
+
 Deno.test('reference slots follow the catalog', () => {
   const max = Object.fromEntries(CATALOG.families.map((f) => [f.id, f.maxReferences]));
   assertEquals(max['flux'], 0);
@@ -173,12 +181,19 @@ Deno.test('flat prices are the fixed retail prices', () => {
   assertEquals(CATALOG.flat.persona.creditsPerImage, 46);
 });
 
+Deno.test('every served style names its category title', () => {
+  for (const style of CATALOG.styles) {
+    assertEquals(style.categoryLabel, STYLE_CATEGORY_TITLES[style.category as keyof typeof STYLE_CATEGORY_TITLES]);
+  }
+});
+
 Deno.test('styles, trends and tool plans ride along as data', () => {
   assertEquals(CATALOG.styles.length, STYLE_PRESETS.length);
   assertEquals(CATALOG.styles[0], {
     id: STYLE_PRESETS[0].id,
     label: STYLE_PRESETS[0].name,
     category: STYLE_PRESETS[0].category,
+    categoryLabel: STYLE_CATEGORY_TITLES[STYLE_PRESETS[0].category],
     thumb: STYLE_PRESETS[0].thumb,
   });
   assertEquals(CATALOG.trends.length, TREND_PRESETS.length);

@@ -21,7 +21,7 @@ Process (owner, 2026-09-23: faster): fewer, larger tasks, run in parallel worktr
   - Request: `POST /generations {op:'upscale', parentId, prompt, settings, batch:1}`.
   - Family: `upscaler`, provider fal clarity-upscaler.
   - Price: `/catalog` `flat.upscale {credits:7, enabled}`.
-  - Plan: `ENTITLEMENTS.upscale = 'pro'`, served as `toolPlans.upscale`. The gateway refuses other plans with `pro_required`.
+  - Plan: plan = `models.min_plan` for `upscaler` (studio), served as `flat.upscale.plan`; `ENTITLEMENTS.upscale` is the local Swin2SR tool (decided 2026-09-23 after audit: the web sells cloud upscale to Studio).
 - **Styles.**
   - The request carries `style: <id>`. The gateway appends the modifier to the prompt and returns 400 `invalid_style` for an unknown id.
   - Styles are free.
@@ -62,7 +62,7 @@ Process (owner, 2026-09-23: faster): fewer, larger tasks, run in parallel worktr
 **Task B: cloud upscale + parent link** (generation detail).
 - **Upscale action.** On a done image item that is neither a video nor a Studio Edit mask, show an Upscale action priced at `flat.upscale.credits`.
   - Disable it when `flat.upscale.enabled` is false, and show the same "temporarily unavailable" notice used for disabled models.
-  - Lock it behind `toolPlans.upscale` using the existing plan-lock pattern and upgrade prompt.
+  - Lock it behind `flat.upscale.plan` using the existing plan-lock pattern and upgrade prompt.
   - Submit `op:'upscale'`, `parentId`, the item's `prompt` and `settings`, `batch:1` and `catalogVersion`.
   - The new pending item joins the library and the job poller. Credits update from the response.
   - Errors go through `apiErrorText` (`pro_required`, `insufficient_credits`, `model_disabled`).
