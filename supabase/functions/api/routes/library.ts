@@ -1,0 +1,122 @@
+// Library reads: GET /generations (the paged grid, thumbnails only),
+// GET /generations/:id (one item, fully signed) and
+// GET /generations/:id/versions (its version chain, oldest first).
+// Tombstoned rows (deleted_at set) are never returned.
+import type { ApiContext, App } from "../lib/context.ts";
+import { fail } from "../lib/http.ts";
+import {
+  decodeCursor,
+  encodeCursor,
+  MAX_PAGE,
+  pageSize,
+  versionChain,
+} from "../lib/paging.ts";
+
+export function registerLibraryReadRoutes(app: App, ctx: ApiContext): void {
+  const { admin, toGenerationDto, toGenerationDtos } = ctx;
+
+  /** Newest-first keyset page over `generations`, one extra row for "is there more?". */
+  function pageQuery(
+    userId: string,
+    limit: number,
+    cursor: { createdAt: string; id: string } | null,
+  ) {
+    let query = admin
+      .from("generations")
+      .select("*")
+      .eq("user_id", userId)
+      // A tombstoned row is gone as far as its owner is concerned; it exists
+      // only until its job settles and the cleanup worker has its bytes.
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit + 1);
+    if (!cursor) return query;
+    query = query.or(
+      `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+    );
+    return query;
+  }
+
+  app.get("/generations", async (c) => {
+    const userId = c.get("userId") as string;
+    const limit = pageSize(c.req.query("limit"));
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
+    }
+
+    const { data, error } = await pageQuery(userId, limit, cursor);
+    if (error) return fail(c, 400, "query_failed", error.message);
+
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return c.json({
+      items: await toGenerationDtos(page, new Map(), { thumbsOnly: true }),
+      nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
+    });
+  });
+
+  /**
+   * One item, fully signed. The library is paged now, so an item the client
+   * wants — a deep link, an edit parent — may never have been in a loaded page.
+   */
+  app.get("/generations/:id", async (c) => {
+    const { data } = await admin
+      .from("generations")
+      .select("*")
+      .eq("id", c.req.param("id"))
+      .eq("user_id", c.get("userId") as string)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!data) return fail(c, 404, "not_found", "That item does not exist.");
+    return c.json({ item: await toGenerationDto(data) });
+  });
+
+  /**
+   * The version chain rooted at one item, oldest first. The client used to
+   * assemble this from whatever happened to be loaded, which silently lost
+   * ancestors once the library paged.
+   */
+  app.get("/generations/:id/versions", async (c) => {
+    const userId = c.get("userId") as string;
+    const limit = pageSize(c.req.query("limit"));
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
+    }
+
+    const { data: root } = await admin
+      .from("generations")
+      .select("*")
+      .eq("id", c.req.param("id"))
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!root) return fail(c, 404, "not_found", "That item does not exist.");
+
+    const { data, error } = await admin
+      .from("generations")
+      .select("*")
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(MAX_PAGE * 4);
+    if (error) return fail(c, 400, "query_failed", error.message);
+
+    const chain = versionChain((data ?? []) as Record<string, unknown>[], root);
+    const start = cursor
+      ? chain.findIndex((r) => String(r.id) === cursor.id) + 1
+      : 0;
+    const page = chain.slice(start, start + limit);
+    const hasMore = start + limit < chain.length;
+    return c.json({
+      items: await toGenerationDtos(page),
+      nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,
+    });
+  });
+}
