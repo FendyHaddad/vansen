@@ -6,7 +6,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 export type ErrCtx = {
   req: { url: string; method: string };
-  get: (k: "userId" | "requestId") => string | undefined;
+  get: (k: "userId" | "requestId" | "client") => string | undefined;
 };
 
 export function createErrorLog(admin: SupabaseClient) {
@@ -26,6 +26,8 @@ export function createErrorLog(admin: SupabaseClient) {
         stack: (e.stack ?? "").slice(0, 4000),
         user_id: c.get("userId") ?? null,
         request_id: c.get("requestId") ?? null,
+        // Only the server-set tag ('mcp'); header platforms are not trusted here.
+        ...(c.get("client") ? { client: c.get("client") } : {}),
       })
       .then(({ error }) => {
         if (error) console.error("app_errors insert failed:", error.message);

@@ -28,6 +28,7 @@ import { registerBillingReconcileRoutes } from "./routes/billing-reconcile.ts";
 import { registerUploadRoutes } from "./routes/uploads.ts";
 import { registerPersonaRoutes } from "./routes/personas.ts";
 import { registerLibraryWriteRoutes } from "./routes/library-writes.ts";
+import { registerMcpPublicRoutes, registerMcpRoutes } from "./routes/mcp.ts";
 
 export type { ApiDeps, ApiEnv, ReleaseIdentity } from "./lib/deps.ts";
 
@@ -39,6 +40,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   // is the contract: public routes before auth, auth before everything else.
   registerRequestMiddleware(app, ctx);
   registerPublicRoutes(app, ctx);
+  registerMcpPublicRoutes(app, ctx);
   registerAuthMiddleware(app, ctx);
   registerProfileRoutes(app, ctx);
   registerLedgerRoutes(app, ctx);
@@ -52,6 +54,7 @@ export function createApp(deps: ApiDeps): Hono<Vars> {
   registerUploadRoutes(app, ctx);
   registerPersonaRoutes(app, ctx);
   registerLibraryWriteRoutes(app, ctx);
+  registerMcpRoutes(app, ctx);
 
   return app;
 }

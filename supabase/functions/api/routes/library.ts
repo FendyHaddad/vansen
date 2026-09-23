@@ -13,30 +13,7 @@ import {
 } from "../lib/paging.ts";
 
 export function registerLibraryReadRoutes(app: App, ctx: ApiContext): void {
-  const { admin, toGenerationDto, toGenerationDtos } = ctx;
-
-  /** Newest-first keyset page over `generations`, one extra row for "is there more?". */
-  function pageQuery(
-    userId: string,
-    limit: number,
-    cursor: { createdAt: string; id: string } | null,
-  ) {
-    let query = admin
-      .from("generations")
-      .select("*")
-      .eq("user_id", userId)
-      // A tombstoned row is gone as far as its owner is concerned; it exists
-      // only until its job settles and the cleanup worker has its bytes.
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(limit + 1);
-    if (!cursor) return query;
-    query = query.or(
-      `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
-    );
-    return query;
-  }
+  const { admin, libraryPage, toGenerationDto, toGenerationDtos } = ctx;
 
   app.get("/generations", async (c) => {
     const userId = c.get("userId") as string;
@@ -47,12 +24,10 @@ export function registerLibraryReadRoutes(app: App, ctx: ApiContext): void {
       return fail(c, 400, "invalid_cursor", "That page marker is not valid.");
     }
 
-    const { data, error } = await pageQuery(userId, limit, cursor);
-    if (error) return fail(c, 400, "query_failed", error.message);
+    const read = await libraryPage(userId, limit, cursor);
+    if ("error" in read) return fail(c, 400, "query_failed", read.error);
 
-    const rows = (data ?? []) as Record<string, unknown>[];
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
+    const { rows: page, hasMore } = read;
     return c.json({
       items: await toGenerationDtos(page, new Map(), { thumbsOnly: true }),
       nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null,

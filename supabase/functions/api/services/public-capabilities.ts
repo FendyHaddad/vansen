@@ -25,6 +25,8 @@ export interface PublicCapabilities {
 export interface ReleaseFlags {
   backgroundCompletion: boolean;
   completionNotifications: boolean;
+  /** The /mcp assistant connection (MCP_ENABLED). Never published here. */
+  mcpEnabled: boolean;
 }
 
 export function releaseFlagsFromEnv(get: (k: string) => string | undefined): ReleaseFlags {
@@ -36,6 +38,8 @@ export function releaseFlagsFromEnv(get: (k: string) => string | undefined): Rel
     // Notifications need both halves: work that finishes with no client
     // attached, and a delivery path proven on the device.
     completionNotifications: background && get('RELEASE_COMPLETION_NOTIFICATIONS') === 'on',
+    // Off: /mcp answers 503 mcp_disabled; its PRM is still served.
+    mcpEnabled: get('MCP_ENABLED') === 'on',
   };
 }
 

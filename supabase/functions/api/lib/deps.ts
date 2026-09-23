@@ -28,6 +28,14 @@ export interface ReleaseIdentity {
   deployedAt: string | null;
 }
 
+/** Where assistants find us: the MCP resource URL and its OAuth server. */
+export interface McpEnv {
+  /** The exact public URL of POST /mcp; clients compare it to the PRM. */
+  resourceUrl: string;
+  /** Supabase Auth's issuer, e.g. https://<ref>.supabase.co/auth/v1. */
+  authServerUrl: string;
+}
+
 export interface ApiEnv {
   appOrigins: string[];
   planPriceIds: Record<string, string | undefined>;
@@ -39,6 +47,8 @@ export interface ApiEnv {
    * http://kong:8000, which a browser cannot resolve; signed storage URLs for
    * the browser are rewritten to this origin. Unset in production. */
   mediaPublicOrigin?: string;
+  /** Unset: /mcp and its PRM answer 503 (nothing to point a client at). */
+  mcp?: McpEnv;
 }
 
 export interface ApiDeps {
@@ -61,4 +71,6 @@ export interface ApiDeps {
   fcmAccount: ServiceAccount | null;
   env: ApiEnv;
   now: () => Date;
+  /** The MCP tools' wait between job polls. Tests pass an instant one. */
+  sleep?: (ms: number) => Promise<void>;
 }

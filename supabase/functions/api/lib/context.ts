@@ -13,8 +13,22 @@ import { createModerationGate } from "../services/moderation-gate.ts";
 import { createGenerationDtos } from "../services/generation-dto.ts";
 import { createAccountClosure } from "../services/account-closure.ts";
 import { createSubmitGeneration } from "../services/submit-generation.ts";
+import { createAgeGate } from "../services/age-gate.ts";
+import { createJobs } from "../services/jobs.ts";
+import { createLibrary } from "../services/library.ts";
+import { createReplay } from "../services/replay.ts";
 
-export type Vars = { Variables: { userId: string; email: string; requestId: string } };
+export type Vars = {
+  Variables: {
+    userId: string;
+    email: string;
+    requestId: string;
+    /** Server-set client tag ('mcp' on /mcp); wins over the header. */
+    client?: string;
+    /** The OAuth grant's client_id; set only for assistant tokens. */
+    oauthClientId?: string;
+  };
+};
 export type App = Hono<Vars>;
 
 function createServices(deps: ApiDeps) {
@@ -65,6 +79,7 @@ function createServices(deps: ApiDeps) {
     }),
     ...createGenerationDtos(signing.signStored),
     ...createAccountClosure({ admin, stripe, logError, ageOkMemo }),
+    ...createAgeGate(admin, ageOkMemo),
   };
 }
 
@@ -73,7 +88,14 @@ export type Services = ReturnType<typeof createServices>;
 
 export function createContext(deps: ApiDeps) {
   const services = createServices(deps);
-  return { ...services, ...createSubmitGeneration(services) };
+  const submit = createSubmitGeneration(services);
+  return {
+    ...services,
+    ...submit,
+    ...createReplay({ ...services, ...submit }),
+    ...createJobs(services),
+    ...createLibrary(services),
+  };
 }
 
 /** What every route module receives. */

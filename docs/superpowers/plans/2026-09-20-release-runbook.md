@@ -327,6 +327,29 @@ never replaces the deployment procedure in §§1–7.
 a secret on the hosted project: it would rewrite every media URL production
 hands out.
 
+## 7c. Assistant connection (MCP)
+
+Spec: `specs/2026-09-23-mcp-connection-design.md` (§9 is the rollout order).
+The gateway serves `POST /api/mcp` and the public PRM at
+`/api/mcp/.well-known/oauth-protected-resource`; both are dark until the
+owner steps are done and the flag is on.
+
+- **Owner steps (dashboard):** enable the OAuth 2.1 server and Dynamic Client
+  Registration, authorization path `/oauth/consent`, `site_url` =
+  `https://vansen.vankode.com`, asymmetric (ES256) JWT signing keys.
+- **Migration:** `0035_mcp_client.sql` (client tag `mcp`, request bucket `mcp`
+  at 10 per minute).
+- **Flag:** Edge Function secret `MCP_ENABLED`; only the exact string `on`
+  enables `/mcp`. Anything else answers 503 `mcp_disabled` (the PRM is still
+  served). This is also the kill switch.
+- **Read back after deploy:** the PRM answers 200 with
+  `resource = https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/mcp`,
+  and a bare `POST /api/mcp` answers 401 with a `WWW-Authenticate` header that
+  names it.
+- `MCP_PUBLIC_SUPABASE_URL` exists for `supabase functions serve` only (where
+  `SUPABASE_URL` is `http://kong:8000`). Never set it on the hosted project:
+  the PRM would point clients somewhere else.
+
 ## 8. Rollback
 
 **Rehearsed 2026-09-23 on the local stack (§7b)** — commands and output in

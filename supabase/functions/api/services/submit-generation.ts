@@ -44,6 +44,11 @@ import { createReferenceUrls } from "./reference-urls.ts";
 // in P5). A push that fails can no longer fail a paid request, and "was the
 // customer told" is answerable from the database.
 
+export interface SubmitOptions {
+  /** A server-derived key (the MCP tools); wins over the Idempotency-Key header. */
+  idempotencyKey?: string;
+}
+
 export function createSubmitGeneration(ctx: Services) {
   const {
     admin,
@@ -69,8 +74,12 @@ export function createSubmitGeneration(ctx: Services) {
    * same validation, entitlement checks, moderation, quote and snapshot — the
    * old client-side retry skipped all of it and guessed at the fields.
    */
-  // deno-lint-ignore no-explicit-any
-  async function submitGeneration(c: Context, body: any): Promise<Response> {
+  async function submitGeneration(
+    c: Context,
+    // deno-lint-ignore no-explicit-any
+    body: any,
+    opts: SubmitOptions = {},
+  ): Promise<Response> {
     const userId = c.get("userId");
 
     const op = body.op as string;
@@ -466,7 +475,7 @@ export function createSubmitGeneration(ctx: Services) {
     // which the stale sweep could never find.
     const reservation = await admin.rpc("fn_reserve_generation", {
       p_user: userId,
-      p_key: readIdempotencyKey(c) ?? crypto.randomUUID(),
+      p_key: opts.idempotencyKey ?? readIdempotencyKey(c) ?? crypto.randomUUID(),
       p_hash: await bodyHash(body),
       p_items: items,
       p_quote: {
@@ -502,3 +511,5 @@ export function createSubmitGeneration(ctx: Services) {
 
   return { submitGeneration };
 }
+
+export type SubmitGeneration = ReturnType<typeof createSubmitGeneration>["submitGeneration"];

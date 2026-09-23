@@ -2,7 +2,8 @@
 // fail() is the one error shape (a 5xx also carries the request id as
 // errorId); clientOf() reads the x-vansen-client platform header;
 // sanitizeLabel() cleans short free text; deletionStatus() is the body of
-// every delete that hides content now and queues its bytes.
+// every delete that hides content now and queues its bytes. The 'mcp' client
+// is only ever set server-side (by the /mcp route), never read from a header.
 
 export function fail(
   c: {
@@ -23,14 +24,22 @@ export function fail(
   return c.json({ error: { code, message, errorId } }, status);
 }
 
-const KNOWN_CLIENTS = new Set(["web", "ios", "android"]);
+/** What a caller may claim in the x-vansen-client header. */
+const HEADER_CLIENTS = new Set(["web", "ios", "android"]);
+/** Every tag the database accepts (0035). */
+export const KNOWN_CLIENTS = new Set([...HEADER_CLIENTS, "mcp"]);
 
-/** Platform marker from the x-vansen-client header; anything unexpected → null. */
+/** The server-set client if any, else the header's platform; unexpected → null. */
 export function clientOf(
-  c: { req: { header: (name: string) => string | undefined } },
+  c: {
+    req: { header: (name: string) => string | undefined };
+    get?: (k: "client") => string | undefined;
+  },
 ): string | null {
+  const set = c.get?.("client");
+  if (set && KNOWN_CLIENTS.has(set)) return set;
   const v = c.req.header("x-vansen-client");
-  return v && KNOWN_CLIENTS.has(v) ? v : null;
+  return v && HEADER_CLIENTS.has(v) ? v : null;
 }
 
 /** Short free-text field: control chars stripped, trimmed, capped, null if empty. */

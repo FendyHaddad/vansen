@@ -210,7 +210,7 @@ export function testDeps(over: Partial<ApiDeps> = {}): ApiDeps {
       appOrigins: ["https://vansen.app"],
       planPriceIds: {},
       launchCouponId: undefined,
-      releaseFlags: { backgroundCompletion: false, completionNotifications: false },
+      releaseFlags: { backgroundCompletion: false, completionNotifications: false, mcpEnabled: false },
       // Unknown by default: a test that cares about the manifest sets these,
       // and one that does not must not accidentally assert a real revision.
       release: { gitRevision: "", workerVersion: "", deployedAt: null },
