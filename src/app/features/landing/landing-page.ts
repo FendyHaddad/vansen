@@ -142,7 +142,7 @@ export class LandingPage {
     {
       icon: 'lucideEraser',
       title: 'Generative edits, priced per use',
-      body: 'Mask anything and let a frontier model repaint it — remove objects, fill with a prompt, expand the canvas, drop the background. Flat per-use prices, shown before you run.',
+      body: 'Mask anything and let a frontier model repaint it — remove objects, fill with a prompt, expand the canvas, drop the background. A Pro feature, priced flat per use and shown before you run.',
     },
     {
       icon: 'lucideLayers',

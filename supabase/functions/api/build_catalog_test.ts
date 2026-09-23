@@ -135,6 +135,21 @@ Deno.test('cloud upscale carries the upscaler row plan; a missing row is studio'
   assertEquals(buildCatalog([]).flat.upscale.plan, 'studio');
 });
 
+Deno.test('each AI edit tool carries its own row plan; a missing row is studio', () => {
+  const catalog = buildCatalog([
+    { id: 'edit-remove', enabled: true, min_plan: 'pro' },
+    { id: 'edit-fill', enabled: true, min_plan: 'pro' },
+    { id: 'edit-expand', enabled: true, min_plan: 'studio' },
+  ]);
+  const plans = Object.fromEntries(catalog.flat.editTools.map((t) => [t.id, t.plan]));
+  assertEquals(plans, {
+    'edit-remove': 'pro',
+    'edit-fill': 'pro',
+    'edit-expand': 'studio',
+    'edit-bg': 'studio',
+  });
+});
+
 Deno.test('reference slots follow the catalog', () => {
   const max = Object.fromEntries(CATALOG.families.map((f) => [f.id, f.maxReferences]));
   assertEquals(max['flux'], 0);

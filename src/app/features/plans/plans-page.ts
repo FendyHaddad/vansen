@@ -155,7 +155,6 @@ export class PlansPage {
         `${PLAN_CREDITS.studio.toLocaleString()} credits every month`,
         imageLine,
         `On-device editing — ${this.studioToolNames.join(', ')}`,
-        'AI edit tools from 5 credits per run',
         'Private full-resolution library, no watermarks',
       ],
       featured: false,
@@ -164,6 +163,7 @@ export class PlansPage {
       'Everything in Studio, plus:',
       `${PLAN_CREDITS.pro.toLocaleString()} credits every month — ${PRO_EXTRA_CREDIT_PERCENT}% more per dollar`,
       `Pro on-device tools — ${this.proToolNames.join(', ')}`,
+      'AI edit tools (remove, fill, expand, background) from 5 credits per run',
       `The same job costs ${PRO_SAVING_PERCENT}% less than on Studio`,
       `Biggest add-on packs: up to ${packCredits(100, 'pro').toLocaleString()} credits for $100`,
     ];
@@ -218,7 +218,7 @@ export class PlansPage {
     {
       question: 'What does editing cost?',
       answer:
-        'The on-canvas suite runs on your own device, so it never costs credits. Crop, adjust, filters, sharpen, smooth, spot heal, dehaze and portrait smooth come with every plan; cut out, bokeh, upscale, AI sharpen, smart select, magic erase and the rest are the Pro tier. Generative AI edits (remove, fill, expand, background) cost 5–10 credits per run, and saving an edited version costs nothing.',
+        'The on-canvas suite runs on your own device, so it never costs credits. Crop, adjust, filters, sharpen, smooth, spot heal, dehaze and portrait smooth come with every plan; cut out, bokeh, upscale, AI sharpen, smart select, magic erase and the rest are the Pro tier. Generative AI edits (remove, fill, expand, background) are Pro and cost 5–10 credits per run, and saving an edited version costs nothing.',
     },
     {
       question: 'Why is video Pro-only?',

@@ -22,6 +22,7 @@ Process (owner, 2026-09-23: faster): fewer, larger tasks, run in parallel worktr
   - Family: `upscaler`, provider fal clarity-upscaler.
   - Price: `/catalog` `flat.upscale {credits:7, enabled}`.
   - Plan: plan = `models.min_plan` for `upscaler` (studio), served as `flat.upscale.plan`; `ENTITLEMENTS.upscale` is the local Swin2SR tool (decided 2026-09-23 after audit: the web sells cloud upscale to Studio).
+- **AI edit tools.** AI edit tools are Pro (owner, 2026-09-23: follow the web): `models.min_plan`, migration 0034, served as `flat.editTools[].plan`.
 - **Styles.**
   - The request carries `style: <id>`. The gateway appends the modifier to the prompt and returns 400 `invalid_style` for an unknown id.
   - Styles are free.

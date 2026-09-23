@@ -38,7 +38,7 @@ test('catalog:mobile writes the seed-state catalog to the given path', () => {
     ]);
     assert.equal(catalog.flat.persona.minEdge, 1024);
     assert.equal(catalog.flat.persona.maxBytes, 2621440);
-    assert.equal(catalog.flat.editTools.every((t) => t.enabled && t.plan === 'studio'), true);
+    assert.equal(catalog.flat.editTools.every((t) => t.enabled && t.plan === 'pro'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

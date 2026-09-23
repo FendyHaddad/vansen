@@ -117,6 +117,15 @@ describe('public surfaces never advertise what is switched off', () => {
     }
   });
 
+  it('the pricing page sells the AI edit tools on Pro, not Studio (migration 0034)', async () => {
+    const fixture = await render(PlansPage, ALL_IDS);
+    const [studioCard, proCard] = Array.from(
+      fixture.nativeElement.querySelectorAll('.perk-list, ul') as NodeListOf<HTMLElement>,
+    );
+    expect(studioCard.textContent ?? '').not.toContain('AI edit tools');
+    expect(proCard.textContent ?? '').toContain('AI edit tools');
+  });
+
   it('the pricing page lists every Studio tool it gates as Studio', async () => {
     const fixture = await render(PlansPage, ALL_IDS);
     const text = textOf(fixture);
