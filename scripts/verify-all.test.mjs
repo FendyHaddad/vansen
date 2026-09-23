@@ -73,7 +73,7 @@ test('the real check list covers each suite the release depends on', () => {
   const names = CHECKS.map((c) => c.name);
   for (const required of [
     'web unit tests', 'web production build', 'deno tests', 'deno type check',
-    'shared catalog drift', 'trend assets', 'migration inventory', 'sql integration',
+    'shared catalog drift', 'catalog assets', 'migration inventory', 'sql integration',
   ]) {
     assert.ok(names.includes(required), `verify-all lost the "${required}" check`);
   }

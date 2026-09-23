@@ -18,7 +18,7 @@ export const CHECKS = [
   { name: 'migration inventory', cmd: 'node', args: ['scripts/migration-inventory.mjs'] },
   { name: 'script unit tests', cmd: 'npm', args: ['run', 'test:scripts'] },
   { name: 'shared catalog drift', cmd: 'node', args: ['scripts/sync-shared.mjs', '--check'] },
-  { name: 'trend assets', cmd: 'npm', args: ['run', 'check:assets'] },
+  { name: 'catalog assets', cmd: 'npm', args: ['run', 'check:assets'] },
   { name: 'deno type check', cmd: 'deno', args: ['check', 'api/index.ts', 'api/app.ts', 'job-worker/index.ts', 'cleanup-worker/index.ts', 'stripe-webhook/index.ts', 'appstore-webhook/index.ts'], cwd: 'supabase/functions' },
   { name: 'deno tests', cmd: 'deno', args: ['test', '--allow-all', '_shared', 'api', 'job-worker', 'cleanup-worker', 'stripe-webhook', 'appstore-webhook'], cwd: 'supabase/functions' },
   { name: 'web unit tests', cmd: 'npm', args: ['test', '--', '--watch=false'] },

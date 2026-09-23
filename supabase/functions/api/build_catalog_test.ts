@@ -175,9 +175,15 @@ Deno.test('flat prices are the fixed retail prices', () => {
 
 Deno.test('styles, trends and tool plans ride along as data', () => {
   assertEquals(CATALOG.styles.length, STYLE_PRESETS.length);
-  assertEquals(CATALOG.styles[0], { id: STYLE_PRESETS[0].id, label: STYLE_PRESETS[0].name });
+  assertEquals(CATALOG.styles[0], {
+    id: STYLE_PRESETS[0].id,
+    label: STYLE_PRESETS[0].name,
+    category: STYLE_PRESETS[0].category,
+    thumb: STYLE_PRESETS[0].thumb,
+  });
   assertEquals(CATALOG.trends.length, TREND_PRESETS.length);
   assertEquals(CATALOG.trends[0].prompt, TREND_PRESETS[0].prompt);
+  assertEquals(CATALOG.trends[0].thumb, TREND_PRESETS[0].thumb);
   assertEquals(CATALOG.toolPlans['bgremove'], 'pro');
   assertEquals(CATALOG.toolPlans['crop'], 'studio');
 });

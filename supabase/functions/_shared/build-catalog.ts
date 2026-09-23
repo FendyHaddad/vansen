@@ -109,8 +109,8 @@ export interface Catalog {
     upscale: { credits: number; enabled: boolean };
     persona: CatalogPersona;
   };
-  styles: { id: string; label: string }[];
-  trends: { id: string; label: string; prompt: string; aspectRatio: string | null }[];
+  styles: { id: string; label: string; category: string; thumb: string }[];
+  trends: { id: string; label: string; prompt: string; aspectRatio: string | null; thumb: string }[];
   toolPlans: Record<string, CatalogPlan>;
 }
 
@@ -274,8 +274,14 @@ export function buildCatalog(rows: ModelRow[], families: ModelFamily[] = MODEL_F
       upscale: { credits: upscaleCreditCost(), enabled: byId.get(UPSCALER.id)?.enabled === true },
       persona: personaEntry(byId.get(PERSONA_GEN.id)),
     },
-    styles: STYLE_PRESETS.map((s) => ({ id: s.id, label: s.name })),
-    trends: TREND_PRESETS.map((t) => ({ id: t.id, label: t.name, prompt: t.prompt, aspectRatio: t.aspectRatio ?? null })),
+    styles: STYLE_PRESETS.map((s) => ({ id: s.id, label: s.name, category: s.category, thumb: s.thumb })),
+    trends: TREND_PRESETS.map((t) => ({
+      id: t.id,
+      label: t.name,
+      prompt: t.prompt,
+      aspectRatio: t.aspectRatio ?? null,
+      thumb: t.thumb,
+    })),
     toolPlans: { ...ENTITLEMENTS },
   };
 }
