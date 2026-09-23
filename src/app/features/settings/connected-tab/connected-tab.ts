@@ -3,7 +3,8 @@ import { DatePipe } from '@angular/common';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideBot, lucideCheck, lucideCopy, lucideTrash2 } from '@ng-icons/lucide';
-import { AuthService, OAuthGrant } from '../../../core/auth/auth-service';
+import { ApiError, ApiService } from '../../../core/api/api-service';
+import { OAuthGrantDto, OAuthGrantsResponse } from '../../../core/api/dtos';
 import { ConfirmService } from '../../../shared/confirm/confirm-service';
 import { environment } from '../../../../environments/environment';
 
@@ -13,7 +14,8 @@ const COPIED_FLASH_MS = 2000;
 /**
  * Settings → Connected assistants: the OAuth grants an MCP client (Claude,
  * ChatGPT, …) holds on this account, with revoke, plus how to connect a new
- * one. See docs/superpowers/specs/2026-09-23-mcp-connection-design.md §3, §6.
+ * one. Talks to the gateway's own `/oauth/grants*` endpoints through the
+ * app's api client — GoTrue never sees an assistant grant (spec §R, §R3, §R4).
  */
 @Component({
   selector: 'app-connected-tab',
@@ -24,14 +26,14 @@ const COPIED_FLASH_MS = 2000;
   providers: [provideIcons({ lucideBot, lucideCheck, lucideCopy, lucideTrash2 })],
 })
 export class ConnectedTab {
-  private readonly auth = inject(AuthService);
+  private readonly api = inject(ApiService);
   private readonly confirm = inject(ConfirmService);
 
   /** Derived from the app's own Supabase config, never hard-coded, so staging
    * and production each show their own URL. */
   readonly mcpUrl = `${environment.apiBaseUrl}/mcp`;
 
-  readonly grants = signal<OAuthGrant[]>([]);
+  readonly grants = signal<OAuthGrantDto[]>([]);
   readonly loading = signal(true);
   readonly error = signal('');
   readonly revokingId = signal<string | null>(null);
@@ -47,7 +49,8 @@ export class ConnectedTab {
     this.loading.set(true);
     this.error.set('');
     try {
-      this.grants.set(await this.auth.listGrants());
+      const res = await this.api.get<OAuthGrantsResponse>('/oauth/grants');
+      this.grants.set(res.grants);
     } catch {
       this.error.set('Could not load connected assistants. Check your connection and try again.');
     } finally {
@@ -55,10 +58,10 @@ export class ConnectedTab {
     }
   }
 
-  async revoke(grant: OAuthGrant): Promise<void> {
+  async revoke(grant: OAuthGrantDto): Promise<void> {
     if (this.revokingId()) return;
     const ok = await this.confirm.ask({
-      title: `Disconnect ${grant.client.name || 'this assistant'}?`,
+      title: `Disconnect ${grant.clientName || 'this assistant'}?`,
       body: 'It loses access to your account immediately. Your credits, library and plan are unaffected, and you can reconnect any time.',
       confirmLabel: 'Disconnect',
       cancelLabel: 'Keep connected',
@@ -66,15 +69,28 @@ export class ConnectedTab {
     });
     if (!ok) return;
 
-    this.revokingId.set(grant.client.id);
+    this.revokingId.set(grant.clientId);
     this.error.set('');
-    try {
-      await this.auth.revokeGrant(grant.client.id);
-      this.grants.update((list) => list.filter((g) => g.client.id !== grant.client.id));
-    } catch {
+    const outcome = await this.deleteGrant(grant.clientId);
+    if (outcome === 'failed') {
       this.error.set('Could not disconnect — check your connection and try again.');
-    } finally {
       this.revokingId.set(null);
+      return;
+    }
+    this.grants.update((list) => list.filter((g) => g.clientId !== grant.clientId));
+    this.revokingId.set(null);
+  }
+
+  /**
+   * A 404 means the grant is already gone — the outcome the user wanted —
+   * so it is treated the same as success, not surfaced as a failure.
+   */
+  private async deleteGrant(clientId: string): Promise<'ok' | 'failed'> {
+    try {
+      await this.api.delete(`/oauth/grants/${clientId}`);
+      return 'ok';
+    } catch (e) {
+      return e instanceof ApiError && e.status === 404 ? 'ok' : 'failed';
     }
   }
 

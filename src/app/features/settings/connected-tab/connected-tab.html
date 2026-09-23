@@ -15,17 +15,17 @@
   } @else if (grants().length) {
     <div class="panel">
       <span class="eyebrow">Connected</span>
-      @for (grant of grants(); track grant.client.id; let last = $last) {
+      @for (grant of grants(); track grant.clientId; let last = $last) {
         <div class="grant-row">
           <div class="grant-icon">
             <ng-icon name="lucideBot" size="18" />
           </div>
           <div class="grant-text">
-            <p class="grant-name">{{ grant.client.name || 'Unnamed client' }}</p>
+            <p class="grant-name">{{ grant.clientName || 'Unnamed client' }}</p>
             <p class="muted small">
-              Connected {{ grant.granted_at | date: 'mediumDate' }}
-              @if (grant.scopes.length) {
-                · {{ grant.scopes.join(' ') }}
+              Connected {{ grant.createdAt | date: 'mediumDate' }}
+              @if (grant.redirectHost) {
+                · {{ grant.redirectHost }}
               }
             </p>
           </div>
@@ -33,11 +33,11 @@
             hlmBtn
             variant="outline"
             size="sm"
-            [disabled]="revokingId() === grant.client.id"
+            [disabled]="revokingId() === grant.clientId"
             (click)="revoke(grant)"
           >
             <ng-icon name="lucideTrash2" size="14" />
-            {{ revokingId() === grant.client.id ? 'Disconnecting…' : 'Revoke' }}
+            {{ revokingId() === grant.clientId ? 'Disconnecting…' : 'Revoke' }}
           </button>
         </div>
         @if (!last) {

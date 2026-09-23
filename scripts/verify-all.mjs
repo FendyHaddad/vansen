@@ -23,6 +23,10 @@ export const CHECKS = [
   { name: 'deno tests', cmd: 'deno', args: ['test', '--allow-all', '_shared', 'api', 'job-worker', 'cleanup-worker', 'stripe-webhook', 'appstore-webhook'], cwd: 'supabase/functions' },
   { name: 'web unit tests', cmd: 'npm', args: ['test', '--', '--watch=false'] },
   { name: 'web production build', cmd: 'npx', args: ['ng', 'build', '--configuration', 'production'] },
+  // Must run after the build above: it asserts against dist/vansen/browser,
+  // not the repository — a build that dropped .well-known/ or _headers would
+  // otherwise still look green (spec §R1).
+  { name: 'mcp metadata assets', cmd: 'npm', args: ['run', 'check:mcp-assets'] },
   { name: 'sql integration', cmd: 'node', args: ['scripts/run-sql-tests.mjs'], skipWithout: 'VANSEN_LOCAL_DB' },
 ];
 

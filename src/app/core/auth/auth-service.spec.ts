@@ -98,69 +98,6 @@ describe('AuthService session teardown', () => {
 });
 
 /**
- * Connected assistants (Settings → Connected assistants).
- *
- * `auth.oauth` is a separate surface from the rest of GoTrueClient, so these
- * get their own fake rather than extending `fakeAuth`.
- */
-function oauthAuth(over: Record<string, unknown> = {}) {
-  return {
-    getSession: () => Promise.resolve({ data: { session: null } }),
-    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => undefined } } }),
-    signOut: () => Promise.resolve({ error: null }),
-    oauth: {
-      listGrants: vi.fn(() => Promise.resolve({ data: [], error: null })),
-      revokeGrant: vi.fn(() => Promise.resolve({ data: {}, error: null })),
-      ...over,
-    },
-  } as unknown as SupabaseClient['auth'];
-}
-
-describe('AuthService connected assistants', () => {
-  async function setup(over: Record<string, unknown> = {}) {
-    TestBed.resetTestingModule();
-    const auth = oauthAuth(over);
-    TestBed.configureTestingModule({ providers: [{ provide: AUTH_CLIENT, useValue: auth }] });
-    const service = TestBed.inject(AuthService);
-    await service.whenReady();
-    return { service, auth };
-  }
-
-  it('lists the grants the client returns', async () => {
-    const grant = {
-      client: { id: 'client-1', name: 'Claude', uri: '', logo_uri: '' },
-      scopes: ['openid', 'email'],
-      granted_at: '2026-09-01T00:00:00Z',
-    };
-    const { service } = await setup({
-      listGrants: vi.fn(() => Promise.resolve({ data: [grant], error: null })),
-    });
-    await expect(service.listGrants()).resolves.toEqual([grant]);
-  });
-
-  it('never echoes the vendor error when the grant list fails', async () => {
-    const { service } = await setup({
-      listGrants: vi.fn(() => Promise.resolve({ data: null, error: { message: 'db down' } })),
-    });
-    await expect(service.listGrants()).rejects.toThrow(/try again/i);
-  });
-
-  it('revokes by client id', async () => {
-    const { service, auth } = await setup();
-    await service.revokeGrant('client-1');
-    expect((auth as unknown as { oauth: { revokeGrant: ReturnType<typeof vi.fn> } }).oauth.revokeGrant)
-      .toHaveBeenCalledWith({ clientId: 'client-1' });
-  });
-
-  it('never echoes the vendor error when revoke fails', async () => {
-    const { service } = await setup({
-      revokeGrant: vi.fn(() => Promise.resolve({ data: null, error: { message: 'boom' } })),
-    });
-    await expect(service.revokeGrant('client-1')).rejects.toThrow(/try again/i);
-  });
-});
-
-/**
  * Password recovery.
  *
  * Two things matter more than the happy path. First, the response must be

@@ -1,21 +1,24 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectedTab } from './connected-tab';
-import { AuthService, OAuthGrant } from '../../../core/auth/auth-service';
+import { ApiError, ApiService } from '../../../core/api/api-service';
+import { OAuthGrantDto } from '../../../core/api/dtos';
 import { ConfirmService } from '../../../shared/confirm/confirm-service';
 import { environment } from '../../../../environments/environment';
 
-function grant(id: string, name: string): OAuthGrant {
+function grant(clientId: string, clientName: string): OAuthGrantDto {
   return {
-    client: { id, name, uri: '', logo_uri: '' },
-    scopes: ['openid', 'email'],
-    granted_at: '2026-09-01T00:00:00Z',
+    clientId,
+    clientName,
+    redirectHost: 'claude.ai',
+    createdAt: '2026-09-01T00:00:00Z',
+    lastUsedAt: null,
   };
 }
 
 describe('ConnectedTab', () => {
   let fixture: ComponentFixture<ConnectedTab>;
-  let auth: { listGrants: ReturnType<typeof vi.fn>; revokeGrant: ReturnType<typeof vi.fn> };
+  let api: { get: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
   let confirm: { ask: ReturnType<typeof vi.fn> };
 
   function make(): ConnectedTab {
@@ -26,15 +29,14 @@ describe('ConnectedTab', () => {
 
   beforeEach(() => {
     TestBed.resetTestingModule();
-    auth = {
-      listGrants: vi.fn(() => Promise.resolve([])),
-      revokeGrant: vi.fn(() => Promise.resolve()),
-    };
+    api = { get: vi.fn(), delete: vi.fn() };
+    api.get.mockResolvedValue({ grants: [] });
+    api.delete.mockResolvedValue(undefined);
     confirm = { ask: vi.fn(() => Promise.resolve(true)) };
     TestBed.configureTestingModule({
       imports: [ConnectedTab],
       providers: [
-        { provide: AuthService, useValue: auth },
+        { provide: ApiService, useValue: api },
         { provide: ConfirmService, useValue: confirm },
       ],
     });
@@ -44,13 +46,19 @@ describe('ConnectedTab', () => {
   const settle = () => new Promise((r) => setTimeout(r, 0));
 
   it('shows a loading state before the grants arrive', () => {
-    auth.listGrants.mockReturnValue(new Promise(() => {}));
+    api.get.mockReturnValue(new Promise(() => {}));
     make();
     expect(fixture.nativeElement.textContent).toContain('Loading connected assistants');
   });
 
+  it('loads the list through GET /oauth/grants', async () => {
+    make();
+    await settle();
+    expect(api.get).toHaveBeenCalledWith('/oauth/grants');
+  });
+
   it('lists each grant with its client name and connected date', async () => {
-    auth.listGrants.mockResolvedValue([grant('c1', 'Claude'), grant('c2', 'ChatGPT')]);
+    api.get.mockResolvedValue({ grants: [grant('c1', 'Claude'), grant('c2', 'ChatGPT')] });
     make();
     await settle();
     fixture.detectChanges();
@@ -61,7 +69,7 @@ describe('ConnectedTab', () => {
   });
 
   it('shows the empty state with the MCP URL and per-client instructions when nothing is connected', async () => {
-    auth.listGrants.mockResolvedValue([]);
+    api.get.mockResolvedValue({ grants: [] });
     make();
     await settle();
     fixture.detectChanges();
@@ -73,7 +81,7 @@ describe('ConnectedTab', () => {
   });
 
   it('shows an error state when the grant list fails to load', async () => {
-    auth.listGrants.mockRejectedValue(new Error('network down'));
+    api.get.mockRejectedValue(new Error('network down'));
     make();
     await settle();
     fixture.detectChanges();
@@ -81,22 +89,22 @@ describe('ConnectedTab', () => {
   });
 
   it('revokes only after the confirm dialog is accepted', async () => {
-    auth.listGrants.mockResolvedValue([grant('c1', 'Claude')]);
+    api.get.mockResolvedValue({ grants: [grant('c1', 'Claude')] });
     const tab = make();
     await settle();
     fixture.detectChanges();
 
     confirm.ask.mockResolvedValue(false);
     await tab.revoke(grant('c1', 'Claude'));
-    expect(auth.revokeGrant).not.toHaveBeenCalled();
+    expect(api.delete).not.toHaveBeenCalled();
 
     confirm.ask.mockResolvedValue(true);
     await tab.revoke(grant('c1', 'Claude'));
-    expect(auth.revokeGrant).toHaveBeenCalledWith('c1');
+    expect(api.delete).toHaveBeenCalledWith('/oauth/grants/c1');
   });
 
   it('drops the revoked grant from the list on success', async () => {
-    auth.listGrants.mockResolvedValue([grant('c1', 'Claude'), grant('c2', 'ChatGPT')]);
+    api.get.mockResolvedValue({ grants: [grant('c1', 'Claude'), grant('c2', 'ChatGPT')] });
     const tab = make();
     await settle();
     fixture.detectChanges();
@@ -104,26 +112,39 @@ describe('ConnectedTab', () => {
     await tab.revoke(grant('c1', 'Claude'));
     fixture.detectChanges();
 
-    expect(tab.grants().map((g) => g.client.id)).toEqual(['c2']);
+    expect(tab.grants().map((g) => g.clientId)).toEqual(['c2']);
   });
 
   it('shows an error and keeps the grant listed when revoke fails', async () => {
-    auth.listGrants.mockResolvedValue([grant('c1', 'Claude')]);
-    auth.revokeGrant.mockRejectedValue(new Error('boom'));
+    api.get.mockResolvedValue({ grants: [grant('c1', 'Claude')] });
+    api.delete.mockRejectedValue(new Error('boom'));
     const tab = make();
     await settle();
 
     await tab.revoke(grant('c1', 'Claude'));
     fixture.detectChanges();
 
-    expect(tab.grants().map((g) => g.client.id)).toEqual(['c1']);
+    expect(tab.grants().map((g) => g.clientId)).toEqual(['c1']);
     expect(fixture.nativeElement.textContent).toContain('Could not disconnect');
+  });
+
+  it('a 404 on revoke (already gone) still drops it from the list, with no error', async () => {
+    api.get.mockResolvedValue({ grants: [grant('c1', 'Claude')] });
+    api.delete.mockRejectedValue(new ApiError('not_found', 'Not found', 404));
+    const tab = make();
+    await settle();
+
+    await tab.revoke(grant('c1', 'Claude'));
+    fixture.detectChanges();
+
+    expect(tab.grants()).toEqual([]);
+    expect(tab.error()).toBe('');
   });
 
   it('copies the MCP URL and flashes a confirmation', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.assign(navigator, { clipboard: { writeText } });
-    auth.listGrants.mockResolvedValue([]);
+    api.get.mockResolvedValue({ grants: [] });
     const tab = make();
     await settle();
     fixture.detectChanges();
@@ -135,7 +156,7 @@ describe('ConnectedTab', () => {
 
   it('clears the "Copied" timer when the tab is destroyed', async () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn(() => Promise.resolve()) } });
-    auth.listGrants.mockResolvedValue([]);
+    api.get.mockResolvedValue({ grants: [] });
     const tab = make();
     await settle();
     vi.useFakeTimers();

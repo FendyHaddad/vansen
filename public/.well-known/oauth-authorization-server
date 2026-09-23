@@ -1,0 +1,13 @@
+{
+  "issuer": "https://vansen.vankode.com",
+  "authorization_endpoint": "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/oauth/authorize",
+  "token_endpoint": "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/oauth/token",
+  "registration_endpoint": "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/oauth/register",
+  "revocation_endpoint": "https://bnorhcxhvxydkgvcxjad.supabase.co/functions/v1/api/oauth/revoke",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "revocation_endpoint_auth_methods_supported": ["none"],
+  "scopes_supported": ["vansen"]
+}

@@ -18,10 +18,10 @@ const CAPABILITIES = ['Generate images', 'Spend your credits', 'See your library
  * Three things make this page different from a normal form: a signed-out
  * visitor has to detour through login and back without becoming an
  * open-redirect (see `consent-return-url.ts`); a client the user already
- * approved comes back as a ready-made `redirect_url` that must be followed
- * immediately, not shown a screen; and Allow/Deny both end by leaving the
- * app entirely, for a URL Supabase already validated against the client's
- * registered redirect URI.
+ * approved (`alreadyGranted`) must be approved again automatically rather
+ * than shown a screen, since the decision was already made; and Allow/Deny
+ * both end by leaving the app entirely, for a URL the gateway already
+ * validated against the client's registered redirect URI (spec §R3, §R4).
  */
 @Component({
   selector: 'app-consent-page',
@@ -88,13 +88,22 @@ export class ConsentPage {
     }
 
     try {
-      const outcome = await this.consent.load(authorizationId);
-      if (outcome.kind === 'redirect') {
-        this.leave(outcome.url);
+      const details = await this.consent.load(authorizationId);
+      if (details.alreadyGranted) {
+        await this.autoApprove();
         return;
       }
-      this.details.set(outcome.details);
+      this.details.set(details);
       this.phase.set('consent');
+    } catch (e) {
+      this.fail(messageOf(e));
+    }
+  }
+
+  /** The user already granted this client — approve without a screen. */
+  private async autoApprove(): Promise<void> {
+    try {
+      this.leave(await this.consent.approve(this.authorizationId));
     } catch (e) {
       this.fail(messageOf(e));
     }

@@ -10,6 +10,9 @@ const CLIENT_DETAILS = {
   authorizationId: 'auth-1',
   clientName: 'Claude',
   redirectUri: 'https://claude.ai/api/mcp/auth_callback',
+  redirectHost: 'claude.ai',
+  scope: 'vansen',
+  alreadyGranted: false,
 };
 
 function make(opts: {
@@ -22,7 +25,7 @@ function make(opts: {
     isAuthed: vi.fn(() => opts.authed ?? true),
   };
   const consent = {
-    load: vi.fn(() => Promise.resolve({ kind: 'details' as const, details: CLIENT_DETAILS })),
+    load: vi.fn(() => Promise.resolve(CLIENT_DETAILS)),
     approve: vi.fn(() => Promise.resolve('https://claude.ai/api/mcp/auth_callback?code=ok')),
     deny: vi.fn(() => Promise.resolve('https://claude.ai/api/mcp/auth_callback?error=access_denied')),
     ...opts.consent,
@@ -80,10 +83,7 @@ describe('ConsentPage', () => {
     const { fixture, page } = make({
       consent: {
         load: vi.fn(() =>
-          Promise.resolve({
-            kind: 'details' as const,
-            details: { ...CLIENT_DETAILS, redirectUri: 'http://127.0.0.1:6276/oauth/callback' },
-          }),
+          Promise.resolve({ ...CLIENT_DETAILS, redirectUri: 'http://127.0.0.1:6276/oauth/callback' }),
         ),
       },
     });
@@ -96,9 +96,7 @@ describe('ConsentPage', () => {
   function withRedirect(redirectUri: string) {
     return make({
       consent: {
-        load: vi.fn(() =>
-          Promise.resolve({ kind: 'details' as const, details: { ...CLIENT_DETAILS, redirectUri } }),
-        ),
+        load: vi.fn(() => Promise.resolve({ ...CLIENT_DETAILS, redirectUri })),
       },
     });
   }
@@ -166,19 +164,32 @@ describe('ConsentPage', () => {
     expect(page.phase()).toBe('redirecting');
   });
 
-  it('an already-consented client is followed immediately, with no consent screen', async () => {
+  it('an already-consented client is approved automatically, with no consent screen', async () => {
     const { page, consent, navigateAway } = make({
       consent: {
-        load: vi.fn(() =>
-          Promise.resolve({ kind: 'redirect' as const, url: 'https://claude.ai/cb?code=auto' }),
-        ),
+        load: vi.fn(() => Promise.resolve({ ...CLIENT_DETAILS, alreadyGranted: true })),
+        approve: vi.fn(() => Promise.resolve('https://claude.ai/cb?code=auto')),
       },
     });
     await settle();
     expect(consent.load).toHaveBeenCalledWith('auth-1');
+    expect(consent.approve).toHaveBeenCalledWith('auth-1');
     expect(navigateAway).toHaveBeenCalledWith('https://claude.ai/cb?code=auto');
     expect(page.phase()).toBe('redirecting');
     expect(page.details()).toBeNull();
+  });
+
+  it('a failed auto-approve on an already-granted client is an error, not a stuck loading state', async () => {
+    const { page, navigateAway } = make({
+      consent: {
+        load: vi.fn(() => Promise.resolve({ ...CLIENT_DETAILS, alreadyGranted: true })),
+        approve: vi.fn(() => Promise.reject(new Error('authorization request expired'))),
+      },
+    });
+    await settle();
+    expect(page.phase()).toBe('error');
+    expect(page.errorMessage()).toContain('authorization request expired');
+    expect(navigateAway).not.toHaveBeenCalled();
   });
 
   it('a signed-out visitor is sent to login with a return restricted to the consent page', async () => {

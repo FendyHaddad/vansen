@@ -1,10 +1,8 @@
 import { computed, inject, Injectable, InjectionToken, signal } from '@angular/core';
-import { OAuthGrant, Session, SupabaseClient } from '@supabase/supabase-js';
+import { Session, SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '../supabase/supabase-client';
 import { clearAllCaches } from '../api/local-cache';
 import { SessionLifecycle } from './session-lifecycle';
-
-export type { OAuthGrant };
 
 /**
  * The Supabase auth client, injected rather than imported.
@@ -124,21 +122,6 @@ export class AuthService {
    */
   async signOut(): Promise<void> {
     await this.auth.signOut({ scope: 'local' });
-  }
-
-  /** OAuth grants for the assistants (Claude, ChatGPT, …) connected to this
-   * account. No "last used" field — Supabase doesn't track one. */
-  async listGrants(): Promise<OAuthGrant[]> {
-    const { data, error } = await this.auth.oauth.listGrants();
-    if (error) throw new Error(GENERIC_RETRY);
-    return data;
-  }
-
-  /** Revokes one assistant's access immediately: its access token stops
-   * working on the next check, and its refresh token is deleted. */
-  async revokeGrant(clientId: string): Promise<void> {
-    const { error } = await this.auth.oauth.revokeGrant({ clientId });
-    if (error) throw new Error(GENERIC_RETRY);
   }
 
   /** True while a verified reset link is open. Says nothing about whose. */

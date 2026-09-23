@@ -255,3 +255,34 @@ export interface CancelSubscriptionRequest {
 export interface CancelStateResponse {
   cancelAtPeriodEnd: boolean;
 }
+
+/**
+ * The own-authorization-server session endpoints (spec §R3) — the app's
+ * Supabase session calling `<api>/oauth/requests/*` and `/oauth/grants*`
+ * through the normal gateway, never GoTrue's own OAuth server.
+ */
+export interface OAuthRequestDto {
+  clientName: string;
+  redirectUri: string;
+  redirectHost: string;
+  scope: string;
+  /** True when the user already has an active grant for this client. */
+  alreadyGranted: boolean;
+}
+
+/** Both `/approve` and `/deny` resolve to the URL to send the browser to next. */
+export interface OAuthDecisionResponse {
+  redirectUrl: string;
+}
+
+export interface OAuthGrantDto {
+  clientId: string;
+  clientName: string;
+  redirectHost: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface OAuthGrantsResponse {
+  grants: OAuthGrantDto[];
+}
