@@ -3,33 +3,33 @@ import { SessionLifecycle } from '../auth/session-lifecycle';
 import { GenerationDto } from '../api/dtos';
 import { MediaCache } from '../media/media-cache';
 import { EditEngine } from './edit-engine';
-import { resizeBilinear } from './engines/raster';
 import { PixelBuffer } from './pixel-buffer';
-import { WorkerOp, runOpSync } from './edit-worker';
+import { WorkerOp } from './edit-worker';
+import { DownscaleCache } from './edit-session-downscale';
+import { ImagePreviewRenderer, exportBuffer } from './edit-session-render';
+import { EditWorkerQueue, abortError, isAbort } from './edit-session-worker-queue';
 
 /**
  * One editing session over a library image: working pixels, history, dirty
  * state. Heavy ops go to a Worker when the platform has one; vitest and
- * fallback paths run synchronously — identical output either way.
+ * fallback paths run synchronously — identical output either way. The public
+ * API here is the stable entry point; op dispatch lives in
+ * `edit-session-worker-queue.ts`, blob encoding/export in
+ * `edit-session-render.ts`, and preview downscaling in
+ * `edit-session-downscale.ts`.
  */
 @Injectable({ providedIn: 'root' })
 export class EditSession {
   private engine: EditEngine | null = null;
-  private worker: Worker | null = null;
-  private objectUrl = '';
+  private readonly dispatchQueue = new EditWorkerQueue();
+  private readonly renderer = new ImagePreviewRenderer();
+  private readonly downscale = new DownscaleCache();
   /** Invalidates in-flight previewOp results (bumped on commit/reset). */
   private previewToken = 0;
-  /** Drops out-of-order preview renders (blob encoding is async). */
-  private renderSeq = 0;
-  /** Serializes worker ops — concurrent posts would cross-resolve replies. */
-  private opQueue: Promise<unknown> = Promise.resolve();
-  /** Memoized downscaled copy of the committed pixels for cheap previews. */
-  private smallBase: { src: Uint8ClampedArray; maxDim: number; buf: PixelBuffer } | null = null;
 
   private readonly itemSig = signal<GenerationDto | null>(null);
   private readonly dirtySig = signal(false);
   private readonly busySig = signal(false);
-  private readonly previewSig = signal('');
   private readonly historyTick = signal(0);
   /** Uncommitted slider preview — drawn by the viewport over the image. */
   private readonly previewBufSig = signal<PixelBuffer | null>(null);
@@ -47,7 +47,7 @@ export class EditSession {
   readonly busy = this.busySig.asReadonly();
   readonly zoom = this.zoomSig.asReadonly();
   readonly pointPick = this.pointPickSig.asReadonly();
-  readonly previewUrl = this.previewSig.asReadonly();
+  readonly previewUrl = this.renderer.url;
   readonly previewBuffer = this.previewBufSig.asReadonly();
   readonly canUndo = computed(() => {
     this.historyTick();
@@ -87,9 +87,6 @@ export class EditSession {
   readonly openToken = this.openTokenSig.asReadonly();
   readonly revision = this.revisionSig.asReadonly();
   readonly discardedOnSignOut = this.discardedOnSignOutSig.asReadonly();
-
-  /** Rejects the operation the worker is currently running (see `dispatch`). */
-  private cancelWorkerTask: (() => void) | null = null;
 
   constructor() {
     inject(SessionLifecycle).register('edit-session', this);
@@ -148,7 +145,7 @@ export class EditSession {
     this.dirtySig.set(false);
     this.zoomSig.set(1);
     this.historyTick.update((n) => n + 1);
-    this.refreshPreview();
+    this.renderer.refresh(this.engine);
   }
 
   /** Test seam + shared init. */
@@ -181,16 +178,13 @@ export class EditSession {
     // Invalidate first: everything in flight checks this before publishing.
     this.openTokenSig.update((n) => n + 1);
     this.previewToken++;
-    this.renderSeq++;
+    this.renderer.invalidate();
     // Terminating a worker does not settle the promise waiting on it. The
-    // caller would await forever, and its `finally` would never run.
-    this.cancelWorkerTask?.();
-    this.cancelWorkerTask = null;
-    this.worker?.terminate();
-    this.worker = null;
-    this.opQueue = Promise.resolve();
+    // caller would await forever, and its `finally` would never run —
+    // `reset()` settles it.
+    this.dispatchQueue.reset();
     this.engine = null;
-    this.smallBase = null;
+    this.downscale.clear();
     this.itemSig.set(null);
     this.dirtySig.set(false);
     this.busySig.set(false);
@@ -198,7 +192,7 @@ export class EditSession {
     this.pointPickSig.set(null);
     this.previewBufSig.set(null);
     this.historyTick.update((n) => n + 1);
-    this.revokePreview();
+    this.renderer.revoke();
   }
 
   async apply(kind: WorkerOp['kind'], params: unknown): Promise<void> {
@@ -266,19 +260,8 @@ export class EditSession {
   /** Committed pixels, downscaled to `maxDim` and memoized per commit. */
   private previewBase(maxDim?: number): PixelBuffer {
     const cur = this.engine!.current;
-    const long = Math.max(cur.width, cur.height);
-    if (!maxDim || long <= maxDim) return cur;
-    if (this.smallBase?.src === cur.data && this.smallBase.maxDim === maxDim) {
-      return this.smallBase.buf;
-    }
-    const k = maxDim / long;
-    const buf = resizeBilinear(
-      cur,
-      Math.max(1, Math.round(cur.width * k)),
-      Math.max(1, Math.round(cur.height * k)),
-    );
-    this.smallBase = { src: cur.data, maxDim, buf };
-    return buf;
+    if (!maxDim) return cur;
+    return this.downscale.get(cur, maxDim);
   }
 
   /** Discard any uncommitted preview and show the committed pixels again. */
@@ -309,7 +292,7 @@ export class EditSession {
     const token = this.openTokenSig();
     this.busySig.set(true);
     try {
-      const next = await this.enqueue(() => run(engine.current));
+      const next = await this.dispatchQueue.enqueue(() => run(engine.current));
       if (!this.owns(token, engine)) return; // session closed mid-run
       engine.push(next);
       this.afterChange();
@@ -328,23 +311,25 @@ export class EditSession {
    */
   strokeOp(kind: WorkerOp['kind'], params: unknown): Promise<void> {
     const openToken = this.openTokenSig();
-    return this.enqueue(async () => {
-      const engine = this.engine;
-      if (!engine || !this.owns(openToken, engine)) return;
-      const token = this.previewToken;
-      const base = this.previewBufSig() ?? engine.current;
-      const next = await this.dispatch({ kind, buffer: base, params } as WorkerOp);
-      if (!this.owns(openToken, engine)) return;
-      if (token === this.previewToken) this.previewBufSig.set(next);
-    }).catch((error) => {
-      if (isAbort(error)) return;
-      throw error;
-    });
+    return this.dispatchQueue
+      .enqueue(async () => {
+        const engine = this.engine;
+        if (!engine || !this.owns(openToken, engine)) return;
+        const token = this.previewToken;
+        const base = this.previewBufSig() ?? engine.current;
+        const next = await this.dispatchQueue.dispatch({ kind, buffer: base, params } as WorkerOp);
+        if (!this.owns(openToken, engine)) return;
+        if (token === this.previewToken) this.previewBufSig.set(next);
+      })
+      .catch((error) => {
+        if (isAbort(error)) return;
+        throw error;
+      });
   }
 
   /** Commit the accumulated stroke preview as ONE undoable history entry. */
   async commitStroke(): Promise<void> {
-    await this.opQueue; // let queued stroke steps land first
+    await this.dispatchQueue.pending; // let queued stroke steps land first
     const buf = this.previewBufSig();
     if (!buf || !this.engine) return;
     this.engine.push(buf);
@@ -365,7 +350,7 @@ export class EditSession {
       if (typeof OffscreenCanvas !== 'undefined') {
         try {
           const { healSmart } = await import('./heal-engine');
-          next = await this.enqueue(() => healSmart(engine.current, mask));
+          next = await this.dispatchQueue.enqueue(() => healSmart(engine.current, mask));
         } catch {
           next = null;
         }
@@ -412,69 +397,18 @@ export class EditSession {
 
   /** Encode the committed pixels for download in the chosen format. */
   async exportBlob(type: 'image/png' | 'image/jpeg' | 'image/webp', quality?: number): Promise<Blob> {
-    return bufferToBlob(this.engine!.current, type, quality);
+    return exportBuffer(this.engine!.current, type, quality);
   }
 
   private run(op: WorkerOp): Promise<PixelBuffer> {
     const token = this.openTokenSig();
     const engine = this.engine;
-    return this.enqueue(() => {
+    return this.dispatchQueue.enqueue(() => {
       // Queued behind other work; by the time it reaches the front the
       // session may be gone. Posting it would start work nobody wants and
       // hand the reply to whatever opened next.
       if (!this.owns(token, engine)) return Promise.reject(abortError());
-      return this.dispatch(op);
-    });
-  }
-
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const next = this.opQueue.then(task);
-    this.opQueue = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  }
-
-  private dispatch(op: WorkerOp): Promise<PixelBuffer> {
-    if (typeof Worker === 'undefined') return Promise.resolve(runOpSync(op));
-    this.worker ??= new Worker(new URL('./edit-worker', import.meta.url), { type: 'module' });
-    return new Promise((resolve, reject) => {
-      const w = this.worker!;
-      // Dispatch is serialized, so there is exactly one of these at a time.
-      // `close()` calls it to settle the promise the caller is awaiting —
-      // terminating the worker on its own leaves that promise forever
-      // pending, and the caller's `finally` never runs.
-      const cleanup = () => {
-        w.removeEventListener('message', onMessage);
-        w.removeEventListener('error', onError);
-        this.cancelWorkerTask = null;
-      };
-      const onMessage = (e: MessageEvent<PixelBuffer>) => {
-        cleanup();
-        resolve(e.data);
-      };
-      const onError = (e: ErrorEvent) => {
-        cleanup();
-        // Worker broke — fall back to the main thread, same math.
-        try {
-          resolve(runOpSync(op));
-        } catch (err) {
-          reject(err ?? e);
-        }
-      };
-      this.cancelWorkerTask = () => {
-        cleanup();
-        reject(abortError());
-      };
-      w.addEventListener('message', onMessage);
-      w.addEventListener('error', onError);
-      try {
-        w.postMessage(op);
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
+      return this.dispatchQueue.dispatch(op);
     });
   }
 
@@ -491,52 +425,6 @@ export class EditSession {
     this.dirtySig.set(dirty);
     this.revisionSig.update((n) => n + 1);
     this.historyTick.update((n) => n + 1);
-    this.refreshPreview();
+    this.renderer.refresh(this.engine);
   }
-
-  private refreshPreview(): void {
-    if (typeof OffscreenCanvas === 'undefined' || !this.engine) return; // vitest
-    const seq = ++this.renderSeq;
-    void bufferToBlob(this.engine.current).then((blob) => {
-      if (seq !== this.renderSeq) return;
-      this.revokePreview();
-      this.objectUrl = URL.createObjectURL(blob);
-      this.previewSig.set(this.objectUrl);
-    });
-  }
-
-  private revokePreview(): void {
-    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.objectUrl = '';
-    this.previewSig.set('');
-  }
-}
-
-/**
- * Cancellation, not failure. A closed session settles everything it was
- * waiting on with this, and every caller treats it as "nothing to do".
- */
-function abortError(): DOMException {
-  return new DOMException('Edit session closed', 'AbortError');
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
-}
-
-function bufferToBlob(buf: PixelBuffer, type = 'image/png', quality?: number): Promise<Blob> {
-  const canvas = new OffscreenCanvas(buf.width, buf.height);
-  const ctx = canvas.getContext('2d')!;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(buf.data), buf.width, buf.height), 0, 0);
-  if (type === 'image/jpeg') {
-    // JPEG has no alpha and would flatten transparency (Cut Out) to black —
-    // composite over white instead.
-    const flat = new OffscreenCanvas(buf.width, buf.height);
-    const fctx = flat.getContext('2d')!;
-    fctx.fillStyle = '#fff';
-    fctx.fillRect(0, 0, buf.width, buf.height);
-    fctx.drawImage(canvas, 0, 0);
-    return flat.convertToBlob({ type, quality });
-  }
-  return canvas.convertToBlob({ type, quality });
 }

@@ -3,104 +3,40 @@ import {
   Component,
   DestroyRef,
   ElementRef,
-  computed,
   effect,
   inject,
   input,
   model,
   output,
-  signal,
   untracked,
   viewChild,
 } from '@angular/core';
-import { EDIT_TOOLS } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
-import {
-  SelectionStamp,
-  StampedSelection,
-  stampMatches,
-  usableMask,
-} from '../../../core/editing/selection-stamp';
-import { MAX_DEBLUR_PIXELS, MAX_UPSCALE_PIXELS } from '../../../core/editing/engines/engine-status';
-import {
-  HEAVY_PREVIEW_DEBOUNCE_MS,
-  PixelBudgetError,
-  PREVIEW_MAX_DIM,
-  scalePoint,
-} from '../../../core/editing/editor-policy';
-import { PreviewScheduler } from '../../../core/editing/preview-scheduler';
-// Type-only: a value import would drag onnxruntime into the eager bundle.
-import type { SelectPoint } from '../../../core/editing/engines/select-engine';
-import {
-  cutoutModelProgress,
-  deblurModelProgress,
-  deblurTileProgress,
-  depthModelProgress,
-  samModelProgress,
-  upscaleModelProgress,
-  upscaleTileProgress,
-} from '../../../core/editing/engines/engine-status';
-import { healModelProgress } from '../../../core/editing/heal-status';
-import { PixelBuffer } from '../../../core/editing/pixel-buffer';
-import { FilterPreset } from '../../../core/editing/ops/filters';
-import { lumaHistogram } from '../../../core/editing/ops/levels';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
 import { RetouchMode } from '../../../core/editing/ops/retouch';
-import { FlipAxis } from '../../../core/editing/ops/transform';
 import { StudioTool } from '../studio-tool';
+import {
+  CROP_PRESETS,
+  FILTER_PRESETS,
+  LIQUIFY_MODES,
+  RETOUCH_MODES,
+  toNum as clampNumber,
+} from './tool-options.constants';
+import { AiSelectionRequest, EngineToolsController } from './tool-options-engine-tools';
+import { PreviewOpsController } from './tool-options-preview-ops';
 
-interface CropPreset {
-  label: string;
-  /** Width / height; null = free-form. */
-  value: number | null;
-}
-
-const CROP_PRESETS: CropPreset[] = [
-  { label: 'Free', value: null },
-  { label: 'Square 1:1', value: 1 },
-  { label: 'Post 4:5', value: 4 / 5 },
-  { label: 'Story 9:16', value: 9 / 16 },
-  { label: 'Desktop 16:9', value: 16 / 9 },
-  { label: 'Photo 3:2', value: 3 / 2 },
-];
-
-const LIQUIFY_MODES: { id: LiquifyMode; label: string; blurb: string }[] = [
-  { id: 'push', label: 'Push', blurb: 'Drag pixels along your stroke' },
-  { id: 'pinch', label: 'Slim', blurb: 'Shrink toward the brush center' },
-  { id: 'bulge', label: 'Bulge', blurb: 'Expand from the brush center' },
-];
-
-const FILTER_PRESETS: { id: FilterPreset; label: string }[] = [
-  { id: 'bw', label: 'B&W' },
-  { id: 'sepia', label: 'Sepia' },
-  { id: 'vintage', label: 'Vintage' },
-  { id: 'warm', label: 'Warm' },
-  { id: 'cool', label: 'Cool' },
-  { id: 'grain', label: 'Film Grain' },
-  { id: 'vignette', label: 'Vignette' },
-  { id: 'fade', label: 'Fade' },
-  { id: 'noir', label: 'Noir' },
-  { id: 'matte', label: 'Matte' },
-  { id: 'tealorange', label: 'Teal & Orange' },
-  { id: 'goldenhour', label: 'Golden Hour' },
-  { id: 'crossprocess', label: 'Cross Process' },
-  { id: 'infrared', label: 'Infrared' },
-  { id: 'bleach', label: 'Bleach Bypass' },
-  { id: 'duotone', label: 'Duotone' },
-  { id: 'clarity', label: 'Clarity' },
-];
-
-/** Geometry sliders (straighten, perspective) preview on a copy no larger
- * than this — the overlay canvas CSS-scales it back over the image. */
-
-const RETOUCH_MODES: { id: RetouchMode; label: string; blurb: string }[] = [
-  { id: 'lighten', label: 'Lighten', blurb: 'Brighten where you paint (dodge)' },
-  { id: 'darken', label: 'Darken', blurb: 'Deepen shadows where you paint (burn)' },
-  { id: 'saturate', label: 'Saturate', blurb: 'Boost color where you paint' },
-  { id: 'desaturate', label: 'Mute', blurb: 'Drain color where you paint' },
-];
-
-/** Parameter strip for the active local tool (brush size, amounts, apply). */
+/**
+ * Parameter strip for the active local tool (brush size, amounts, apply).
+ *
+ * This component is the stable entry point other files bind to (selector,
+ * inputs/outputs). Its own state and behaviour are split into two grouped
+ * controllers: `PreviewOpsController` (`tool-options-preview-ops.ts`) for the
+ * tools that run through the session's live-preview pipeline, and
+ * `EngineToolsController` (`tool-options-engine-tools.ts`) for the on-device
+ * (ONNX) and selection-driven tools. The tool-switch reset, the histogram
+ * redraw and the canvas-click routing stay here because they are the same
+ * three effects regardless of which controller owns the affected state.
+ */
 @Component({
   selector: 'app-tool-options',
   templateUrl: './tool-options.html',
@@ -129,114 +65,23 @@ export class ToolOptions {
   readonly liquifyModes = LIQUIFY_MODES;
   readonly filterPresets = FILTER_PRESETS;
   readonly retouchModes = RETOUCH_MODES;
-  /** MI-GAN model download %, first heal only — null when idle. */
-  readonly healPct = computed(() => {
-    const p = healModelProgress();
-    return p === null ? null : Math.round(p * 100);
-  });
-  readonly brightness = signal(0);
-  readonly contrast = signal(0);
-  readonly saturation = signal(0);
-  readonly amount = signal(50);
-  /** −45..45°, live-previews without crop; Apply crops to the inside rect. */
-  readonly straightenDeg = signal(0);
-  readonly filterPreset = signal<FilterPreset>('bw');
-  readonly filterIntensity = signal(80);
-  /** Duotone shadow/highlight tints (RGB) — only read by that preset. */
-  readonly duotoneA = signal<[number, number, number]>([26, 22, 55]);
-  readonly duotoneB = signal<[number, number, number]>([245, 226, 168]);
-  readonly enhanceStrength = signal(80);
-  readonly levelsBlack = signal(0);
-  readonly levelsWhite = signal(255);
-  /** Stored ×100 so the range input stays integer (20..300 → 0.2..3.0). */
-  readonly levelsGamma = signal(100);
-  readonly perspV = signal(0);
-  readonly perspH = signal(0);
-  readonly dehazeStrength = signal(60);
-  readonly portraitStrength = signal(60);
-  readonly bokehStrength = signal(50);
-  /** Focus point in image px; null = center until the user clicks. */
-  readonly bokehFocus = signal<{ x: number; y: number } | null>(null);
-  /**
-   * Smart-select mask for the clicked object, stamped with the session it was
-   * computed in.
-   *
-   * A mask is a per-pixel map of ONE image at ONE moment. A crop, a rotate,
-   * an undo or a different image all invalidate it, and applying it anyway
-   * either throws on a length mismatch or — worse — erases the wrong part of
-   * the picture.
-   */
-  private readonly selectionSig = signal<StampedSelection | null>(null);
-  /** Template binding: is there a selection at all. */
-  readonly selMask = computed(() => this.selectionSig()?.mask ?? null);
-  /** All selection clicks so far — SAM refines the mask from the full set. */
-  readonly selPoints = signal<SelectPoint[]>([]);
-  /** Whether the next click grows or carves the selection. */
-  readonly selMode = signal<'add' | 'subtract'>('add');
-  /** Prompt for AI Fill on the selected area. */
-  readonly selPrompt = signal('');
+
   /** AI edit scoped to the selection mask — the workspace runs the job. */
-  readonly aiSelection = output<{ toolId: string; prompt: string; maskPngBase64: string }>();
-  /** Credit prices for the AI-on-selection buttons. */
-  readonly aiRemovePrice = EDIT_TOOLS.find((t) => t.id === 'edit-remove')?.creditCost ?? 0;
-  readonly aiFillPrice = EDIT_TOOLS.find((t) => t.id === 'edit-fill')?.creditCost ?? 0;
-  /** True while an engine (ONNX) call runs from this strip. */
-  readonly engineBusy = signal(false);
-  readonly engineError = signal('');
+  readonly aiSelection = output<AiSelectionRequest>();
 
-  /** First-use model download % for whichever engine tool is open. */
-  readonly enginePct = computed(() => {
-    const p =
-      cutoutModelProgress() ??
-      depthModelProgress() ??
-      upscaleModelProgress() ??
-      deblurModelProgress() ??
-      samModelProgress();
-    return p === null ? null : Math.round(p * 100);
-  });
-  /** Upscale inference progress %, null when idle. */
-  readonly upscalePct = computed(() => {
-    const p = upscaleTileProgress();
-    return p === null ? null : Math.round(p * 100);
-  });
-  /** Current pixel size — refreshed on every commit for the upscale caption. */
-  readonly imageSize = computed(() => {
-    this.session.previewUrl();
-    const buf = this.session.current();
-    return buf ? { w: buf.width, h: buf.height } : null;
-  });
-  readonly upscaleTooLarge = computed(() => {
-    const s = this.imageSize();
-    return !!s && s.w * s.h > MAX_UPSCALE_PIXELS;
-  });
-  /** AI Sharpen inference progress %, null when idle. */
-  readonly deblurPct = computed(() => {
-    const p = deblurTileProgress();
-    return p === null ? null : Math.round(p * 100);
-  });
-  readonly deblurTooLarge = computed(() => {
-    const s = this.imageSize();
-    return !!s && s.w * s.h > MAX_DEBLUR_PIXELS;
-  });
+  /** Tools driven by the session's live-preview pipeline (adjust, crop,
+   * filters, levels, perspective, …). */
+  readonly ops = new PreviewOpsController(this.session, () => this.tool(), this.cropAspect);
+  /** On-device (ONNX) and selection-driven tools (cutout, upscale, bokeh,
+   * smart select, magic erase). */
+  readonly engineTools = new EngineToolsController(this.session, () => this.tool(), (payload) =>
+    this.aiSelection.emit(payload),
+  );
 
-  private bokehToken = 0;
+  /** Clamp a free-typed number from a percent/degree input box. */
+  readonly toNum = clampNumber;
 
   private readonly histCanvas = viewChild<ElementRef<HTMLCanvasElement>>('histCanvas');
-
-  /** One preview compute per animation frame — slider drags coalesce. */
-  private readonly previewSched = new PreviewScheduler(() => this.runPreview());
-
-  /**
-   * Bokeh is heavier (ONNX), so it debounces instead of running per frame —
-   * and the scheduler keeps exactly one run in flight, with at most one
-   * replacement waiting. A drag used to start a new depth pass on top of the
-   * last one for as long as it lasted.
-   */
-  private readonly bokehPreview = new PreviewScheduler(
-    () => this.runBokehPreview(),
-    (cb) => setTimeout(() => cb(0), HEAVY_PREVIEW_DEBOUNCE_MS) as unknown as number,
-    (handle) => clearTimeout(handle),
-  );
 
   constructor() {
     // Switching tools drops any un-applied preview and resets the sliders.
@@ -260,7 +105,7 @@ export class ToolOptions {
       if (!this.histCanvas()) return;
       this.session.previewUrl();
       this.session.previewBuffer();
-      untracked(() => this.drawHistogram());
+      untracked(() => this.ops.drawHistogram(this.histCanvas()?.nativeElement));
     });
     // Canvas clicks routed from the viewport: bokeh re-focuses, select masks.
     effect(() => {
@@ -269,16 +114,14 @@ export class ToolOptions {
       const t = untracked(() => this.tool());
       untracked(() => {
         if (t === 'bokeh') {
-          this.bokehFocus.set(pick);
-          this.scheduleBokehPreview();
+          this.engineTools.bokehFocus.set(pick);
+          this.engineTools.scheduleBokehPreview();
         } else if (t === 'select') {
           // First click is always additive — subtracting from nothing is a no-op.
-          const label: 0 | 1 =
-            this.selPoints().length && this.selMode() === 'subtract' ? 0 : 1;
-          this.selPoints.update((pts) => [...pts, { x: pick.x, y: pick.y, label }]);
-          void this.runSelect();
+          this.engineTools.addSelectPoint(pick);
+          void this.engineTools.runSelect();
         } else if (t === 'erase') {
-          void this.runErase({ x: pick.x, y: pick.y, label: 1 });
+          void this.engineTools.runErase({ x: pick.x, y: pick.y, label: 1 });
         }
       });
     });
@@ -286,507 +129,22 @@ export class ToolOptions {
     // slider/filter preview would otherwise linger on the canvas with no owner
     // to clear it — drop it so closing a tool discards its preview.
     inject(DestroyRef).onDestroy(() => {
-      this.previewSched.cancel();
-      this.bokehPreview.cancel();
+      this.ops.cancelPreview();
+      this.engineTools.cancelBokehPreview();
       this.session.resetPreview();
       this.session.setPointPick(null);
     });
   }
 
-  /** Clamp free-typed numbers from the percent boxes. */
-  toNum(value: string, lo: number, hi: number): number {
-    const n = Number(value);
-    if (Number.isNaN(n)) return 0;
-    return Math.min(hi, Math.max(lo, Math.round(n)));
-  }
-
   /** Live preview, coalesced to one compute per frame — no history commit. */
   schedulePreview(): void {
-    this.previewSched.schedule();
-  }
-
-  private async runPreview(): Promise<void> {
-    const t = this.tool();
-    if (t === 'adjust') {
-      await this.session.previewOp(
-        'adjust',
-        {
-          brightness: this.brightness(),
-          contrast: this.contrast(),
-          saturation: this.saturation(),
-        },
-        PREVIEW_MAX_DIM,
-      );
-    } else if (t === 'sharpen') {
-      await this.session.previewOp('sharpen', this.amount(), PREVIEW_MAX_DIM);
-    } else if (t === 'smooth') {
-      await this.session.previewOp('smooth', this.amount(), PREVIEW_MAX_DIM);
-    } else if (t === 'crop') {
-      // Rotate/flip/straighten live inside the crop options.
-      if (this.straightenDeg() === 0) this.session.resetPreview();
-      else
-        await this.session.previewOp(
-          'straighten',
-          { degrees: this.straightenDeg(), crop: false },
-          PREVIEW_MAX_DIM,
-        );
-    } else if (t === 'filters') {
-      await this.session.previewOp(
-        'filter',
-        {
-          preset: this.filterPreset(),
-          intensity: this.filterIntensity(),
-          colorA: this.duotoneA(),
-          colorB: this.duotoneB(),
-        },
-        PREVIEW_MAX_DIM,
-      );
-    } else if (t === 'enhance') {
-      await this.session.previewOp('enhance', this.enhanceStrength(), PREVIEW_MAX_DIM);
-    } else if (t === 'dehaze') {
-      await this.session.previewOp('dehaze', { strength: this.dehazeStrength() }, PREVIEW_MAX_DIM);
-    } else if (t === 'portraitsmooth') {
-      await this.session.previewOp(
-        'portraitSmooth',
-        { strength: this.portraitStrength() },
-        PREVIEW_MAX_DIM,
-      );
-    } else if (t === 'levels') {
-      await this.session.previewOp('levels', this.levelsParams(), PREVIEW_MAX_DIM);
-    } else if (t === 'perspective') {
-      if (this.perspV() === 0 && this.perspH() === 0) this.session.resetPreview();
-      else
-        await this.session.previewOp(
-          'perspective',
-          { vertical: this.perspV(), horizontal: this.perspH() },
-          PREVIEW_MAX_DIM,
-        );
-    }
+    this.ops.schedulePreview();
   }
 
   private resetPending(): void {
-    this.previewSched.cancel();
-    this.bokehPreview.cancel();
-    this.brightness.set(0);
-    this.contrast.set(0);
-    this.saturation.set(0);
-    this.amount.set(50); // sharpen/smooth must not inherit each other's value
-    this.straightenDeg.set(0);
-    this.filterPreset.set('bw');
-    this.filterIntensity.set(80);
-    this.duotoneA.set([26, 22, 55]);
-    this.duotoneB.set([245, 226, 168]);
-    this.enhanceStrength.set(80);
-    this.levelsBlack.set(0);
-    this.levelsWhite.set(255);
-    this.levelsGamma.set(100);
-    this.perspV.set(0);
-    this.perspH.set(0);
-    this.dehazeStrength.set(60);
-    this.portraitStrength.set(60);
-    this.bokehStrength.set(50);
-    this.bokehFocus.set(null);
-    this.selectionSig.set(null);
-    this.selPoints.set([]);
-    this.selMode.set('add');
-    this.selPrompt.set('');
-    this.engineError.set('');
+    this.ops.reset();
+    this.engineTools.reset();
     this.session.setPointPick(null);
     this.session.resetPreview();
   }
-
-  selectPreset(value: number | null): void {
-    this.cropAspect.set(value);
-  }
-
-  /** Lock the crop to the image's own ratio. */
-  selectOriginal(): void {
-    const buf = this.session.current();
-    if (buf) this.cropAspect.set(buf.width / buf.height);
-  }
-
-  selectFilter(preset: FilterPreset): void {
-    this.filterPreset.set(preset);
-    this.schedulePreview();
-  }
-
-  hexToRgb(hex: string): [number, number, number] {
-    const n = parseInt(hex.replace('#', ''), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  }
-
-  rgbToHex([r, g, b]: [number, number, number]): string {
-    return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
-  }
-
-  setDuotone(which: 'a' | 'b', hex: string): void {
-    (which === 'a' ? this.duotoneA : this.duotoneB).set(this.hexToRgb(hex));
-    this.schedulePreview();
-  }
-
-  async applyAdjust(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('adjust', {
-      brightness: this.brightness(),
-      contrast: this.contrast(),
-      saturation: this.saturation(),
-    });
-    this.brightness.set(0);
-    this.contrast.set(0);
-    this.saturation.set(0);
-  }
-
-  async applySharpen(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('sharpen', this.amount());
-  }
-
-  async applySmooth(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('smooth', this.amount());
-  }
-
-  async applyRotate(): Promise<void> {
-    await this.session.apply('rotate90', null);
-  }
-
-  async applyRotateCcw(): Promise<void> {
-    await this.session.apply('rotate90ccw', null);
-  }
-
-  async applyFlip(axis: FlipAxis): Promise<void> {
-    await this.session.apply('flip', axis);
-  }
-
-  async applyStraighten(): Promise<void> {
-    this.previewSched.cancel();
-    const degrees = this.straightenDeg();
-    if (degrees === 0) return;
-    await this.session.apply('straighten', { degrees, crop: true });
-    this.straightenDeg.set(0);
-  }
-
-  async applyFilter(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('filter', {
-      preset: this.filterPreset(),
-      intensity: this.filterIntensity(),
-      colorA: this.duotoneA(),
-      colorB: this.duotoneB(),
-    });
-  }
-
-  async applyEnhance(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('enhance', this.enhanceStrength());
-  }
-
-  async applyDehaze(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('dehaze', { strength: this.dehazeStrength() });
-  }
-
-  async applyPortrait(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('portraitSmooth', { strength: this.portraitStrength() });
-  }
-
-  async applyLevels(): Promise<void> {
-    this.previewSched.cancel();
-    await this.session.apply('levels', this.levelsParams());
-    this.levelsBlack.set(0);
-    this.levelsWhite.set(255);
-    this.levelsGamma.set(100);
-  }
-
-  async applyPerspective(): Promise<void> {
-    this.previewSched.cancel();
-    if (this.perspV() === 0 && this.perspH() === 0) return;
-    await this.session.apply('perspective', {
-      vertical: this.perspV(),
-      horizontal: this.perspH(),
-    });
-    this.perspV.set(0);
-    this.perspH.set(0);
-  }
-
-  /** Cut Out: strip the background locally — free, on-device. */
-  async runCutout(): Promise<void> {
-    await this.runEngine(async () => {
-      const { removeBackground } = await import('../../../core/editing/engines/cutout-engine');
-      await this.session.applyEngine(removeBackground);
-    });
-  }
-
-  /** Upscale 2×: tiled Swin2SR, on-device. */
-  async runUpscale(): Promise<void> {
-    await this.runEngine(async () => {
-      const { upscale2x } = await import('../../../core/editing/engines/upscale-engine');
-      await this.session.applyEngine(upscale2x);
-    });
-  }
-
-  /** AI Sharpen: tiled NAFNet deblur, on-device. */
-  async runAiSharpen(): Promise<void> {
-    await this.runEngine(async () => {
-      const { deblur } = await import('../../../core/editing/engines/deblur-engine');
-      await this.session.applyEngine(deblur);
-    });
-  }
-
-  /** Magic Erase: tap an object → SAM mask → grow → MI-GAN inpaint it away. */
-  private async runErase(point: SelectPoint): Promise<void> {
-    await this.runEngine(async () => {
-      const buf = this.session.current();
-      if (!buf) return;
-      const stamp = this.stamp(buf);
-      const { smartSelect } = await import('../../../core/editing/engines/select-engine');
-      const mask = await smartSelect(buf, [point]);
-      // SAM took a while. If the pixels moved, healing this mask would erase
-      // whatever is now in that rectangle.
-      if (!this.stampMatches(stamp)) {
-        this.engineError.set('The image changed — tap the object again.');
-        return;
-      }
-      const { dilateMask } = await import('../../../core/editing/engines/raster');
-      const grown = dilateMask(mask, buf.width, buf.height, 3);
-      await this.session.applyHeal(grown);
-    });
-  }
-
-  scheduleBokehPreview(): void {
-    this.bokehPreview.schedule();
-  }
-
-  private async runBokehPreview(): Promise<void> {
-    const token = ++this.bokehToken;
-    // Previews run on the proxy: a full-resolution depth pass per slider
-    // notch is seconds of inference for an answer nobody can see at that
-    // size. The commit still runs on the real pixels.
-    const proxy = this.session.proxy(PREVIEW_MAX_DIM);
-    if (!proxy) return;
-    this.engineError.set('');
-    this.engineBusy.set(true);
-    try {
-      const { bokeh } = await import('../../../core/editing/engines/bokeh-engine');
-      const out = await bokeh(proxy.buf, {
-        // The focus point was picked on the full image.
-        focus: scalePoint(this.bokehFocus(), proxy.scale),
-        strength: this.bokehStrength(),
-      });
-      if (token === this.bokehToken && this.tool() === 'bokeh') {
-        this.session.showPreviewBuffer(out);
-      }
-    } catch {
-      if (token === this.bokehToken) this.engineError.set('Engine failed to load — check your connection and try again.');
-    } finally {
-      if (token === this.bokehToken) this.engineBusy.set(false);
-    }
-  }
-
-  async applyBokeh(): Promise<void> {
-    this.bokehPreview.cancel();
-    const focus = this.bokehFocus();
-    const strength = this.bokehStrength();
-    await this.runEngine(async () => {
-      const { bokeh } = await import('../../../core/editing/engines/bokeh-engine');
-      await this.session.applyEngine((buf) => bokeh(buf, { focus, strength }));
-    });
-  }
-
-  private async runSelect(): Promise<void> {
-    await this.runEngine(async () => {
-      const buf = this.session.current();
-      const points = this.selPoints();
-      if (!buf || !points.length) return;
-      const stamp = this.stamp(buf);
-      const { smartSelect } = await import('../../../core/editing/engines/select-engine');
-      const mask = await smartSelect(buf, points);
-      if (this.tool() !== 'select') return;
-      // The image may have changed while the model ran.
-      if (!this.stampMatches(stamp)) return;
-      this.selectionSig.set({ ...stamp, mask });
-      this.session.showPreviewBuffer(tintMask(buf, mask));
-    });
-  }
-
-  /** What identifies the pixels a mask was computed from. */
-  private stamp(buf: PixelBuffer): SelectionStamp {
-    return {
-      token: this.session.openToken(),
-      revision: this.session.revision(),
-      width: buf.width,
-      height: buf.height,
-    };
-  }
-
-  private stampMatches(stamp: SelectionStamp): boolean {
-    const now = this.currentStamp();
-    return !!now && stampMatches(stamp, now);
-  }
-
-  private currentStamp(): SelectionStamp | null {
-    const buf = this.session.current();
-    if (!buf) return null;
-    return this.stamp(buf);
-  }
-
-  /**
-   * The selection, but only if it still describes the pixels on screen.
-   *
-   * Anything else is refused with something the customer can act on, BEFORE
-   * a model runs or a buffer is allocated.
-   */
-  private usableSelection(): Uint8Array | null {
-    const selection = this.selectionSig();
-    if (!selection) return null;
-    const mask = usableMask(selection, this.currentStamp());
-    if (mask) return mask;
-    this.selectClear();
-    this.engineError.set('The image changed — select the area again.');
-    return null;
-  }
-
-  /** Smart select → MI-GAN inpaint: the clicked object disappears. */
-  async selectRemove(): Promise<void> {
-    const mask = this.usableSelection();
-    if (!mask) return;
-    this.selectClear();
-    await this.session.applyHeal(mask);
-  }
-
-  /** Smart select → keep only the object, transparent elsewhere. */
-  async selectCutout(): Promise<void> {
-    const mask = this.usableSelection();
-    if (!mask) return;
-    this.selectClear();
-    await this.runEngine(async () => {
-      const { cutToMask } = await import('../../../core/editing/engines/select-engine');
-      await this.session.applyEngine((buf) => Promise.resolve(cutToMask(buf, mask)));
-    });
-  }
-
-  selectClear(): void {
-    this.selectionSig.set(null);
-    this.selPoints.set([]);
-    this.selMode.set('add');
-    this.session.resetPreview();
-  }
-
-  /** Selection → AI Remove: FLUX-fill erases the object, scoped to the mask. */
-  async selectAiRemove(): Promise<void> {
-    const png = await this.selectionMaskPng();
-    if (!png) return;
-    this.selectClear();
-    this.aiSelection.emit({ toolId: 'edit-remove', prompt: '', maskPngBase64: png });
-  }
-
-  /** Selection → AI Fill: repaint ONLY the selected area from the prompt. */
-  async selectAiFill(): Promise<void> {
-    const prompt = this.selPrompt().trim();
-    const png = await this.selectionMaskPng();
-    if (!png || !prompt) return;
-    this.selectClear();
-    this.selPrompt.set('');
-    this.aiSelection.emit({ toolId: 'edit-fill', prompt, maskPngBase64: png });
-  }
-
-  /** Selection mask as the white-on-black PNG data URI FLUX fill expects,
-   * grown a few px so no rim of the original object survives the repaint. */
-  private async selectionMaskPng(): Promise<string | null> {
-    const mask = this.usableSelection();
-    const buf = this.session.current();
-    if (!mask || !buf) return null;
-    const { dilateMask } = await import('../../../core/editing/engines/raster');
-    const grown = dilateMask(mask, buf.width, buf.height, 4);
-    const canvas = document.createElement('canvas');
-    canvas.width = buf.width;
-    canvas.height = buf.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    const img = ctx.createImageData(buf.width, buf.height);
-    for (let i = 0; i < grown.length; i++) {
-      const v = grown[i] ? 255 : 0;
-      const p = i * 4;
-      img.data[p] = v;
-      img.data[p + 1] = v;
-      img.data[p + 2] = v;
-      img.data[p + 3] = 255;
-    }
-    ctx.putImageData(img, 0, 0);
-    return canvas.toDataURL('image/png');
-  }
-
-  private async runEngine(task: () => Promise<void>): Promise<void> {
-    this.engineError.set('');
-    this.engineBusy.set(true);
-    try {
-      await task();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      this.engineError.set(
-        // A size refusal already carries the sentence a customer should read.
-        e instanceof PixelBudgetError
-          ? `${msg} The limit is 16 MP (4096×4096).`
-          : /fetch|network/i.test(msg) || !msg
-            ? 'Engine failed to load — check your connection and try again.'
-            : `Engine error: ${msg}`,
-      );
-    } finally {
-      this.engineBusy.set(false);
-    }
-  }
-
-  /** Gamma slider value as the real coefficient, e.g. 100 → "1.00". */
-  gammaLabel(): string {
-    return (this.levelsGamma() / 100).toFixed(2);
-  }
-
-  private levelsParams(): { black: number; white: number; gamma: number } {
-    // Never let black meet white — the op guards too, but keep the UI sane.
-    const black = Math.min(this.levelsBlack(), 254);
-    const white = Math.max(this.levelsWhite(), black + 1);
-    return { black, white, gamma: this.levelsGamma() / 100 };
-  }
-
-  /** Bokeh slider drag re-renders the preview with the cached depth map. */
-  onBokehStrength(v: number): void {
-    this.bokehStrength.set(v);
-    this.scheduleBokehPreview();
-  }
-
-  private drawHistogram(): void {
-    const canvas = this.histCanvas()?.nativeElement;
-    // Preview pixels when a levels preview is up — the bars follow the sliders.
-    const buf = this.session.previewBuffer() ?? this.session.current();
-    if (!canvas || !buf) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return; // non-browser test envs
-    const bins = lumaHistogram(buf);
-    const { width: cw, height: ch } = canvas;
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = 'rgb(255 255 255 / 0.45)';
-    for (let v = 0; v < 256; v++) {
-      const barH = Math.max(bins[v] > 0 ? 1 : 0, bins[v] * ch);
-      ctx.fillRect((v / 256) * cw, ch - barH, cw / 256, barH);
-    }
-  }
-}
-
-/** Selection highlight: masked pixels blended toward the accent purple. */
-function tintMask(buf: PixelBuffer, mask: Uint8Array): PixelBuffer {
-  const out: PixelBuffer = {
-    width: buf.width,
-    height: buf.height,
-    data: new Uint8ClampedArray(buf.data),
-  };
-  const d = out.data;
-  for (let i = 0; i < mask.length; i++) {
-    if (!mask[i]) continue;
-    const p = i * 4;
-    d[p] = d[p] * 0.55 + 130 * 0.45;
-    d[p + 1] = d[p + 1] * 0.55 + 90 * 0.45;
-    d[p + 2] = d[p + 2] * 0.55 + 255 * 0.45;
-  }
-  return out;
 }
