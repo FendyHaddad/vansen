@@ -849,3 +849,18 @@ still the default); mobile's bundled catalog regenerated (`6bc0d0b`, no store bu
 Shipped: style presets removed across web, api, MCP (`generate_image` has no `style`) and catalog; a
 `style` field from an old cached client is ignored, never refused. Composer headings removed, model name
 on provider-icon hover. Mobile `b8918c0` + `347b07e` pushed (no store build).
+
+### 2026-09-24 — AI edit tools open to Studio (0039) + composer polish (`0fd293e`)
+
+`supabase db push --linked` applied `0039_edit_tools_studio.sql` (dry run first); `./deploy.sh --yes`
+exited 0 (gates included): `DEPLOYED 0fd293e · catalog 2026-09-24.2 · api v85`.
+
+| Check | Result |
+|---|---|
+| `GET <api>/manifest` | `gitRevision` 0fd293e, `schemaVersion` 0039, `workerVersion` v38 |
+| `GET <api>/catalog` `flat.editTools[].plan` | all four `studio` |
+
+Shipped: owner decision — Remove Object / Generative Fill / Expand / Remove Background available to
+Studio (still credit-priced); fixed-width high-contrast price badges; edit hint only for an empty
+library; composer reference row Upload · Library · Persona, batch stepper beside Generate. Mobile
+`6fc83bc` pushed (no store build).
