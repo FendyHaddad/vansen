@@ -46,6 +46,9 @@ const WEB_ONLY_CATALOG_FILES = new Set([
   'catalog-fingerprint.ts',
   // Angular Injectable/InjectionToken + `environment` import — browser-only.
   'public-capabilities.ts',
+  // Angular Injectable that fetches GET /catalog for the AI edit tool plans —
+  // browser-only.
+  'edit-tool-catalog.ts',
 ]);
 
 /** Every non-spec `.ts` file under `src/app/core/catalog/`, relative to it. */
