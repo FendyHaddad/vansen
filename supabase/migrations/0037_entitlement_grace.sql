@@ -35,13 +35,14 @@ begin
 
   -- The gateway's isEntitled rule exactly: anything but expired; a canceled
   -- plan (Stripe sets it on cancel-at-period-end) until its paid period ends;
-  -- an active plan until 3 days after it (late renewal webhooks).
+  -- an active plan until 72 hours after it (late renewal webhooks; hours,
+  -- not calendar days, so a session time zone's DST shift cannot move it).
   select plan into v_plan from public.subscriptions
    where user_id = p_user and status <> 'expired'
      and not (status = 'canceled' and current_period_end is not null
               and current_period_end < now())
      and not (status = 'active' and current_period_end is not null
-              and current_period_end <= now() - interval '3 days');
+              and current_period_end <= now() - interval '72 hours');
   if v_plan is null then
     raise exception 'subscription_required' using errcode = 'P0001';
   end if;

@@ -5,7 +5,16 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import type Stripe from "npm:stripe@17";
 import { isEntitled } from "./entitlement.ts";
-import { type SubscriptionSource, subscriptionSourceOf } from "./subscription-source.ts";
+import {
+  appStoreOnly,
+  type SubscriptionSource,
+  subscriptionSourceOf,
+} from "./subscription-source.ts";
+
+export interface SubscriptionRail {
+  source: SubscriptionSource | null;
+  appStoreOnly: boolean;
+}
 
 const SUSPEND_STRIKES = 2;
 
@@ -76,18 +85,23 @@ export function createAccounts(admin: SupabaseClient, stripe: Stripe) {
     return data.plan as "studio" | "pro" | "owner";
   }
 
-  /** Which rail wrote the subscription row; null when there is none. A failed
-   * read throws, so a caller in a try block refuses rather than guesses. */
-  async function subscriptionSource(
-    userId: string,
-  ): Promise<SubscriptionSource | null> {
+  /**
+   * Who bills the subscription row. `source` is what /profile publishes;
+   * `appStoreOnly` is true when the row has no Stripe subscription id, and only
+   * then may a Stripe route refuse without asking Stripe. A failed read
+   * throws, so a caller in a try block refuses rather than guesses.
+   */
+  async function subscriptionRail(userId: string): Promise<SubscriptionRail> {
     const { data, error } = await admin
       .from("subscriptions")
-      .select("stripe_subscription_id, iap_original_transaction_id")
+      .select("plan, stripe_subscription_id, iap_original_transaction_id")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw new Error(`subscription_read_failed ${error.message}`);
-    return await subscriptionSourceOf(admin, userId, data);
+    return {
+      source: await subscriptionSourceOf(admin, userId, data),
+      appStoreOnly: appStoreOnly(data),
+    };
   }
 
   return {
@@ -96,6 +110,6 @@ export function createAccounts(admin: SupabaseClient, stripe: Stripe) {
     creditsOf,
     stripeCustomerFor,
     activePlan,
-    subscriptionSource,
+    subscriptionRail,
   };
 }

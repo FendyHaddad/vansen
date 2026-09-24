@@ -2,8 +2,12 @@
 // GET /billing/lane, GET /billing/overview, POST /billing/cancel,
 // POST /billing/resume and POST /billing/portal. Credits always land via
 // the webhook's invoice.paid; these routes only mirror plan and status.
-// A subscription the App Store wrote is managed there: the Stripe routes
-// answer 409 managed_in_app_store and overview makes no Stripe call.
+// A row only the App Store billed (no Stripe subscription id) is managed
+// there: the Stripe routes answer 409 managed_in_app_store and overview makes
+// no Stripe call. A row with a Stripe subscription id always lets Stripe
+// answer, so a user billed by both rails can still cancel the Stripe side;
+// if Stripe has nothing live and the App Store pays, "no subscription" reads
+// as managed_in_app_store.
 import type { Context } from "jsr:@hono/hono";
 import { laneFor } from "../_shared/billing-lanes.ts";
 import type { ApiContext, App } from "../lib/context.ts";
@@ -13,6 +17,8 @@ const EMPTY_OVERVIEW = {
   cancelAtPeriodEnd: false,
   upcoming: null,
   paymentMethod: null,
+  /** Whether Stripe bills a live subscription for this user. */
+  stripeSubscription: false,
 };
 
 export function registerBillingSubscriptionRoutes(
@@ -23,22 +29,36 @@ export function registerBillingSubscriptionRoutes(
     admin,
     stripe,
     stripeCustomerFor,
-    subscriptionSource,
+    subscriptionRail,
     appOrigin,
     logError,
     PLAN_PRICE_IDS,
   } = ctx;
 
-  /** Refuses before any Stripe call when the App Store wrote the row. */
-  async function managedInAppStore(c: Context): Promise<Response | null> {
-    const source = await subscriptionSource(c.get("userId"));
-    if (source !== "app_store") return null;
+  function managedInAppStore(c: Context): Response {
     return fail(
       c,
       409,
       "managed_in_app_store",
       "Your plan is billed by the App Store. Manage it there.",
     );
+  }
+
+  /** Refuses before any Stripe call when only the App Store billed the row. */
+  async function appStoreOnlyRefusal(c: Context): Promise<Response | null> {
+    const rail = await subscriptionRail(c.get("userId"));
+    if (!rail.appStoreOnly) return null;
+    return managedInAppStore(c);
+  }
+
+  /** Stripe has nothing live: say who does bill the plan, if anyone. */
+  async function noStripeSubscription(
+    c: Context,
+    message: string,
+  ): Promise<Response> {
+    const rail = await subscriptionRail(c.get("userId"));
+    if (rail.source === "app_store") return managedInAppStore(c);
+    return fail(c, 400, "no_subscription", message);
   }
 
   /**
@@ -78,7 +98,7 @@ export function registerBillingSubscriptionRoutes(
     }
 
     try {
-      const refused = await managedInAppStore(c);
+      const refused = await appStoreOnlyRefusal(c);
       if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
@@ -92,10 +112,8 @@ export function registerBillingSubscriptionRoutes(
           s.status === "past_due",
       );
       if (!sub) {
-        return fail(
+        return await noStripeSubscription(
           c,
-          400,
-          "no_subscription",
           "Start a subscription before changing plans",
         );
       }
@@ -231,9 +249,9 @@ export function registerBillingSubscriptionRoutes(
   app.get("/billing/overview", async (c) => {
     const userId = c.get("userId");
     try {
-      // An App Store subscriber has nothing in Stripe to show, and opening
-      // Billing must not create a Stripe customer for them.
-      if (await subscriptionSource(userId) === "app_store") {
+      // A row only the App Store billed has nothing in Stripe to show, and
+      // opening Billing must not create a Stripe customer for it.
+      if ((await subscriptionRail(userId)).appStoreOnly) {
         return c.json(EMPTY_OVERVIEW);
       }
       const customer = await stripeCustomerFor(userId, c.get("email"));
@@ -271,6 +289,7 @@ export function registerBillingSubscriptionRoutes(
         cancelAtPeriodEnd: sub.cancel_at_period_end,
         upcoming,
         paymentMethod: card ? { brand: card.brand, last4: card.last4 } : null,
+        stripeSubscription: true,
       });
     } catch (e) {
       logError(c, "overview_failed", e);
@@ -290,7 +309,7 @@ export function registerBillingSubscriptionRoutes(
       ? body.reason.slice(0, 120)
       : "";
     try {
-      const refused = await managedInAppStore(c);
+      const refused = await appStoreOnlyRefusal(c);
       if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
@@ -304,12 +323,7 @@ export function registerBillingSubscriptionRoutes(
           s.status === "past_due",
       );
       if (!sub) {
-        return fail(
-          c,
-          400,
-          "no_subscription",
-          "No active subscription to cancel",
-        );
+        return await noStripeSubscription(c, "No active subscription to cancel");
       }
       if (sub.cancel_at_period_end) return c.json({ cancelAtPeriodEnd: true });
 
@@ -349,7 +363,7 @@ export function registerBillingSubscriptionRoutes(
   app.post("/billing/resume", async (c) => {
     const userId = c.get("userId");
     try {
-      const refused = await managedInAppStore(c);
+      const refused = await appStoreOnlyRefusal(c);
       if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
@@ -363,7 +377,7 @@ export function registerBillingSubscriptionRoutes(
           s.status === "past_due",
       );
       if (!sub) {
-        return fail(c, 400, "no_subscription", "No subscription to resume");
+        return await noStripeSubscription(c, "No subscription to resume");
       }
       if (sub.cancel_at_period_end) {
         await stripe.subscriptions.update(sub.id, {
@@ -393,7 +407,7 @@ export function registerBillingSubscriptionRoutes(
   app.post("/billing/portal", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     try {
-      const refused = await managedInAppStore(c);
+      const refused = await appStoreOnlyRefusal(c);
       if (refused) return refused;
       const customer = await stripeCustomerFor(c.get("userId"), c.get("email"));
       const returnUrl = body.platform === "mobile"

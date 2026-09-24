@@ -67,7 +67,12 @@ export function createAppstoreWebhook(
       : new Date().toISOString();
 
     if (action === 'set_active' || action === 'set_canceled' || action === 'set_expired') {
-      await setIapSubscriptionStatus(admin, tx.originalTransactionId, statusFor(action));
+      await setIapSubscriptionStatus(
+        admin,
+        tx.originalTransactionId,
+        statusFor(action),
+        tx.expiresDate,
+      );
       return;
     }
 
@@ -88,10 +93,7 @@ export function createAppstoreWebhook(
         console.error('no user for iap transaction', tx.originalTransactionId);
         return 'unfulfillable:no_user';
       }
-      if (action === 'refund') {
-        const clawedBack = await clawBackIap(admin, userId, tx, eventAt, delivery);
-        return clawedBack ? 'granted' : 'unfulfillable:unknown_iap_grant';
-      }
+      if (action === 'refund') return await clawBackIap(admin, userId, tx, eventAt, delivery);
       return settlementOf(await applyIapTransaction(admin, userId, tx, eventAt, Date.now(), delivery));
     });
   }

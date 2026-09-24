@@ -116,6 +116,7 @@
 
 .studio-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: auto;
 }
@@ -123,6 +124,11 @@
 .app-store-note {
   margin: 0;
   align-self: center;
+  font-weight: 500;
+}
+
+.two-subs-note {
+  color: var(--warn);
   font-weight: 500;
 }
 

@@ -56,13 +56,18 @@ export function registerBillingCheckoutRoutes(app: App, ctx: ApiContext): void {
     if (!plan) {
       return fail(c, 400, "invalid_plan", "plan must be studio or pro");
     }
-    const { data: ownSub } = await admin
+    const { data: ownSub, error: ownSubError } = await admin
       .from("subscriptions")
       .select(
         "plan, status, current_period_end, stripe_subscription_id, iap_original_transaction_id",
       )
       .eq("user_id", userId)
       .maybeSingle();
+    // Unread is not "no row": the App Store guard below must not fail open.
+    if (ownSubError) {
+      logError(c, "subscribe_failed", new Error(ownSubError.message));
+      return fail(c, 400, "billing_failed", "Could not start checkout");
+    }
     if (ownSub?.plan === "owner" && ownSub.status === "active") {
       return fail(
         c,

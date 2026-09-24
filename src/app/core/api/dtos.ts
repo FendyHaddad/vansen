@@ -250,6 +250,8 @@ export interface BillingOverviewDto {
   cancelAtPeriodEnd: boolean;
   upcoming: { amountUsd: number; date: string | null } | null;
   paymentMethod: { brand: string; last4: string } | null;
+  /** Stripe bills a live subscription. Absent from an older server: read as false. */
+  stripeSubscription?: boolean;
 }
 
 export interface CancelSubscriptionRequest {

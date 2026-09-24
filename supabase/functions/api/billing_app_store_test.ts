@@ -16,7 +16,7 @@ interface StripeCall {
 }
 
 /** Records every Stripe method called, answering with canned values. */
-function recordingStripe(opts: { history?: { status: string }[] } = {}) {
+function recordingStripe(opts: { history?: Record<string, unknown>[] } = {}) {
   const calls: StripeCall[] = [];
   const answers: Record<string, unknown> = {
     'customers.create': { id: 'cus_new' },
@@ -39,7 +39,7 @@ function recordingStripe(opts: { history?: { status: string }[] } = {}) {
 
 function setup(
   row: Record<string, unknown> | null,
-  opts: { history?: { status: string }[]; coupon?: string } = {},
+  opts: { history?: Record<string, unknown>[]; coupon?: string } = {},
 ) {
   const recorder = recordingStripe(opts);
   const base = testDeps();
@@ -72,6 +72,36 @@ const STRIPE_ACTIVE = {
   status: 'active',
   current_period_end: iso(20 * DAY),
   stripe_subscription_id: 'sub_1',
+};
+/** Both rails wrote the row: the double-subscribed user of review C1. */
+const BOTH_IDS = { ...STRIPE_ACTIVE, iap_original_transaction_id: 'otx_1' };
+
+function grantRow(source: string, txn: string, appliedAt: string, periodEnd: string) {
+  return {
+    user_id: TEST_USER,
+    source,
+    business_txn_id: txn,
+    kind: 'subscription_grant',
+    applied_at: appliedAt,
+    period_end: periodEnd,
+    result: { applied: true, replay: false, reason: null },
+  };
+}
+
+/** Apple's grant pays for the latest period, so the source reads app_store. */
+const APPLE_PAYS_LATEST = [
+  grantRow('stripe', 'in_1', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z'),
+  grantRow('apple', 'atx_1', '2026-09-01T00:00:00Z', iso(25 * DAY)),
+];
+
+/** A subscription Stripe still bills. */
+const LIVE_STRIPE = {
+  id: 'sub_1',
+  status: 'active',
+  cancel_at_period_end: false,
+  metadata: {},
+  schedule: null,
+  items: { data: [{ id: 'si_1', price: { id: 'price_studio' } }] },
 };
 
 function post(app: ReturnType<typeof createApp>, path: string, body: unknown = {}) {
@@ -114,13 +144,31 @@ Deno.test('/profile: an owner grant (neither rail) → "stripe", never app_store
 });
 
 Deno.test('/profile: a row both rails wrote follows the latest subscription grant', async () => {
-  const { app, db } = setup({ ...STRIPE_ACTIVE, iap_original_transaction_id: 'otx_1' });
-  db.tables.billing_transactions = [
-    { user_id: TEST_USER, source: 'stripe', kind: 'subscription_grant', applied_at: '2026-08-01T00:00:00Z' },
-    { user_id: TEST_USER, source: 'apple', kind: 'subscription_grant', applied_at: '2026-09-01T00:00:00Z' },
-  ];
+  const { app, db } = setup(BOTH_IDS);
+  db.tables.billing_transactions = APPLE_PAYS_LATEST;
   const res = await app.request('/api/profile', { headers: AUTH });
   assertEquals((await res.json()).subscriptionSource, 'app_store');
+});
+
+Deno.test('/profile: a stale Apple redelivery does not take a Stripe row (I1)', async () => {
+  const { app, db } = setup(BOTH_IDS);
+  db.tables.billing_transactions = [
+    grantRow('stripe', 'in_1', '2026-09-01T00:00:00Z', iso(20 * DAY)),
+    {
+      ...grantRow('apple', 'atx_old', '2026-09-20T00:00:00Z', '2026-08-01T00:00:00Z'),
+      result: { applied: false, replay: false, reason: 'stale_period' },
+    },
+  ];
+  const res = await app.request('/api/profile', { headers: AUTH });
+  assertEquals((await res.json()).subscriptionSource, 'stripe');
+});
+
+Deno.test('/profile: a failed tie-break read falls back instead of failing /profile (M2)', async () => {
+  const { app, db } = setup(BOTH_IDS);
+  db.failNext('billing_transactions.select', 'boom');
+  const res = await app.request('/api/profile', { headers: AUTH });
+  assertEquals(res.status, 200);
+  assertEquals((await res.json()).subscriptionSource, 'stripe');
 });
 
 Deno.test('/profile: entitled honours the 3-day grace on an active row', async () => {
@@ -139,6 +187,15 @@ Deno.test('subscribe: an entitled App Store subscription is refused 409 and Stri
   assertEquals((await res.json()).error.code, 'subscribed_in_app_store');
   assertEquals(calls, []);
   assertEquals(db.tables.profiles[0].stripe_customer_id, undefined);
+});
+
+Deno.test('subscribe: a failed subscription read refuses checkout instead of failing open (M1)', async () => {
+  const { app, db, calls } = setup(APPLE_ACTIVE);
+  db.failNext('subscriptions.select', 'boom');
+  const res = await post(app, '/billing/subscribe', { plan: 'pro' });
+  assertEquals(res.status, 400);
+  assertEquals((await res.json()).error.code, 'billing_failed');
+  assertEquals(calls, []);
 });
 
 Deno.test('subscribe: an App Store row canceled inside its period is still refused', async () => {
@@ -186,6 +243,57 @@ Deno.test('/billing/cancel: an expired App Store row is still managed in the App
   assertEquals(calls, []);
 });
 
+// ── C1: a row with a Stripe subscription id lets Stripe answer ──────────────
+
+Deno.test('/billing/cancel: both ids, Apple latest, live Stripe → Stripe is cancelled (C1)', async () => {
+  const { app, db, calls } = setup(BOTH_IDS, { history: [LIVE_STRIPE] });
+  db.tables.billing_transactions = APPLE_PAYS_LATEST;
+  const res = await post(app, '/billing/cancel', { reason: 'double_billed' });
+  assertEquals(res.status, 200);
+  assertEquals(await res.json(), { cancelAtPeriodEnd: true });
+  const update = calls.find((c) => c.path === 'subscriptions.update');
+  assertEquals(update?.args[0], 'sub_1');
+  assertEquals((update?.args[1] as { cancel_at_period_end: boolean }).cancel_at_period_end, true);
+});
+
+Deno.test('/billing/resume: both ids, Apple latest, live Stripe → reaches Stripe (C1)', async () => {
+  const { app, db, calls } = setup(BOTH_IDS, {
+    history: [{ ...LIVE_STRIPE, cancel_at_period_end: true }],
+  });
+  db.tables.billing_transactions = APPLE_PAYS_LATEST;
+  const res = await post(app, '/billing/resume');
+  assertEquals(res.status, 200);
+  assertEquals(calls.some((c) => c.path === 'subscriptions.update'), true);
+});
+
+Deno.test('/billing/portal: both ids, Apple latest → opens the Stripe portal (C1)', async () => {
+  const { app, db, calls } = setup(BOTH_IDS);
+  db.tables.billing_transactions = APPLE_PAYS_LATEST;
+  const res = await post(app, '/billing/portal');
+  assertEquals(res.status, 200);
+  assertEquals(calls.some((c) => c.path === 'billingPortal.sessions.create'), true);
+});
+
+for (const path of ['/billing/cancel', '/billing/resume', '/billing/change-plan']) {
+  Deno.test(`${path}: both ids, Apple latest, nothing live in Stripe → 409 managed_in_app_store`, async () => {
+    const { app, db, calls } = setup(BOTH_IDS);
+    db.tables.billing_transactions = APPLE_PAYS_LATEST;
+    const res = await post(app, path, { plan: 'pro', when: 'now', reason: 'x' });
+    assertEquals(res.status, 409);
+    assertEquals((await res.json()).error.code, 'managed_in_app_store');
+    assertEquals(calls.some((c) => c.path === 'subscriptions.update'), false);
+  });
+}
+
+Deno.test('/billing/overview: both ids, Apple latest → reads Stripe and reports the live subscription', async () => {
+  const { app, db, calls } = setup(BOTH_IDS, { history: [LIVE_STRIPE] });
+  db.tables.billing_transactions = APPLE_PAYS_LATEST;
+  const res = await app.request('/api/billing/overview', { headers: AUTH });
+  assertEquals(res.status, 200);
+  assertEquals((await res.json()).stripeSubscription, true);
+  assertEquals(calls.some((c) => c.path === 'subscriptions.list'), true);
+});
+
 Deno.test('/billing/cancel: a Stripe row still reaches Stripe', async () => {
   const { app, calls } = setup(STRIPE_ACTIVE);
   const res = await post(app, '/billing/cancel', { reason: 'x' });
@@ -207,7 +315,12 @@ Deno.test('/billing/overview: an App Store user gets the empty overview and no S
   const { app, db, calls } = setup(APPLE_ACTIVE);
   const res = await app.request('/api/billing/overview', { headers: AUTH });
   assertEquals(res.status, 200);
-  assertEquals(await res.json(), { cancelAtPeriodEnd: false, upcoming: null, paymentMethod: null });
+  assertEquals(await res.json(), {
+    cancelAtPeriodEnd: false,
+    upcoming: null,
+    paymentMethod: null,
+    stripeSubscription: false,
+  });
   assertEquals(calls, []);
   assertEquals(db.tables.profiles[0].stripe_customer_id, undefined);
 });

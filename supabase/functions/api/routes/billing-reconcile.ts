@@ -5,6 +5,7 @@ import type Stripe from "npm:stripe@17";
 import { CREDIT_PACKS, packCredits } from "../_shared/model-families.ts";
 import { applyIapTransaction } from "../_shared/iap-grants.ts";
 import { applyFulfillment } from "../_shared/billing-fulfillment.ts";
+import { looksLikeJws, receiptNeverVerifies } from "../_shared/apple-verifier.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
 
@@ -83,6 +84,17 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
     const body = await c.req.json().catch(() => ({}));
     const jws = typeof body.jws === "string" ? body.jws : "";
     if (!jws) return fail(c, 400, "invalid_input", "Missing jws");
+    // A receipt that can never verify is final: the app finishes the
+    // transaction on a 4xx. Answering 503 would leave it open forever, and
+    // StoreKit then refuses every new purchase of that product.
+    const rejected = () =>
+      fail(
+        c,
+        422,
+        "purchase_rejected",
+        "This purchase cannot be applied to this account.",
+      );
+    if (!looksLikeJws(jws)) return rejected();
     try {
       const tx = await appleVerifier().verifyAndDecodeTransaction(jws);
       if (tx.appAccountToken !== userId) {
@@ -98,14 +110,7 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
       // The client must be able to tell "your credits are here" from "try again
       // in a moment" — a retryable failure that reads as success strands paid
       // money, and one that reads as a hard error sends the user to support.
-      if (result.outcome === "rejected") {
-        return fail(
-          c,
-          422,
-          "purchase_rejected",
-          "This purchase cannot be applied to this account.",
-        );
-      }
+      if (result.outcome === "rejected") return rejected();
       return c.json({
         // `granted` is kept for one release so an un-updated mobile build is
         // not broken; MT-01 moves the client to `outcome`.
@@ -115,6 +120,10 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
       });
     } catch (e) {
       logError(c, "iap_verify_failed", e);
+      // Sandbox receipts against production land here too (INVALID_ENVIRONMENT).
+      // They are refused, never re-verified in sandbox: sandbox purchases are
+      // free, so granting them on production would give credits away.
+      if (receiptNeverVerifies(e)) return rejected();
       const res = fail(
         c,
         503,

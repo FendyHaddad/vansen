@@ -89,6 +89,18 @@ export class BillingTab {
     () => this.subscription()?.status === SubscriptionStatus.Canceled && !!this.plan(),
   );
 
+  /** Stripe still bills a live subscription, whoever else does. */
+  readonly stripeLive = computed(() => this.overview()?.stripeSubscription === true);
+  /** Apple and Stripe both bill this person: show both, and say so. */
+  readonly twoSubscriptions = computed(() => this.managedInAppStore() && this.stripeLive());
+  /** The Stripe controls apply unless only the App Store bills the plan. */
+  readonly stripeControls = computed(() => !this.managedInAppStore() || this.stripeLive());
+  /** Resume instead of cancel. With two subscriptions the row's status is
+   * Apple's, so Stripe's own flag decides. */
+  readonly stripeEnding = computed(() =>
+    this.twoSubscriptions() ? this.overview()?.cancelAtPeriodEnd === true : this.canceledPending(),
+  );
+
   /** Subscriber-facing plan name; owner rides the hidden top tier. */
   readonly planLabel = computed(() => {
     const plan = this.plan();

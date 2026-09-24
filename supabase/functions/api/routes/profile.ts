@@ -4,7 +4,7 @@
 // GET /profile also says which rail wrote the subscription row
 // (`subscriptionSource`), so both apps know who manages the plan.
 import { isEntitled } from "../services/entitlement.ts";
-import { subscriptionSourceOf } from "../services/subscription-source.ts";
+import { railOf, subscriptionSourceOf } from "../services/subscription-source.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
 import { sanitizePrefs } from "../lib/request-sanitize.ts";
@@ -50,11 +50,17 @@ export function registerProfileRoutes(app: App, ctx: ApiContext): void {
           .maybeSingle(),
       ]);
     if (error || !profile) return fail(c, 404, "not_found", "Profile missing");
+    // The tie-break read is only for rows both rails wrote. Failing it must
+    // not cost the user their profile (mobile cannot even buy without one):
+    // fall back to the ids alone.
     const subscriptionSource = await subscriptionSourceOf(
       admin,
       userId,
       subscription,
-    );
+    ).catch((e) => {
+      logError(c, "subscription_source_failed", e);
+      return railOf(subscription, null);
+    });
     return c.json({
       profile: {
         id: profile.id,

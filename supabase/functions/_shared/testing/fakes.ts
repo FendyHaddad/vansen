@@ -67,7 +67,9 @@ function parseOrTerm(term: string): (r: Row) => boolean {
   const op = term.slice(first + 1, second);
   const val = term.slice(second + 1);
   if (op === "eq") return (r) => String(r[col] ?? "") === val;
+  if (op === "is" && val === "null") return (r) => (r[col] ?? null) === null;
   if (op === "lt") return (r) => compare(r[col], val) < 0;
+  if (op === "lte") return (r) => compare(r[col], val) <= 0;
   if (op === "gt") return (r) => compare(r[col], val) > 0;
   throw new Error(`fake or(${op}) is not implemented`);
 }

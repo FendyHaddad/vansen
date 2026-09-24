@@ -267,3 +267,86 @@ Deno.test('verified Apple refund survives account lookup failure in the inbox', 
   assertEquals((await createAppstoreWebhook(dep)(post())).status, 500);
   assertEquals(db.rpcCalls.some(c => c.name === 'fn_record_billing_delivery' && c.args.p_txn_id === 'refund:old_tx'), true);
 });
+
+// ── I4: Apple end-of-life events never end a period Stripe is paying for ────
+
+const DAY_MS = 86_400_000;
+const APPLE_ENDED = Date.now() - 5 * DAY_MS;
+const STRIPE_PAID_TO = new Date(Date.now() + 25 * DAY_MS).toISOString();
+
+/** Lapsed on Apple, then subscribed through Stripe: both ids on one row. */
+function stripeCarriedRow(status = 'active') {
+  return {
+    user_id: TEST_USER,
+    plan: 'studio',
+    status,
+    current_period_end: STRIPE_PAID_TO,
+    stripe_subscription_id: 'sub_live',
+    iap_original_transaction_id: 'otx_1',
+  };
+}
+
+function appleEvent(db: FakeDb, notificationType: string, subtype?: string) {
+  return createAppstoreWebhook(
+    deps(db, {
+      verifyNotification: () => Promise.resolve({ ...NOTIFICATION, notificationType, subtype }),
+      verifyTransaction: () =>
+        Promise.resolve({
+          productId: 'vansen.studio.monthly',
+          transactionId: 'tx_old',
+          originalTransactionId: 'otx_1',
+          expiresDate: APPLE_ENDED,
+          appAccountToken: TEST_USER,
+        }),
+    }),
+  );
+}
+
+for (const [type, subtype] of [['EXPIRED', 'VOLUNTARY'], ['GRACE_PERIOD_EXPIRED', undefined]] as const) {
+  Deno.test(`${type} after the user moved to Stripe leaves the Stripe-paid row alone`, async () => {
+    const db = fakeDb();
+    db.tables.subscriptions = [stripeCarriedRow()];
+    assertEquals((await appleEvent(db, type, subtype)(post())).status, 200);
+    assertEquals(db.tables.subscriptions[0].status, 'active');
+    assertEquals(db.tables.subscriptions[0].current_period_end, STRIPE_PAID_TO);
+  });
+}
+
+Deno.test('AUTO_RENEW_ENABLED on the old Apple plan does not un-cancel a Stripe row', async () => {
+  const db = fakeDb();
+  db.tables.subscriptions = [stripeCarriedRow('canceled')];
+  assertEquals((await appleEvent(db, 'DID_CHANGE_RENEWAL_STATUS', 'AUTO_RENEW_ENABLED')(post())).status, 200);
+  assertEquals(db.tables.subscriptions[0].status, 'canceled');
+});
+
+Deno.test('EXPIRED still ends a row Apple is paying for, even with an old Stripe id on it', async () => {
+  const db = fakeDb();
+  db.tables.subscriptions = [{
+    ...stripeCarriedRow(),
+    current_period_end: new Date(APPLE_ENDED).toISOString(),
+  }];
+  assertEquals((await appleEvent(db, 'EXPIRED', 'VOLUNTARY')(post())).status, 200);
+  assertEquals(db.tables.subscriptions[0].status, 'expired');
+});
+
+Deno.test('a late refund of an old Apple subscription neither expires the Stripe row nor zeroes its credits', async () => {
+  const db = fakeDb();
+  db.tables.subscriptions = [stripeCarriedRow()];
+  assertEquals((await appleEvent(db, 'REFUND')(post())).status, 200);
+  assertEquals(db.tables.applied ?? [], [], 'no subscription_grant, no entitlement patch');
+  assertEquals(db.tables.subscriptions[0].status, 'active');
+  const finished = db.rpcCalls.find((c) => c.name === 'fn_finish_billing_delivery');
+  assertEquals(finished?.args.p_error, null, 'the receipt closes as nothing owed');
+});
+
+Deno.test('a refund of the Apple subscription Apple is paying for still expires the row', async () => {
+  const db = fakeDb();
+  db.tables.subscriptions = [{
+    ...stripeCarriedRow(),
+    stripe_subscription_id: null,
+    current_period_end: new Date(APPLE_ENDED).toISOString(),
+  }];
+  assertEquals((await appleEvent(db, 'REFUND')(post())).status, 200);
+  assertEquals(db.tables.applied.length, 1);
+  assertEquals((db.tables.applied[0].p_entitlement as { status: string }).status, 'expired');
+});

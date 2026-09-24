@@ -109,9 +109,17 @@
             your library or resubscribe — it is deleted when the paid period ends.
           </p>
         }
+        @if (twoSubscriptions()) {
+          <p class="small two-subs-note">
+            You have two subscriptions: one billed by the App Store and one billed by Stripe
+            here. Cancel the one you don’t need.
+          </p>
+        }
         <div class="studio-actions">
-          @if (plan() && managedInAppStore()) {
+          @if (plan() && managedInAppStore() && !twoSubscriptions()) {
             <p class="small app-store-note">Managed in the App Store</p>
+          }
+          @if (plan() && managedInAppStore()) {
             <a
               class="app-store-link"
               hlmBtn
@@ -123,26 +131,29 @@
             >
               Manage in the App Store
             </a>
-          } @else if (canceledPending()) {
-            <button hlmBtn size="sm" [disabled]="busy()" (click)="resume()">
-              Resume subscription
-            </button>
-          } @else if (plan() && !isOwner()) {
-            @if (switchTarget(); as target) {
-              <button
-                hlmBtn
-                size="sm"
-                [variant]="target === 'pro' ? 'default' : 'outline'"
-                [disabled]="busy()"
-                (click)="openPlanChange(target)"
-              >
-                {{ target === 'pro' ? 'Upgrade to Pro' : 'Switch to Studio' }}
+          }
+          @if (plan() && stripeControls()) {
+            @if (stripeEnding()) {
+              <button hlmBtn size="sm" [disabled]="busy()" (click)="resume()">
+                Resume subscription
+              </button>
+            } @else if (!isOwner()) {
+              @if (switchTarget(); as target) {
+                <button
+                  hlmBtn
+                  size="sm"
+                  [variant]="target === 'pro' ? 'default' : 'outline'"
+                  [disabled]="busy()"
+                  (click)="openPlanChange(target)"
+                >
+                  {{ target === 'pro' ? 'Upgrade to Pro' : 'Switch to Studio' }}
+                </button>
+              }
+              <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
+                Invoices & card
               </button>
             }
-            <button hlmBtn size="sm" variant="ghost" [disabled]="busy()" (click)="portal()">
-              Invoices & card
-            </button>
-          } @else if (!isOwner()) {
+          } @else if (!plan() && !isOwner()) {
             <button hlmBtn size="sm" [disabled]="busy()" (click)="subscribe('studio')">
               Get Studio · <span class="num">$15</span>
             </button>
@@ -151,7 +162,7 @@
             </button>
           }
         </div>
-        @if (plan() && !canceledPending() && !isOwner() && !managedInAppStore()) {
+        @if (plan() && stripeControls() && !stripeEnding() && !isOwner()) {
           <button type="button" class="cancel-link" [disabled]="busy()" (click)="openCancel()">
             Cancel subscription
           </button>
@@ -170,7 +181,7 @@
     </div>
   </div>
 
-  @if (plan() && !isOwner() && !managedInAppStore()) {
+  @if (plan() && !isOwner() && stripeControls()) {
     <div class="card-row">
       <div class="panel">
         <span class="eyebrow">Next invoice</span>

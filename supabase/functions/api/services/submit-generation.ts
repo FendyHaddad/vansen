@@ -27,6 +27,12 @@ import type { Services } from "../lib/context.ts";
 import { clientOf, fail, sanitizeLabel } from "../lib/http.ts";
 import { MAX_PROMPT_LEN, sanitizeSettings } from "../lib/request-sanitize.ts";
 import { bodyHash, readIdempotencyKey } from "./idempotency.ts";
+import {
+  contentPolicyRefusal,
+  createSubmissionReplay,
+  idempotencyConflict,
+  isRefusal,
+} from "./submission-replay.ts";
 import { validateSettings } from "./request-validation.ts";
 import { createVideoPrep, slotsOf } from "./video-prep.ts";
 import {
@@ -67,6 +73,35 @@ export function createSubmitGeneration(ctx: Services) {
   const { storeMask, existingMask } = createMasks(ctx);
   const { uploadReferenceUrl, imageParentUrl } = createReferenceUrls(ctx);
   const { reservationFailure } = createReservationFailure(ctx);
+  const { priorSubmission, claimRefusal, releaseRefusal } = createSubmissionReplay(admin);
+
+  /**
+   * Moderation gate — BEFORE charge and BEFORE any provider call. An outage
+   * refuses the request; it never silently lets an unchecked prompt through.
+   * A block strikes once per request: with a key, only the request that
+   * records the refusal strikes, so a retry or a racing twin never does.
+   */
+  async function moderatePrompt(
+    c: Context,
+    userId: string,
+    prompt: string,
+    styled: string,
+    key: string | null,
+    hash: string,
+  ): Promise<Response | null> {
+    const decision = await moderate({ text: styled });
+    if (decision.state === "unavailable") return moderationFailure(c, decision);
+    if (decision.state !== "blocked") return null;
+    const first = key ? await claimRefusal(userId, key, hash) : true;
+    if (!first) return contentPolicyRefusal(c);
+    try {
+      await recordStrike(userId, "prompt", prompt, decision.categories);
+    } catch (e) {
+      if (key) await releaseRefusal(userId, key);
+      throw e;
+    }
+    return contentPolicyRefusal(c);
+  }
 
   /**
    * One submission path, whether the request came from the composer or was
@@ -126,6 +161,17 @@ export function createSubmitGeneration(ctx: Services) {
     ) {
       return fail(c, 400, "invalid_parent", `${op} requires parentId`);
     }
+
+    // A retry (same key, same body) is answered from its first outcome
+    // before anything else runs: a refused request gets the same refusal,
+    // never a second strike, and an accepted one is not moderated again (the
+    // reservation replays it). The same key with a different body is a
+    // conflict, so a changed prompt cannot ride an old key past moderation.
+    const key = opts.idempotencyKey ?? readIdempotencyKey(c);
+    const hash = await bodyHash(body);
+    const prior = key ? await priorSubmission(userId, key) : null;
+    if (prior && prior.body_hash !== hash) return idempotencyConflict(c);
+    if (prior && isRefusal(prior)) return contentPolicyRefusal(c);
 
     // Suspension shield (2 strikes = out).
     if (await isSuspended(userId)) {
@@ -294,21 +340,10 @@ export function createSubmitGeneration(ctx: Services) {
       return fail(c, 403, "pro_required", "This model requires the Pro plan.");
     }
 
-    // Moderation gate — BEFORE charge and BEFORE any provider call. An outage
-    // refuses the request; it never silently lets an unchecked prompt through.
-    const promptDecision = await moderate({ text: styled });
-    if (promptDecision.state === "unavailable") {
-      return moderationFailure(c, promptDecision);
-    }
-    if (promptDecision.state === "blocked") {
-      await recordStrike(userId, "prompt", prompt, promptDecision.categories);
-      return fail(
-        c,
-        422,
-        "content_policy",
-        "This prompt violates our content policy.",
-      );
-    }
+    // Moderation gate (moderatePrompt). An accepted request being replayed
+    // was moderated when it was accepted.
+    const refused = prior ? null : await moderatePrompt(c, userId, prompt, styled, key, hash);
+    if (refused) return refused;
 
     const videoResult = await resolveVideoPrep(
       c,
@@ -475,8 +510,8 @@ export function createSubmitGeneration(ctx: Services) {
     // which the stale sweep could never find.
     const reservation = await admin.rpc("fn_reserve_generation", {
       p_user: userId,
-      p_key: opts.idempotencyKey ?? readIdempotencyKey(c) ?? crypto.randomUUID(),
-      p_hash: await bodyHash(body),
+      p_key: key ?? crypto.randomUUID(),
+      p_hash: hash,
       p_items: items,
       p_quote: {
         provider: adapterFor(familyId).provider,
