@@ -2,31 +2,12 @@
   display: block;
 }
 
-.tc {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* Matches the left panel's .field-label. */
-.tc-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted-foreground);
-}
-
-.tc-info {
-  font-size: 0.75rem;
-}
-
 .tc-frame {
   --tc-fade: 22px;
   position: relative;
-  /* Bleed to the sidebar edges so tiles slide in from off-panel. */
-  margin: 0 -18px;
+  /* Bleed to the sidebar edges so tiles slide in from off-panel; the negative
+   * block margin hands back the track's hover-zoom padding to the layout. */
+  margin: -10px -18px;
 }
 
 /* Fade whichever edge still has tiles behind it. */

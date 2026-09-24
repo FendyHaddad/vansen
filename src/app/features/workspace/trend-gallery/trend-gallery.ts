@@ -11,7 +11,6 @@ import {
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideChevronLeft, lucideChevronRight } from '@ng-icons/lucide';
 import { TREND_PRESETS, TrendPreset } from '../../../core/catalog/trend-presets';
-import { Hint } from '../../../shared/hint/hint';
 
 /** Tiles moved per arrow click. */
 const PAGE_TILES = 2;
@@ -26,7 +25,7 @@ const PAGE_TILES = 2;
   templateUrl: './trend-gallery.html',
   styleUrl: './trend-gallery.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, Hint],
+  imports: [NgIcon],
   providers: [provideIcons({ lucideChevronLeft, lucideChevronRight })],
 })
 export class TrendGallery {

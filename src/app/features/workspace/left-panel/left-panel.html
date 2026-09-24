@@ -25,7 +25,6 @@
   <section class="rail-section">
 
     <div class="field">
-      <span class="field-label">Prompt</span>
       @if (appliedTrendPreset(); as trend) {
         <span class="trend-chip">
           <img [src]="trend.thumb" alt="" class="trend-chip-thumb"/>
@@ -38,6 +37,7 @@
       <textarea
         rows="3"
         class="prompt-input"
+        aria-label="Prompt"
         placeholder="Describe the {{ mode() }} you want..."
         [value]="prompt()"
         [attr.maxlength]="promptMaxChars"
@@ -56,14 +56,6 @@
 
     @if (mode() === 'image' && family().capabilities.imageInput && !personaActive()) {
       <div class="field">
-        <span class="field-label">
-          Reference image
-          <app-hint
-            text="Attach an image to edit or guide the generation (image-to-image)."
-          >
-            <span class="og-info">ⓘ</span>
-          </app-hint>
-        </span>
         @if (reference(); as ref) {
           <div class="ref-preview">
             <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
@@ -78,7 +70,7 @@
           </div>
         } @else {
           <div class="ref-actions">
-            <label class="ref-drop" [class.ref-blocked]="uploading()">
+            <label class="ref-drop" [class.ref-blocked]="uploading()" title="Attach an image to edit or guide the generation">
               <ng-icon name="lucideImagePlus" size="16"/>
               {{ uploading() ? 'Uploading…' : 'Upload' }}
               <input
@@ -92,8 +84,10 @@
             <button
               type="button"
               class="ref-drop"
+              title="Use an image from your library as the reference"
               (click)="pickReferenceRequested.emit()"
             >
+              <ng-icon name="lucideImages" size="16"/>
               From library
             </button>
           </div>
@@ -135,15 +129,6 @@
 
     @if (!personaActive()) {
       <div class="field model-field">
-        <span class="field-label">
-          <span class="field-label-main">
-            Model
-            <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
-              <span class="og-info">ⓘ</span>
-            </app-hint>
-          </span>
-          <span class="model-name">{{ family().name }}</span>
-        </span>
         <div class="provider-row" role="radiogroup" aria-label="Model">
           @for (f of families(); track f.id) {
             <button
@@ -153,7 +138,7 @@
               [class.provider-btn--on]="familyId() === f.id"
               [attr.aria-checked]="familyId() === f.id"
               [attr.aria-label]="f.name + ' · ' + f.provider"
-              [attr.title]="disabledFamily(f.id) ? f.name + ' · ' + (mode() === 'video' ? 'Coming soon' : 'Unavailable') : f.name + ' · ' + f.provider"
+              [hlmTooltip]="disabledFamily(f.id) ? f.name + ' · ' + (mode() === 'video' ? 'Coming soon' : 'Unavailable') : f.name"
               [disabled]="disabledFamily(f.id)"
               (click)="selectFamily(f.id)"
             >
@@ -265,7 +250,6 @@
 
   @if (mode() === 'image') {
     <section class="rail-section rail-divided rail-look">
-      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
       <app-persona-picker
         [selected]="persona()"
         (changed)="setPersona($event)"

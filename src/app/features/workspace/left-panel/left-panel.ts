@@ -11,12 +11,14 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideImage,
   lucideImagePlus,
+  lucideImages,
   lucideLock,
   lucideVideo,
   lucideWandSparkles,
   lucideX,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
+import { HlmTooltipImports } from '@spartan-ng/helm/tooltip';
 import {
   AUDIO_OPTIONS,
   FamilyOption,
@@ -44,8 +46,6 @@ import { ModelAvailability } from '../../../core/models/model-availability';
 import { StepSlider } from '../step-slider/step-slider';
 import { Hint } from '../../../shared/hint/hint';
 import { CachedSrc } from '../../../core/media/cached-src';
-import { styleById } from '../../../core/catalog/style-presets';
-import { StylePicker } from '../style-picker/style-picker';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { PersonaPicker } from '../persona-picker/persona-picker';
 import { TrendPreset, trendById } from '../../../core/catalog/trend-presets';
@@ -58,8 +58,6 @@ export interface GenerateRequest {
   family: ModelFamily;
   settings: GenerationSettings;
   prompt: string;
-  /** Style preset id, null = none. Server appends the modifier. */
-  style: string | null;
   /** Persona id, null = none. The server renders it on Nano Banana Pro 4K with the persona's photos. */
   personaId: string | null;
   /** Trend the prompt was prefilled from, null = hand-written. */
@@ -106,11 +104,11 @@ const AXIS_TOOLTIPS = {
     StepSlider,
     Hint,
     CachedSrc,
-    StylePicker,
     PersonaPicker,
     TrendGallery,
     ModePicker,
     ReferenceDrop,
+    ...HlmTooltipImports,
   ],
   providers: [
     provideIcons({
@@ -119,6 +117,7 @@ const AXIS_TOOLTIPS = {
       lucideVideo,
       lucideWandSparkles,
       lucideImagePlus,
+      lucideImages,
       lucideX,
     }),
   ],
@@ -158,7 +157,6 @@ export class LeftPanel {
   readonly familyId = signal(firstFamilyOf('image').id);
   readonly settings = signal<GenerationSettings>(defaultSettings(firstFamilyOf('image')));
   readonly prompt = signal('');
-  readonly style = signal<string | null>(null);
   readonly persona = signal<string | null>(null);
   /** Set when the prompt came from a trend prefill; survives edits, dies with the prompt. */
   readonly appliedTrend = signal<string | null>(null);
@@ -185,7 +183,6 @@ export class LeftPanel {
       base.aspectRatio = prefs.defaultAspect;
     }
     this.settings.set(base);
-    this.style.set(styleById(prefs.defaultStyle)?.id ?? null);
     this.persona.set(prefs.defaultPersona || null);
     // Reset silently if the remembered persona is gone or not ready.
     void this.personaStore.load().then(() => {
@@ -394,16 +391,10 @@ export class LeftPanel {
     if (!value.trim()) this.appliedTrend.set(null);
   }
 
-  setStyle(id: string | null): void {
-    this.style.set(id);
-    void this.prefsService.update({ defaultStyle: id ?? '' });
-  }
-
   applyTrend(trend: TrendPreset): void {
     const current = this.prompt().trim();
-    if (current && current !== trend.prompt) {
-      if (!confirm('Replace your current prompt with this trend?')) return;
-    }
+    const replacing = !!current && current !== trend.prompt;
+    if (replacing && !confirm('Replace your current prompt with this trend?')) return;
     this.prompt.set(trend.prompt);
     this.appliedTrend.set(trend.id);
     if (trend.aspectRatio && this.family().capabilities.aspectRatios.includes(trend.aspectRatio)) {
@@ -466,7 +457,6 @@ export class LeftPanel {
       family: this.family(),
       settings: { ...this.settings() },
       prompt: this.prompt().trim(),
-      style: imageMode ? this.style() : null,
       personaId: this.personaActive() ? this.persona() : null,
       trendId: imageMode ? this.appliedTrend() : null,
       referenceId: imageRef?.id ?? null,

@@ -29,7 +29,6 @@ const PREFS = {
   defaultVideoFamily: 'veo',
   defaultVideoMode: 'i2v',
   defaultAspect: '1:1',
-  defaultStyle: '',
   defaultPersona: '',
 };
 

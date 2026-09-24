@@ -15,7 +15,7 @@
 .rail-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* Settings render as compact rows — rows carry their own height, so the
@@ -154,18 +154,6 @@
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted-foreground);
-}
-
-.field-label-main {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.model-name {
-  font-size: 0.8125rem;
-  font-weight: 550;
-  color: var(--foreground);
 }
 
 /* One logo per family, spread across the rail; the pick is a soft tile,
