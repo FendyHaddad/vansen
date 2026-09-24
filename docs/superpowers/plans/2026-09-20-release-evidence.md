@@ -803,3 +803,22 @@ transient HTTP/2 framing error; the read-back below replaces it). Supabase's OAu
 
 Mobile `5580fce`: sign-out pinned to local scope. Still owner-gated: set `MCP_ENABLED=on`, paid smoke with
 Claude and ChatGPT (connect, one image each, revoke, next call fails), then the FAQ entry.
+
+### 2026-09-24 — cross-platform account fixes + CORS (`3e12759`)
+
+Spec `specs/2026-09-24-cross-platform-account-fixes.md`. `supabase db push --linked` applied
+`0037_entitlement_grace.sql` and `0038_iap_sandbox_environment.sql`; `./deploy.sh --yes` exited 0:
+`DEPLOYED 3e12759 · catalog 2026-09-23.4 · api v80`.
+
+| Check | Result |
+|---|---|
+| CORS preflight `OPTIONS /generations` from `https://vansen.vankode.com` | 204, `access-control-allow-headers: authorization,content-type,x-vansen-client,idempotency-key` (was missing `idempotency-key` since 2026-09-21: browsers dropped every web generate/retry/vary) |
+| `GET <api>/manifest` | `gitRevision` 3e12759, `schemaVersion` 0038, `workerVersion` v33 |
+| `/profile`, `/iap/verify` unauthenticated | 401 |
+| `POST /mcp` | 503 (MCP still dark) |
+
+Shipped: App Store–aware billing (cross-rail subscribe refused, `subscriptionSource`, 3-day entitlement
+grace, Apple events spare Stripe-paid rows, replay before moderation), sandbox IAP granted and recorded as
+sandbox (`APPLE_SANDBOX_GRANTS=off` brake), web Sign in with Apple (hidden until the provider is enabled),
+AI edit tool locks from the served plan. Mobile `dd0e6da` (pushed to `github.com/FendyHaddad/vansen-mobile`,
+no store build). Not yet proven: a browser generate end to end (Gate B).
