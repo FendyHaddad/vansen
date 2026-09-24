@@ -38,7 +38,8 @@ import { referenceRoutingFor } from './reference-routing';
 import { EditSession } from '../../core/editing/edit-session';
 import { ProfileMenu } from '../../shared/profile-menu/profile-menu';
 import { NotificationBell } from '../../shared/notification-bell/notification-bell';
-import { NotificationToast } from '../../shared/notification-toast/notification-toast';
+import { toastNotifications } from '../../shared/notification-toast/notification-toasts';
+import { ToastService } from '../../core/feedback/toast-service';
 import { TourService } from '../../core/tour/tour-service';
 import { TourOverlay } from '../../shared/tour-overlay/tour-overlay';
 import { LeftPanel, GenerateRequest } from './left-panel/left-panel';
@@ -78,7 +79,6 @@ const SAMPLE_PROMPTS = [
     NgIcon,
     ProfileMenu,
     NotificationBell,
-    NotificationToast,
     RenderingChip,
     TourOverlay,
     LeftPanel,
@@ -123,6 +123,7 @@ export class WorkspacePage {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   /** Public: the notice banner, suspension flag and live-region announcer —
    * the template binds to these directly. */
@@ -188,6 +189,9 @@ export class WorkspacePage {
   private readonly baseTitle = document.title;
 
   constructor() {
+    // Generation results / refunds / blocks toast top-right; "View" opens them.
+    toastNotifications((genId) => void this.onOpened(genId));
+
     // The router guard cannot see a tab close or a reload. This is the only
     // hook the browser offers, and it only counts when the handler is
     // registered while the canvas is genuinely dirty.
@@ -282,6 +286,7 @@ export class WorkspacePage {
       );
     } catch (e) {
       this.notices.showError(e, 'Generation failed', !!req.personaId);
+      this.toast.error('Generation failed');
     } finally {
       this.generating.set(false);
     }
@@ -327,9 +332,11 @@ export class WorkspacePage {
     try {
       const item = await this.store.importImage(file);
       this.notices.notice.set('');
+      this.toast.success('Image imported');
       await this.enterEdit(item.id);
     } catch (e) {
       this.notices.showError(e, 'Upload failed');
+      this.toast.error('Upload failed');
     } finally {
       this.uploading.set(false);
     }
@@ -393,6 +400,7 @@ export class WorkspacePage {
       this.mode.set('edit');
     } catch {
       this.notices.notice.set('Could not open this image for editing.');
+      this.toast.error("Couldn't open this image for editing");
     }
   }
 

@@ -40,6 +40,7 @@ import { LedgerService } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { PreferencesService } from '../../../core/preferences/preferences-service';
 import { ApiService } from '../../../core/api/api-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { UploadResponse } from '../../../core/api/dtos';
 import { ModelAvailability } from '../../../core/models/model-availability';
 import { StepSlider } from '../step-slider/step-slider';
@@ -128,6 +129,7 @@ export class LeftPanel {
   private readonly profileStore = inject(ProfileStore);
   private readonly prefsService = inject(PreferencesService);
   private readonly api = inject(ApiService);
+  private readonly toast = inject(ToastService);
   private readonly availability = inject(ModelAvailability);
   private readonly personaStore = inject(PersonaStore);
 
@@ -438,7 +440,9 @@ export class LeftPanel {
       form.append('file', file);
       const res = await this.api.postForm<UploadResponse>('/uploads', form);
       this.reference.set({ id: null, uploadId: res.uploadId, url: res.url });
+      this.toast.success('Reference added');
     } catch (e) {
+      this.toast.error('Upload failed');
       this.uploadError.set(
         (e as { code?: string })?.code === 'content_policy'
           ? 'That image violates our content policy.'

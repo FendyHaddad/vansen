@@ -9,6 +9,7 @@ import { ProfileStore } from '../../../core/profile/profile-store';
 import { LedgerService } from '../../../core/ledger/ledger-service';
 import { GenerationStore } from '../../../core/generations/generation-store';
 import { ApiError } from '../../../core/api/api-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 
 @Component({
   selector: 'app-profile-tab',
@@ -23,6 +24,7 @@ export class ProfileTab {
   private readonly ledger = inject(LedgerService);
   private readonly store = inject(GenerationStore);
   private readonly router = inject(Router);
+  private readonly toast = inject(ToastService);
 
   readonly email = this.auth.userEmail;
   readonly profile = this.profileStore.profile;
@@ -50,9 +52,11 @@ export class ProfileTab {
     try {
       await this.profileStore.updateDisplayName(this.displayName().trim());
       this.saved.set(true);
+      this.toast.success('Display name saved');
       setTimeout(() => this.saved.set(false), 2000);
     } catch (e) {
       this.error.set(e instanceof ApiError ? e.message : 'Save failed');
+      this.toast.error("Couldn't save display name");
     } finally {
       this.saving.set(false);
     }
@@ -71,9 +75,11 @@ export class ProfileTab {
       await this.auth.setPassword(password);
       this.password.set('');
       this.passwordSaved.set(true);
+      this.toast.success('Password updated');
       setTimeout(() => this.passwordSaved.set(false), 2000);
     } catch (e) {
       this.passwordError.set(e instanceof Error ? e.message : 'Could not set password');
+      this.toast.error("Couldn't update password");
     } finally {
       this.settingPassword.set(false);
     }
@@ -95,9 +101,11 @@ export class ProfileTab {
       this.ledger.reset();
       this.store.reset();
       this.router.navigate(['/']);
+      this.toast.success('Account deleted');
       // Stay "deleting" — navigation replaces this view.
     } catch (e) {
       this.error.set(e instanceof ApiError ? e.message : 'Delete failed');
+      this.toast.error("Couldn't delete account — try again");
       this.deleting.set(false);
     }
   }

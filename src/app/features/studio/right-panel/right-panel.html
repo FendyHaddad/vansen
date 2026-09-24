@@ -4,25 +4,6 @@
       <span class="rail-spinner" aria-hidden="true"></span>
     </div>
   } @else {
-  <div class="tier-switch">
-    <button
-      type="button"
-      class="tier-btn"
-      [class.tier-active]="tier() === 'studio'"
-      (click)="tier.set('studio')"
-    >
-      Studio
-    </button>
-    <button
-      type="button"
-      class="tier-btn"
-      [class.tier-active]="tier() === 'pro'"
-      (click)="tier.set('pro')"
-    >
-      Pro
-    </button>
-  </div>
-
   @if (pendingPlan(); as pending) {
     <p class="pending-note">
       <ng-icon name="lucideCalendarClock" size="13" />
@@ -36,19 +17,6 @@
         — you keep your current plan until then.
       </span>
     </p>
-  }
-
-  @if (downgradeOffer()) {
-    <div class="downgrade-card">
-      <p class="downgrade-copy">
-        You're on Pro — every tool here is included. Prefer Studio at
-        <span class="num">${{ planPriceUsd() }}</span
-        >/mo?
-      </p>
-      <button type="button" class="downgrade-cta" (click)="downgradeRequested.emit()">
-        Switch to Studio
-      </button>
-    </div>
   }
 
   @if (showPitch()) {
@@ -72,7 +40,7 @@
         class="lock-cta"
         type="button"
         [disabled]="checkoutBusy()"
-        (click)="upgrading() ? upgradeRequested.emit() : subscribeRequested.emit(tier())"
+        (click)="subscribeRequested.emit('studio')"
       >
         @if (checkoutBusy()) {
           <span class="cta-spinner" aria-hidden="true"></span>
@@ -85,8 +53,6 @@
         <p class="lock-note">
           Launch offer: ${{ planPromoUsd() }}/mo for your first 60 days. Cancel anytime.
         </p>
-      } @else if (upgrading()) {
-        <p class="lock-note">Switch plans in the billing portal — prorated by Stripe.</p>
       }
     </div>
   } @else {
@@ -109,16 +75,17 @@
             <span>{{ tool.label }}</span>
           </button>
         }
-        <!-- Pro tools sit in the same grid — no divider. Disabled with a lock
-             icon for anyone below the pro/owner tier. -->
+        <!-- Pro tools sit in the same grid — no divider. Below Pro they show a
+             lock and a click opens the upgrade dialog. -->
         @for (tool of proTools; track tool.id) {
           <button
             type="button"
             class="tool-btn"
             [class.tool-active]="activeTool() === tool.id"
-            [disabled]="!editing() || proLocked()"
+            [class.tool-locked]="proLocked()"
+            [disabled]="!editing() && !proLocked()"
             [title]="proLocked() ? 'Pro tool — upgrade to unlock' : ''"
-            (click)="selectTool(tool.id)"
+            (click)="pickProTool(tool.id)"
           >
             <ng-icon [name]="proLocked() ? 'lucideLock' : tool.icon" size="15" />
             <span>{{ tool.label }}</span>

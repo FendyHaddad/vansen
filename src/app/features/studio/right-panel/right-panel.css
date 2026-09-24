@@ -11,42 +11,6 @@
   overflow-y: auto;
 }
 
-.tier-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
-  gap: 4px;
-  height: 36px;
-  padding: 4px;
-  border: 1px solid var(--border, #26262a);
-  border-radius: calc(var(--radius, 8px) - 2px);
-  background: color-mix(in oklch, var(--muted) 45%, transparent);
-}
-
-.tier-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 26px;
-  border: none;
-  border-radius: calc(var(--radius, 8px) - 4px);
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.tier-active {
-  background: var(--background);
-  color: var(--foreground);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
-}
-
 .section-title {
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -115,6 +79,11 @@
 .tool-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Looks locked but stays clickable: the click opens the upgrade dialog. */
+.tool-locked {
+  opacity: 0.45;
 }
 
 .ai-section {
@@ -390,37 +359,6 @@
   .rail-spinner {
     animation-duration: 2.4s;
   }
-}
-
-/* Quiet downgrade offer for a Pro subscriber browsing the Studio tab — an
-   informational card, deliberately not styled like a sales pitch. */
-.downgrade-card {
-  margin: 0;
-  padding: 9px 11px;
-  border: 1px solid var(--border, #26262a);
-  border-radius: 9px;
-}
-
-.downgrade-copy {
-  margin: 0;
-  font-size: 0.7rem;
-  line-height: 1.45;
-  opacity: 0.65;
-}
-
-.downgrade-cta {
-  margin-top: 4px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--primary, #825aff);
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.downgrade-cta:hover {
-  text-decoration: underline;
 }
 
 /* Stacked layout: rail becomes a full-width section under the canvas */

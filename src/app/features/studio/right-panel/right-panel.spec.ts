@@ -133,3 +133,20 @@ describe('RightPanel readiness', () => {
     expect(fixture.componentInstance.ready()).toBe(false);
   });
 });
+
+describe('RightPanel locked Pro tools', () => {
+  it('opens the upgrade dialog instead of selecting the tool below Pro', () => {
+    const panel = make({ studioActive: true, proActive: false, planFor: {} }).componentInstance;
+    let upgrades = 0;
+    panel.upgradeRequested.subscribe(() => upgrades++);
+    panel.pickProTool(panel.proTools[0].id);
+    expect(upgrades).toBe(1);
+    expect(panel.activeTool()).toBeNull();
+  });
+
+  it('selects the tool for a Pro subscriber', () => {
+    const panel = make({ studioActive: true, proActive: true, planFor: {} }).componentInstance;
+    panel.pickProTool(panel.proTools[0].id);
+    expect(panel.activeTool()).toBe(panel.proTools[0].id);
+  });
+});

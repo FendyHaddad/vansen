@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { HlmToaster } from '@spartan-ng/helm/sonner';
 import { ConfirmDialog } from './shared/confirm/confirm-dialog';
 import { ConfirmService } from './shared/confirm/confirm-service';
 import { setModelConsent, saveDataOn } from './core/editing/engines/model-consent';
@@ -12,7 +13,7 @@ function mb(bytes: number): number {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, ConfirmDialog],
+  imports: [RouterOutlet, ConfirmDialog, HlmToaster],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })

@@ -248,7 +248,6 @@
     [checkoutBusy]="billing.checkoutBusy()"
     (subscribeRequested)="billing.subscribeTo($event)"
     (upgradeRequested)="billing.upgradePlan()"
-    (downgradeRequested)="billing.downgradePlan()"
   />
 
   @if (billing.packsOpen()) {
@@ -300,8 +299,6 @@
       (editVideo)="onVideoFollowUp($event, 'edit')"
     />
   }
-
-  <app-notification-toast (open)="onOpened($event)" />
 
   @if (tour.active()) {
     <app-tour-overlay />

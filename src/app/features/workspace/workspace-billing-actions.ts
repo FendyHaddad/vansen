@@ -9,6 +9,7 @@ import { billingErrorText } from '../../core/billing/billing-error-text';
 import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileStore } from '../../core/profile/profile-store';
+import { ToastService } from '../../core/feedback/toast-service';
 import { WorkspaceNotices } from './workspace-notices';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class WorkspaceBillingActions {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly notices = inject(WorkspaceNotices);
+  private readonly toast = inject(ToastService);
 
   /** True while a Stripe redirect is in flight — the CTA must show progress and
    * refuse repeat clicks, since the round trip is slow enough to look frozen. */
@@ -59,7 +61,7 @@ export class WorkspaceBillingActions {
     if (!result) return;
     this.router.navigate([], { queryParams: {}, replaceUrl: true });
     if (result === 'canceled') {
-      this.notices.notice.set('Checkout canceled — nothing was charged.');
+      this.toast.info('Checkout canceled — nothing was charged');
       return;
     }
     if (result !== 'success') return;
@@ -70,9 +72,10 @@ export class WorkspaceBillingActions {
       await this.profileStore.load();
       if (this.ledger.totalCredits() !== before) {
         clearInterval(poll);
-        this.notices.notice.set(`Payment received — ${this.ledger.totalCredits().toLocaleString()} credits.`);
+        this.toast.success(`Payment received — ${this.ledger.totalCredits().toLocaleString()} credits`);
       } else if (attempts >= 6) {
         clearInterval(poll);
+        this.toast.success('Payment received');
         this.notices.notice.set(
           'Payment received — credits are on the way. If they don’t appear, use “Didn’t receive your credits?” in Settings → Subscription.',
         );
@@ -91,6 +94,7 @@ export class WorkspaceBillingActions {
       // back to idle mid-redirect invites a second click and a second session.
       this.checkoutBusy.set(false);
       this.notices.showError(e, 'Could not start checkout');
+      this.toast.error("Couldn't start checkout");
     }
   }
 
@@ -103,12 +107,6 @@ export class WorkspaceBillingActions {
     this.planChange.set('pro');
   }
 
-  /** Pro → Studio, same dialog — the server holds it to period-end anyway. */
-  downgradePlan(): void {
-    this.planChangeError.set('');
-    this.planChange.set('studio');
-  }
-
   async confirmPlanChange(when: 'now' | 'period_end'): Promise<void> {
     const plan = this.planChange();
     if (!plan || this.planChangeBusy()) return;
@@ -119,10 +117,10 @@ export class WorkspaceBillingActions {
       const { effectiveAt } = await this.billing.changePlan(plan, when);
       await this.profileStore.load();
       const label = plan === 'pro' ? 'Pro' : 'Studio';
-      this.notices.notice.set(
+      this.toast.success(
         effectiveAt
-          ? `${label} starts ${new Date(effectiveAt).toLocaleDateString()} — you keep your current plan until then.`
-          : `You're on ${label} now — enjoy your fresh credits.`,
+          ? `${label} starts ${new Date(effectiveAt).toLocaleDateString()} — you keep your current plan until then`
+          : `You're on ${label} now — enjoy your fresh credits`,
       );
       this.planChange.set(null);
       // The plan mirror updates synchronously, but the fresh grant lands via the
@@ -131,6 +129,7 @@ export class WorkspaceBillingActions {
       if (!effectiveAt) this.pollCreditsUntilChanged(before);
     } catch (e) {
       this.planChangeError.set(this.planChangeMessage(e));
+      this.toast.error("Couldn't change your plan");
     } finally {
       this.planChangeBusy.set(false);
     }

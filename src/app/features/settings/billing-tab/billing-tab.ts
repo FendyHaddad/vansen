@@ -10,6 +10,7 @@ import {
   billingErrorText,
 } from '../../../core/billing/billing-error-text';
 import { ApiError } from '../../../core/api/api-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { BillingOverviewDto } from '../../../core/api/dtos';
 import { SubscriptionStatus } from '../../../core/enums';
 import {
@@ -53,6 +54,7 @@ export class BillingTab {
   private readonly ledger = inject(LedgerService);
   readonly profileStore = inject(ProfileStore);
   private readonly billing = inject(BillingService);
+  private readonly toast = inject(ToastService);
 
   readonly studioPriceUsd = PLAN_PRICE_USD.studio;
   readonly proPriceUsd = PLAN_PRICE_USD.pro;
@@ -171,15 +173,15 @@ export class BillingTab {
   }
 
   async subscribe(plan: 'studio' | 'pro'): Promise<void> {
-    await this.run(() => this.billing.subscribe(plan));
+    await this.run(() => this.billing.subscribe(plan), 'Opening checkout…');
   }
 
   async buyPack(usd: number): Promise<void> {
-    await this.run(() => this.billing.buyPack(usd));
+    await this.run(() => this.billing.buyPack(usd), 'Opening checkout…');
   }
 
   async portal(): Promise<void> {
-    await this.run(() => this.billing.openPortal());
+    await this.run(() => this.billing.openPortal(), 'Opening billing portal…');
   }
 
   async resume(): Promise<void> {
@@ -187,7 +189,7 @@ export class BillingTab {
       await this.billing.resumeSubscription();
       await this.profileStore.load();
       await this.loadOverview();
-    });
+    }, 'Subscription resumed');
   }
 
   async reconcile(): Promise<void> {
@@ -195,9 +197,10 @@ export class BillingTab {
     await this.run(async () => {
       const credited = await this.billing.reconcile();
       await this.ledger.loadEntries();
-      this.reconcileResult.set(
-        credited > 0 ? `Restored ${credited} missing pack(s).` : 'Everything already credited.',
-      );
+      const message =
+        credited > 0 ? `Restored ${credited} missing pack(s).` : 'Everything already credited.';
+      this.reconcileResult.set(message);
+      return message;
     });
   }
 
@@ -225,8 +228,10 @@ export class BillingTab {
       await this.loadOverview();
       void this.ledger.loadEntries();
       this.planChange.set(null);
+      this.toast.success(when === 'now' ? 'Plan changed' : 'Plan change scheduled for renewal');
     } catch (e) {
       this.planChangeError.set(this.planChangeMessage(e));
+      this.toast.error("Couldn't change your plan");
     } finally {
       this.planChangeBusy.set(false);
     }
@@ -271,23 +276,29 @@ export class BillingTab {
       await this.billing.cancelSubscription(reason);
       await this.profileStore.load();
       await this.loadOverview();
+      // The dialog's own result screen confirms success; only failures toast.
       this.cancelDone.set(true);
     } catch (e) {
       this.cancelError.set(
         billingErrorText(e, 'Could not cancel — check your connection and try again.'),
       );
+      this.toast.error("Couldn't cancel your subscription");
     } finally {
       this.cancelBusy.set(false);
     }
   }
 
-  private async run(op: () => Promise<unknown>): Promise<void> {
+  /** `success` confirms the action; an op may instead return its own message. */
+  private async run(op: () => Promise<unknown>, success?: string): Promise<void> {
     this.busy.set(true);
     this.error.set('');
     try {
-      await op();
+      const result = await op();
+      const message = typeof result === 'string' ? result : success;
+      if (message) this.toast.success(message);
     } catch (e) {
       this.error.set(billingErrorText(e, 'Billing action failed'));
+      this.toast.error(billingErrorText(e, 'Billing action failed'));
     } finally {
       this.busy.set(false);
     }

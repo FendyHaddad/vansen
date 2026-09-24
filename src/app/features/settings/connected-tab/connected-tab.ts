@@ -6,6 +6,7 @@ import { lucideBot, lucideCheck, lucideCopy, lucideTrash2 } from '@ng-icons/luci
 import { ApiError, ApiService } from '../../../core/api/api-service';
 import { OAuthGrantDto, OAuthGrantsResponse } from '../../../core/api/dtos';
 import { ConfirmService } from '../../../shared/confirm/confirm-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { environment } from '../../../../environments/environment';
 
 /** How long the "Copied" acknowledgement stays up. */
@@ -28,6 +29,7 @@ const COPIED_FLASH_MS = 2000;
 export class ConnectedTab {
   private readonly api = inject(ApiService);
   private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   /** Derived from the app's own Supabase config, never hard-coded, so staging
    * and production each show their own URL. */
@@ -74,11 +76,13 @@ export class ConnectedTab {
     const outcome = await this.deleteGrant(grant.clientId);
     if (outcome === 'failed') {
       this.error.set('Could not disconnect — check your connection and try again.');
+      this.toast.error("Couldn't disconnect — try again");
       this.revokingId.set(null);
       return;
     }
     this.grants.update((list) => list.filter((g) => g.clientId !== grant.clientId));
     this.revokingId.set(null);
+    this.toast.success(`${grant.clientName || 'Assistant'} disconnected`);
   }
 
   /**
@@ -98,11 +102,13 @@ export class ConnectedTab {
     try {
       await navigator.clipboard.writeText(this.mcpUrl);
       this.copied.set(true);
+      this.toast.success('Link copied');
       clearTimeout(this.copiedTimer);
       this.copiedTimer = setTimeout(() => this.copied.set(false), COPIED_FLASH_MS);
     } catch {
       // Clipboard permission denied or unavailable in this browser — the URL
       // is still plain, selectable text right above the button.
+      this.toast.error("Couldn't copy — select the link instead");
     }
   }
 }

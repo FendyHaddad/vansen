@@ -11,6 +11,7 @@ import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideX } from '@ng-icons/lucide';
 import { ApiError } from '../../../core/api/api-service';
 import { BillingService } from '../../../core/billing/billing-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { CREDIT_PACKS, packCredits } from '../../../core/catalog/model-families';
 import { DialogDirective } from '../../../shared/a11y/dialog.directive';
@@ -27,6 +28,7 @@ import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 })
 export class CreditPacksDialog {
   private readonly billing = inject(BillingService);
+  private readonly toast = inject(ToastService);
   private readonly profileStore = inject(ProfileStore);
 
   readonly dismissed = output<void>();
@@ -60,9 +62,11 @@ export class CreditPacksDialog {
     try {
       await this.billing.buyPack(usd);
       // Success navigates to Stripe — stay busy so a second click can't fire.
+      this.toast.success('Opening checkout…');
     } catch (e) {
       this.busy.set(null);
       this.error.set(e instanceof ApiError ? e.message : 'Could not start checkout — try again.');
+      this.toast.error("Couldn't start checkout");
     }
   }
 }

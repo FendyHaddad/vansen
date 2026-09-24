@@ -9,6 +9,7 @@ import {
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
 import { PersonaStore } from '../../../core/personas/persona-store';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { prepPhoto, PhotoTooSmallError } from '../../../core/personas/photo-prep';
 import { ApiService } from '../../../core/api/api-service';
 import { PersonaDto, UploadResponse } from '../../../core/api/dtos';
@@ -61,6 +62,7 @@ const SLOT_UPLOAD_MESSAGES: Record<string, string> = {
 export class PersonaManager {
   private readonly store = inject(PersonaStore);
   private readonly api = inject(ApiService);
+  private readonly toast = inject(ToastService);
 
   readonly dismissed = output<void>();
 
@@ -125,9 +127,11 @@ export class PersonaManager {
       this.name.set('');
       this.attested.set(false);
       this.editingId.set(persona.id);
+      this.toast.success('Persona created');
     } catch (e) {
       const code = (e as { code?: string })?.code ?? '';
       this.error.set(CREATE_ERROR_MESSAGES[code] ?? 'Could not create the persona.');
+      this.toast.error("Couldn't create the persona");
     } finally {
       this.busy.set(false);
     }
@@ -158,7 +162,9 @@ export class PersonaManager {
       form.append('purpose', 'persona-photo');
       const res = await this.api.postForm<UploadResponse>('/uploads', form);
       await this.store.setPhoto(persona.id, slot, res.uploadId);
+      this.toast.success('Photo uploaded');
     } catch (e) {
+      this.toast.error('Photo upload failed');
       await this.handleSlotError(e);
     } finally {
       this.uploadingSlot.set(null);
@@ -198,8 +204,10 @@ export class PersonaManager {
     try {
       await this.store.remove(id);
       if (this.editingId() === id) this.editingId.set(null);
+      this.toast.success('Persona deleted');
     } catch {
       this.error.set('Delete failed — try again.');
+      this.toast.error("Couldn't delete the persona");
     } finally {
       this.itemBusy.set(null);
     }

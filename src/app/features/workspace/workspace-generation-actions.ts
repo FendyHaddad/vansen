@@ -7,6 +7,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { ApiError } from '../../core/api/api-service';
 import type { CreateGenerationRequest } from '../../core/api/dtos';
 import { EditSession } from '../../core/editing/edit-session';
+import { ToastService } from '../../core/feedback/toast-service';
 import { editToolById } from '../../core/catalog/model-families';
 import { GenerationOp } from '../../core/enums';
 import { GenerationStore } from '../../core/generations/generation-store';
@@ -49,10 +50,17 @@ export class WorkspaceGenerationActions {
   private readonly mediaCache = inject(MediaCache);
   private readonly editSession = inject(EditSession);
   private readonly notices = inject(WorkspaceNotices);
+  private readonly toast = inject(ToastService);
 
   /** Item ids with an action (retry/delete/upscale/variation/download) in flight —
    * their buttons show a spinner and ignore repeat clicks. */
   readonly busyIds = signal<Set<string>>(new Set());
+
+  /** The banner keeps the detailed reason; the toast says it did not work. */
+  private fail(e: unknown, message: string): void {
+    this.notices.showError(e, message);
+    this.toast.error(message);
+  }
 
   private async withBusy(id: string, fn: () => Promise<void>): Promise<void> {
     if (this.busyIds().has(id)) return;
@@ -89,19 +97,20 @@ export class WorkspaceGenerationActions {
         });
         this.notices.notice.set('');
         this.poller.watch();
+        this.toast.success('Upscale started');
       } catch (e) {
-        this.notices.showError(e, 'Upscale failed');
+        this.fail(e, 'Upscale failed');
       }
     });
   }
 
   async variation(id: string): Promise<void> {
-    await this.rerun(id, () => this.store.variation(id), 'Variation failed');
+    await this.rerun(id, () => this.store.variation(id), 'Variation started', 'Variation failed');
   }
 
   /** Re-submit a failed generation with the same settings. */
   async retry(id: string): Promise<void> {
-    await this.rerun(id, () => this.store.retry(id), 'Retry failed');
+    await this.rerun(id, () => this.store.retry(id), 'Retry started', 'Retry failed');
   }
 
   /**
@@ -110,19 +119,26 @@ export class WorkspaceGenerationActions {
    * server can explain why it cannot, and that explanation is worth more to
    * the customer than a generic failure.
    */
-  private async rerun(id: string, run: () => Promise<unknown>, fallback: string): Promise<void> {
+  private async rerun(
+    id: string,
+    run: () => Promise<unknown>,
+    started: string,
+    fallback: string,
+  ): Promise<void> {
     await this.withBusy(id, async () => {
       try {
         await run();
         this.notices.notice.set('');
         this.poller.watch();
+        this.toast.success(started);
       } catch (e) {
         const refusal = refusalMessage(e);
         if (refusal) {
           this.notices.notice.set(refusal);
+          this.toast.error(fallback);
           return;
         }
-        this.notices.showError(e, fallback);
+        this.fail(e, fallback);
       }
     });
   }
@@ -133,9 +149,9 @@ export class WorkspaceGenerationActions {
       await this.store.cancel(id);
       // No refund is promised here: the worker asks the provider, and a render
       // that has already started keeps going and keeps its credits.
-      this.notices.notice.set('Cancelling — we\'ll refund if it stops in time.');
+      this.toast.success('Cancelling — we\'ll refund if it stops in time');
     } catch (e) {
-      this.notices.showError(e, 'Could not cancel');
+      this.fail(e, "Couldn't cancel");
     }
   }
 
@@ -143,8 +159,9 @@ export class WorkspaceGenerationActions {
     await this.withBusy(id, async () => {
       try {
         await this.store.remove(id);
+        this.toast.success('Deleted');
       } catch (e) {
-        this.notices.showError(e, 'Delete failed');
+        this.fail(e, 'Delete failed');
       }
       afterAttempt();
     });
@@ -152,18 +169,23 @@ export class WorkspaceGenerationActions {
 
   /** Library grid delete — one card or a multi-select batch. */
   async deleteMany(ids: string[]): Promise<void> {
+    let deleted = 0;
     for (const id of ids) {
       let failed = false;
       await this.withBusy(id, async () => {
         try {
           await this.store.remove(id);
+          deleted += 1;
         } catch (e) {
-          this.notices.showError(e, 'Delete failed');
+          this.fail(e, 'Delete failed');
           failed = true;
         }
       });
       if (failed) return;
     }
+    // One toast for the whole batch, not one per card.
+    if (deleted === 0) return;
+    this.toast.success(deleted === 1 ? 'Deleted' : `${deleted} items deleted`);
   }
 
   async download(id: string): Promise<void> {
@@ -181,6 +203,7 @@ export class WorkspaceGenerationActions {
             : await this.mediaCache.blob(item.id, item.mediaUrl);
       } catch {
         this.notices.notice.set('Download failed — the media link may have expired. Reload and retry.');
+        this.toast.error('Download failed');
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -191,6 +214,7 @@ export class WorkspaceGenerationActions {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
+      this.toast.success('Download started');
     });
   }
 
@@ -206,13 +230,13 @@ export class WorkspaceGenerationActions {
       const saved = await this.store.saveEdit(blob, item.id);
       const outcome = this.editSession.adoptItem(saved, at, token);
       if (outcome === 'adopted') {
-        this.notices.notice.set('Saved as a new version.');
+        this.toast.success('Saved as a new version');
         return;
       }
       // Telling them "saved" here would mean their newest strokes are safe.
-      this.notices.notice.set('Saved — you have newer changes still unsaved.');
+      this.toast.info('Saved — you have newer changes still unsaved');
     } catch (e) {
-      this.notices.showError(e, 'Save failed');
+      this.fail(e, 'Save failed');
     }
   }
 
@@ -238,7 +262,7 @@ export class WorkspaceGenerationActions {
       // never touches the mask canvas and a throw lands in the catch below.
       const mask = resolveMask();
       if (tool.needsMask && !mask) {
-        this.notices.notice.set('Paint a mask first — the tool needs to know where to work.');
+        this.toast.info('Paint a mask first — the tool needs to know where to work');
         return;
       }
 
@@ -268,8 +292,9 @@ export class WorkspaceGenerationActions {
       onApplied();
       this.notices.notice.set('');
       this.poller.watch();
+      this.toast.success(`${tool.name} started`);
     } catch (e) {
-      this.notices.showError(e, 'Edit failed');
+      this.fail(e, 'Edit failed');
     }
   }
 
@@ -308,5 +333,6 @@ export class WorkspaceGenerationActions {
     });
     this.notices.notice.set('');
     this.poller.watch();
+    this.toast.success('Expand started');
   }
 }

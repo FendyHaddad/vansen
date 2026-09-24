@@ -18,6 +18,7 @@ import { SiteHeader } from '../../shared/site-header/site-header';
 import { SiteFooter } from '../../shared/site-footer/site-footer';
 import { AuthService } from '../../core/auth/auth-service';
 import { BillingService } from '../../core/billing/billing-service';
+import { ToastService } from '../../core/feedback/toast-service';
 import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { billingErrorText } from '../../core/billing/billing-error-text';
 import { ApiError } from '../../core/api/api-service';
@@ -87,6 +88,7 @@ interface PlanFaq {
 export class PlansPage {
   private readonly auth = inject(AuthService);
   private readonly billing = inject(BillingService);
+  private readonly toast = inject(ToastService);
   private readonly intent = inject(CheckoutIntent);
   private readonly router = inject(Router);
   private readonly capabilities = inject(PublicCapabilitiesService);
@@ -136,6 +138,7 @@ export class PlansPage {
         'Could not start checkout. If you already subscribe, manage your plan under Settings → Subscription.';
       const inAppStore = e instanceof ApiError && e.code === 'subscribed_in_app_store';
       this.error.set(inAppStore ? billingErrorText(e, generic) : generic);
+      this.toast.error("Couldn't start checkout");
     }
   }
 

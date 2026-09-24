@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output, si
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideImagePlus, lucideX } from '@ng-icons/lucide';
 import { ApiService } from '../../../../core/api/api-service';
+import { ToastService } from '../../../../core/feedback/toast-service';
 import type { UploadResponse } from '../../../../core/api/dtos';
 import { referenceRule, type VideoMode } from '../../../../core/catalog/model-families';
 
@@ -29,6 +30,7 @@ function slotLabel(mode: VideoMode, index: number): string {
 })
 export class ReferenceDrop {
   private readonly api = inject(ApiService);
+  private readonly toast = inject(ToastService);
 
   readonly mode = input.required<VideoMode>();
   /**
@@ -92,8 +94,10 @@ export class ReferenceDrop {
     try {
       const res = await this.api.postForm<UploadResponse>('/uploads', form);
       this.place(index, { path: res.uploadId, url: res.url });
+      this.toast.success('Reference added');
     } catch (e) {
       this.error.set(messageOf(e));
+      this.toast.error('Upload failed');
     } finally {
       this.uploadingIndex.set(null);
     }

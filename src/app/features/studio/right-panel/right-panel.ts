@@ -44,6 +44,7 @@ import {
   toolsFor,
 } from '../../../core/catalog/entitlements';
 import { EditToolCatalog } from '../../../core/catalog/edit-tool-catalog';
+import { ToastService } from '../../../core/feedback/toast-service';
 import {
   EDIT_TOOLS,
   PLAN_CREDITS,
@@ -147,6 +148,7 @@ export class RightPanel {
   private readonly ledger = inject(LedgerService);
   private readonly profileStore = inject(ProfileStore);
   private readonly editToolCatalog = inject(EditToolCatalog);
+  private readonly toast = inject(ToastService);
 
   /** True while the workspace is in edit mode (panel is a teaser otherwise). */
   readonly editing = input(false);
@@ -157,13 +159,10 @@ export class RightPanel {
   readonly checkoutBusy = input(false);
 
   readonly saveRequested = output<void>();
-  /** Emits the plan the visitor picked in the tier switch, not just "studio". */
   readonly subscribeRequested = output<'studio' | 'pro'>();
   /** Existing subscribers change plan in the Stripe portal — /billing/subscribe
    * rejects them with `already_subscribed`, so an upgrade must not go there. */
   readonly upgradeRequested = output<void>();
-  /** Pro → Studio, via the same confirm dialog (period-end only, server-enforced). */
-  readonly downgradeRequested = output<void>();
   readonly aiToolRequested = output<{
     toolId: string;
     prompt: string;
@@ -176,12 +175,10 @@ export class RightPanel {
   readonly studioActive = this.profileStore.studioActive;
   readonly totalCredits = this.ledger.totalCredits;
 
-  /** Studio | Pro tier switch — drives the lock card and which plan gets bought. */
-  readonly tier = signal<'studio' | 'pro'>('studio');
-  readonly pitch = computed(() => PLAN_PITCH[this.tier()]);
-  readonly planPriceUsd = computed(() => PLAN_PRICE_USD[this.tier()]);
-  readonly planPromoUsd = computed(() => PLAN_PROMO_USD[this.tier()]);
-  readonly planLabel = computed(() => (this.tier() === 'pro' ? 'Pro' : 'Studio'));
+  /** The subscribe pitch sells Studio; Pro is reached by upgrading from inside. */
+  readonly pitch = computed(() => PLAN_PITCH.studio);
+  readonly planPriceUsd = computed(() => PLAN_PRICE_USD.studio);
+  readonly planPromoUsd = computed(() => PLAN_PROMO_USD.studio);
   readonly activeTool = signal<StudioTool | null>(null);
   /** Shared brush size for heal/liquify/mask — the viewport reads it too. */
   readonly brushSize = signal(40);
@@ -224,39 +221,29 @@ export class RightPanel {
    * credits" hint is only useful while there is something to spend them on. */
   readonly anyAiToolUnlocked = computed(() => this.aiTools.some((tool) => !this.aiToolLocked(tool)));
 
-  /** A Studio subscriber who switched to the Pro tab: sell the upgrade rather
-   * than the tools they already have. */
-  readonly upgrading = computed(() => !this.locked() && this.tier() === 'pro' && this.proLocked());
-
   /** A plan change already booked for renewal — the standing reminder. */
   readonly pendingPlan = computed(() => this.profileStore.subscription()?.pendingPlan ?? null);
   readonly pendingAt = computed(() => this.profileStore.subscription()?.pendingAt ?? null);
   readonly pendingLabel = computed(() => (this.pendingPlan() === 'pro' ? 'Pro' : 'Studio'));
 
   /** Show the plan pitch instead of the tool rail. */
-  readonly showPitch = computed(() => this.locked() || this.upgrading());
-
-  /** A Pro subscriber browsing the Studio tab: they own every tool shown, so the
-   * rail stays — a compact downgrade offer rides above it instead. Hidden once
-   * the downgrade is booked (the pending note already covers that state). */
-  readonly downgradeOffer = computed(
-    () =>
-      !this.locked() &&
-      this.tier() === 'studio' &&
-      this.profileStore.subscription()?.plan === 'pro' &&
-      this.pendingPlan() !== 'studio',
-  );
+  readonly showPitch = this.locked;
 
   /** The launch coupon is first-time-only (`firstTime` in /billing/subscribe keys
    * off ever having had a Stripe subscription). Anyone with a subscription row —
    * lapsed included — will not get it, so never promise it to them. */
   readonly showPromo = computed(() => this.profileStore.subscription() === null);
 
-  readonly ctaLabel = computed(() =>
-    this.upgrading()
-      ? `Upgrade to Pro · $${PLAN_PRICE_USD.pro}/mo`
-      : `Subscribe to ${this.planLabel()} · $${this.planPriceUsd()}/mo`,
-  );
+  readonly ctaLabel = computed(() => `Subscribe to Studio · $${this.planPriceUsd()}/mo`);
+
+  /** A locked Pro tool is an upgrade prompt, not a dead button. */
+  pickProTool(id: StudioTool): void {
+    if (this.proLocked()) {
+      this.upgradeRequested.emit();
+      return;
+    }
+    this.selectTool(id);
+  }
 
   selectTool(id: StudioTool): void {
     this.activeTool.set(this.activeTool() === id ? null : id);
@@ -288,7 +275,13 @@ export class RightPanel {
   /** Client-side download of the current canvas in the chosen format. */
   async exportAs(format: ExportFormat): Promise<void> {
     this.exportOpen.set(false);
-    const blob = await this.session.exportBlob(format.type, format.quality);
+    let blob: Blob;
+    try {
+      blob = await this.session.exportBlob(format.type, format.quality);
+    } catch {
+      this.toast.error('Export failed');
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -297,6 +290,7 @@ export class RightPanel {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    this.toast.success(`Exported as ${format.ext.toUpperCase()}`);
   }
 
   runAiTool(toolId: string): void {

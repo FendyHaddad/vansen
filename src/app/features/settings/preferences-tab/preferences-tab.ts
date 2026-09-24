@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { HlmLabel } from '@spartan-ng/helm/label';
 import { PreferencesService } from '../../../core/preferences/preferences-service';
+import type { Prefs } from '../../../core/preferences/preferences-service';
+import { ToastService } from '../../../core/feedback/toast-service';
 import { MODEL_FAMILIES } from '../../../core/catalog/model-families';
 import type { VideoMode } from '../../../core/catalog/model-families';
 import { MODE_LABELS } from '../../workspace/left-panel/mode-picker/mode-picker';
@@ -14,6 +16,7 @@ import { MODE_LABELS } from '../../workspace/left-panel/mode-picker/mode-picker'
 })
 export class PreferencesTab {
   private readonly prefsService = inject(PreferencesService);
+  private readonly toast = inject(ToastService);
 
   readonly prefs = this.prefsService.prefs;
   readonly imageFamilies = MODEL_FAMILIES.filter((f) => f.kind === 'image');
@@ -22,23 +25,32 @@ export class PreferencesTab {
   readonly videoModes = Object.entries(MODE_LABELS) as [VideoMode, string][];
 
   setMode(value: string): void {
-    this.prefsService.update({ defaultMode: value === 'video' ? 'video' : 'image' });
+    void this.save({ defaultMode: value === 'video' ? 'video' : 'image' });
   }
 
   setImageFamily(value: string): void {
-    this.prefsService.update({ defaultImageFamily: value });
+    void this.save({ defaultImageFamily: value });
   }
 
   setVideoFamily(value: string): void {
-    this.prefsService.update({ defaultVideoFamily: value });
+    void this.save({ defaultVideoFamily: value });
   }
 
   setVideoMode(v: string): void {
-    this.prefsService.update({ defaultVideoMode: v as VideoMode });
+    void this.save({ defaultVideoMode: v as VideoMode });
   }
 
   setAspect(value: string): void {
-    this.prefsService.update({ defaultAspect: value });
+    void this.save({ defaultAspect: value });
   }
 
+  /** Every select saves on change, so each change confirms itself. */
+  private async save(patch: Partial<Prefs>): Promise<void> {
+    try {
+      await this.prefsService.update(patch);
+      this.toast.success('Preferences saved');
+    } catch {
+      this.toast.error("Couldn't save preferences — try again");
+    }
+  }
 }
