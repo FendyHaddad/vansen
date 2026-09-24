@@ -23,7 +23,7 @@ export function registerRequestMiddleware(app: App, ctx: ApiContext): void {
       // The OAuth endpoints assistants call are public (RFC 8414/7591 clients
       // may run in a browser): any origin, never credentials.
       origin: (origin, c) => isPublicOauthPath(c.req.path) ? "*" : allowedOrigin(origin) ?? undefined,
-      allowHeaders: ["authorization", "content-type", "x-vansen-client"],
+      allowHeaders: ["authorization", "content-type", "x-vansen-client", "idempotency-key"],
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     }),
   );
