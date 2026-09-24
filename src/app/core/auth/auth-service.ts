@@ -97,6 +97,16 @@ export class AuthService {
     if (error) throw new Error(error.message);
   }
 
+  /** Same redirect and consent-return handling as signInGoogle — the caller
+   * stashes the return before invoking this, same as the Google path. */
+  async signInWithApple(): Promise<void> {
+    const { error } = await this.auth.signInWithOAuth({
+      provider: 'apple',
+      options: { redirectTo: `${location.origin}/app` },
+    });
+    if (error) throw new Error(error.message);
+  }
+
   async signInEmail(email: string, password: string): Promise<void> {
     const { error } = await this.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);

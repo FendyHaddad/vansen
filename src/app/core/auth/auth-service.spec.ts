@@ -374,3 +374,68 @@ describe('AuthService password recovery', () => {
     expect(service.recoveryPending()).toBe(true);
   });
 });
+
+/**
+ * Apple mirrors the Google OAuth leg exactly: same provider-based call, same
+ * redirect back to /app (Supabase, not this app, sends the browser there —
+ * the consent-return stash is the caller's job, same as for Google).
+ */
+describe('AuthService OAuth sign-in', () => {
+  function oauthAuth(handlers: Handler[], over: Record<string, unknown> = {}) {
+    return {
+      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+      onAuthStateChange: (cb: Handler) => {
+        handlers.push(cb);
+        return { data: { subscription: { unsubscribe: () => undefined } } };
+      },
+      signOut: () => Promise.resolve({ error: null }),
+      signInWithOAuth: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+      ...over,
+    } as unknown as SupabaseClient['auth'];
+  }
+
+  const handlers: Handler[] = [];
+  let auth: ReturnType<typeof oauthAuth>;
+  let service: AuthService;
+
+  async function setup(over: Record<string, unknown> = {}) {
+    handlers.length = 0;
+    TestBed.resetTestingModule();
+    auth = oauthAuth(handlers, over);
+    TestBed.configureTestingModule({
+      providers: [{ provide: AUTH_CLIENT, useValue: auth }],
+    });
+    service = TestBed.inject(AuthService);
+    await service.whenReady();
+  }
+
+  const spy = (name: string) =>
+    (auth as unknown as Record<string, ReturnType<typeof vi.fn>>)[name];
+
+  beforeEach(() => setup());
+
+  it('asks for the apple provider with the same redirect Google uses', async () => {
+    await service.signInWithApple();
+    expect(spy('signInWithOAuth')).toHaveBeenCalledWith({
+      provider: 'apple',
+      options: { redirectTo: `${location.origin}/app` },
+    });
+  });
+
+  it('asks for the google provider with a redirect back to /app', async () => {
+    await service.signInGoogle();
+    expect(spy('signInWithOAuth')).toHaveBeenCalledWith({
+      provider: 'google',
+      options: { redirectTo: `${location.origin}/app` },
+    });
+  });
+
+  it('surfaces a failure from the vendor when Apple sign-in cannot start', async () => {
+    await setup({
+      signInWithOAuth: vi.fn(() =>
+        Promise.resolve({ data: {}, error: { message: 'provider not enabled' } }),
+      ),
+    });
+    await expect(service.signInWithApple()).rejects.toThrow(/provider not enabled/);
+  });
+});
