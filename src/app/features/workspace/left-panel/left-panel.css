@@ -21,11 +21,7 @@
 /* Settings render as compact rows — rows carry their own height, so the
  * section gap shrinks; the title keeps a little extra air below it. */
 .rail-settings {
-  gap: 20px;
-}
-
-.rail-look {
-  gap: 4px;
+  gap: 16px;
 }
 
 .rail-settings .rail-title {
@@ -53,6 +49,56 @@
   margin: auto -18px 0;
   padding: 14px 18px 0;
   border-top: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+}
+
+.gen-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.gen-action {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Quantity stepper, shop-style: − n + beside the action it multiplies. */
+.qty {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+
+.qty-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.qty-btn:hover:not(:disabled) {
+  color: var(--foreground);
+}
+
+.qty-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.qty-value {
+  min-width: 16px;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--foreground);
 }
 
 .gen-spin {
@@ -229,13 +275,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 9px 0;
+  padding: 8px 0;
   border: 1px dashed var(--border);
   border-radius: calc(var(--radius) - 4px);
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
   transition:

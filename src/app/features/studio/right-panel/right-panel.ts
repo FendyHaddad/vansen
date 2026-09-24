@@ -150,6 +150,8 @@ export class RightPanel {
 
   /** True while the workspace is in edit mode (panel is a teaser otherwise). */
   readonly editing = input(false);
+  /** The library already has images, so the "open or upload" hint says nothing new. */
+  readonly hasImages = input(false);
 
   /** True while the workspace is redirecting to Stripe — drives the CTA spinner. */
   readonly checkoutBusy = input(false);

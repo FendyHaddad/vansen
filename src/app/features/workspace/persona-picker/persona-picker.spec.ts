@@ -59,12 +59,12 @@ describe('PersonaPicker', () => {
     expect(fixture.nativeElement.textContent).toContain('Me');
   });
 
-  it('falls back to None when the selected persona is not ready', () => {
+  it('falls back to the empty Persona tile when the selected persona is not ready', () => {
     const fixture = TestBed.createComponent(PersonaPicker);
     fixture.componentRef.setInput('selected', 'p2');
     fixture.detectChanges();
     expect(fixture.componentInstance.current()).toBeNull();
-    expect(fixture.nativeElement.textContent).toContain('None');
+    expect(fixture.nativeElement.querySelector('.pp-tile').textContent).toContain('Persona');
   });
 
   it('emits changed on select and manageRequested on manage', () => {

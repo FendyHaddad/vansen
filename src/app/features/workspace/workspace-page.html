@@ -242,6 +242,7 @@
   <app-right-panel
     data-tour="right-panel"
     [editing]="mode() === 'edit'"
+    [hasImages]="generations().length > 0"
     (saveRequested)="actions.saveEdit()"
     (aiToolRequested)="onAiTool($event)"
     [checkoutBusy]="billing.checkoutBusy()"

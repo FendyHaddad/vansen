@@ -392,8 +392,7 @@ describe('LeftPanel persona pipeline', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Persona · Nano Banana Pro · 4K');
-    const labels = Array.from(fixture.nativeElement.querySelectorAll('.ss-label')) as HTMLElement[];
-    expect(labels.some((el) => el.textContent?.trim().startsWith('Resolution'))).toBe(false);
+    expect(fixture.nativeElement.querySelector('.ss-input[aria-label="Resolution"]')).toBeNull();
 
     component.setBatch('4');
     expect(component.unitCredits()).toBe(personaGenCreditCost());

@@ -90,7 +90,7 @@
       }
     </div>
   } @else {
-    @if (!editing()) {
+    @if (!editing() && !hasImages()) {
       <p class="teaser-hint">Open or upload an image to edit — these tools act on the open image.</p>
     }
 

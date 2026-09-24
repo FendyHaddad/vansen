@@ -131,12 +131,18 @@
   cursor: not-allowed;
 }
 
+/* Fixed width so every badge lines up; solid light-on-dark for contrast even
+ * when the row is disabled. */
 .price-chip {
+  flex: none;
+  width: 48px;
   margin-left: auto;
-  padding: 1px 7px;
+  padding: 2px 0;
   border-radius: 999px;
-  background: var(--primary, #825aff);
-  color: #fff;
+  background: var(--foreground);
+  color: var(--background);
+  text-align: center;
+  font-weight: 600;
   font-size: 0.7rem;
   font-family: var(--font-app-mono);
   font-variant-numeric: tabular-nums;

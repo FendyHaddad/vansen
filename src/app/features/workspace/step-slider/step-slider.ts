@@ -10,10 +10,6 @@ import {
 } from '@angular/core';
 import { FamilyOption } from '../../../core/catalog/model-families';
 import { HlmTooltipImports } from '@spartan-ng/helm/tooltip';
-import { Hint } from '../../../shared/hint/hint';
-
-const RATIO_PATTERN = /^(\d+):(\d+)$/;
-const RATIO_BOX = 14; // px, longest edge of the aspect preview icon
 
 /** One thumb move, from stop to stop. `key` alternates the animation classes so each move replays. */
 export interface SliderMove {
@@ -33,11 +29,11 @@ export interface SliderMove {
   templateUrl: './step-slider.html',
   styleUrl: './step-slider.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Hint, ...HlmTooltipImports],
+  imports: [...HlmTooltipImports],
 })
 export class StepSlider {
+  /** Accessible name only; the stops speak for themselves on screen. */
   readonly label = input.required<string>();
-  readonly axisTooltip = input('');
   readonly options = input<FamilyOption[] | null>(null);
   /** Values shown on the track but not selectable right now. */
   readonly disabled = input<string[]>([]);
@@ -101,18 +97,6 @@ export class StepSlider {
     const target = this.nearestEnabled(wanted, Math.sign(wanted - this.index()));
     el.value = String(target);
     this.pick(target);
-  }
-
-  /** Width/height of the shape icon for a ratio label like "16:9"; null otherwise. */
-  ratioBox(option: FamilyOption): { w: number; h: number } | null {
-    const match = RATIO_PATTERN.exec(option.label);
-    if (!match) return null;
-    const w = Number(match[1]);
-    const h = Number(match[2]);
-    if (!w || !h) return null;
-    return w >= h
-      ? { w: RATIO_BOX, h: Math.max(6, Math.round((RATIO_BOX * h) / w)) }
-      : { w: Math.max(6, Math.round((RATIO_BOX * w) / h)), h: RATIO_BOX };
   }
 
   /** A new option list (another model) is a fresh slider, not a move. */

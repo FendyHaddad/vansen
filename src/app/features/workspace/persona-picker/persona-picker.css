@@ -1,74 +1,75 @@
-/* Settings row, identical tokens to option-group — component encapsulation
- * means those styles don't reach in here, so they are repeated. */
-.og {
+/* The composer's third reference tile — same tokens as the left panel's
+ * .ref-drop (encapsulation keeps those out, so they are repeated). */
+:host {
+  flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
-}
-
-.og-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted-foreground);
-}
-
-.og-info {
-  font-size: 0.75rem;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.og-trigger {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   min-width: 0;
-  border: none;
+}
+
+.pp-tile {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  border: 1px dashed var(--border);
   border-radius: calc(var(--radius) - 4px);
   background: transparent;
-  color: var(--foreground);
-  padding: 5px 4px 5px 8px;
-  font-size: 0.8125rem;
-  font-weight: 550;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
-}
-
-.og-trigger:hover {
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
-}
-
-.og-trigger-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.og-chevron {
   color: var(--muted-foreground);
-  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 
-.persona-trigger-thumb {
-  width: 18px;
-  height: 18px;
+.pp-tile:hover {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+  color: var(--foreground);
+}
+
+.persona-locked {
+  opacity: 0.7;
+}
+
+/* An active persona replaces the tiles: its face and name, tap to switch. */
+.pp-chip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pp-chip-thumb {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
 }
 
-.persona-trigger-none {
-  color: var(--muted-foreground);
+.pp-chip-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.persona-locked {
+.pp-chip-chevron {
   color: var(--muted-foreground);
+  flex-shrink: 0;
 }
 
 .persona-menu {

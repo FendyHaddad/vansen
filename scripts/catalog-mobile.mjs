@@ -10,18 +10,18 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { buildCatalog } = await import(join(root, 'src/app/core/catalog/build-catalog.ts'));
 
-// 0001/0005/0008/0013/0016/0032/0034: image families, the upscaler and the
-// edit tools (Pro since 0034) ship on; video (Pro) and persona ship off.
+// 0001/0005/0008/0013/0016/0032/0034/0039: image families, the upscaler and the
+// edit tools (Studio again since 0039) ship on; video (Pro) and persona ship off.
 const SEED_MODEL_ROWS = [
   { id: 'nano-banana', enabled: true, min_plan: 'studio' },
   { id: 'gpt-image', enabled: true, min_plan: 'studio' },
   { id: 'flux', enabled: true, min_plan: 'studio' },
   { id: 'seedream', enabled: true, min_plan: 'studio' },
   { id: 'upscaler', enabled: true, min_plan: 'studio' },
-  { id: 'edit-remove', enabled: true, min_plan: 'pro' },
-  { id: 'edit-fill', enabled: true, min_plan: 'pro' },
-  { id: 'edit-expand', enabled: true, min_plan: 'pro' },
-  { id: 'edit-bg', enabled: true, min_plan: 'pro' },
+  { id: 'edit-remove', enabled: true, min_plan: 'studio' },
+  { id: 'edit-fill', enabled: true, min_plan: 'studio' },
+  { id: 'edit-expand', enabled: true, min_plan: 'studio' },
+  { id: 'edit-bg', enabled: true, min_plan: 'studio' },
   { id: 'veo', enabled: false, min_plan: 'pro' },
   { id: 'omni', enabled: false, min_plan: 'pro' },
   { id: 'kling', enabled: false, min_plan: 'pro' },

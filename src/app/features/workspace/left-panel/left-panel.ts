@@ -10,11 +10,10 @@ import {
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
   lucideImage,
-  lucideImagePlus,
-  lucideImages,
+  lucideMinus,
+  lucidePlus,
   lucideLock,
   lucideVideo,
-  lucideWandSparkles,
   lucideX,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
@@ -83,6 +82,9 @@ export interface ReferenceSelection {
   url: string;
 }
 
+const BATCH_MIN = 1;
+const BATCH_MAX = 4;
+
 const AXIS_TOOLTIPS = {
   version:
     'Model generation. Newer versions produce better results; price and options differ per version.',
@@ -115,9 +117,8 @@ const AXIS_TOOLTIPS = {
       lucideImage,
       lucideLock,
       lucideVideo,
-      lucideWandSparkles,
-      lucideImagePlus,
-      lucideImages,
+      lucideMinus,
+      lucidePlus,
       lucideX,
     }),
   ],
@@ -250,19 +251,18 @@ export class LeftPanel {
     }));
   });
 
-  readonly batchOptions: FamilyOption[] = [1, 2, 3, 4].map((n) => ({
-    value: String(n),
-    label: String(n),
-    tooltip:
-      n === 1
-        ? 'Single output.'
-        : `${n} different takes on the same prompt in one run — ${n}× the price.`,
-  }));
+  readonly batchMin = BATCH_MIN;
+  readonly batchMax = BATCH_MAX;
 
   /** Owner accounts have unlimited credits — the price is shown, never a blocker. */
   readonly isOwner = this.profileStore.isOwner;
 
   readonly personaActive = computed(() => this.mode() === 'image' && !!this.persona());
+  /** A persona brings its own five references, so a composer reference steps aside. */
+  readonly referencePreview = computed(() => (this.personaActive() ? null : this.reference()));
+  readonly referenceTiles = computed(
+    () => this.family().capabilities.imageInput && !this.personaActive(),
+  );
 
   readonly videoMode = computed<VideoMode>(() => this.settings().mode ?? 't2v');
   readonly refRule = computed(() => referenceRule(this.videoMode()));
@@ -384,6 +384,12 @@ export class LeftPanel {
 
   setBatch(value: string): void {
     this.settings.update((s) => ({ ...s, batch: Number(value) }));
+  }
+
+  /** The quantity stepper beside Generate. */
+  stepBatch(delta: 1 | -1): void {
+    const next = Math.min(BATCH_MAX, Math.max(BATCH_MIN, this.batch() + delta));
+    this.setBatch(String(next));
   }
 
   updatePrompt(value: string): void {

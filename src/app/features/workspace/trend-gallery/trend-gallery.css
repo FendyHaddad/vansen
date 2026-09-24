@@ -13,7 +13,7 @@
 /* Fade whichever edge still has tiles behind it. */
 .tc-track {
   display: flex;
-  gap: 8px;
+  gap: 7px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
@@ -58,7 +58,7 @@
 
 .tc-tile {
   position: relative;
-  flex: 0 0 66px;
+  flex: 0 0 56px;
   aspect-ratio: 3 / 4;
   padding: 0;
   border: none;

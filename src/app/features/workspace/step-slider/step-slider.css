@@ -16,53 +16,6 @@
   gap: 8px;
 }
 
-.ss-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 18px;
-}
-
-/* Matches the left panel's .field-label. */
-.ss-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted-foreground);
-}
-
-.ss-info {
-  font-size: 0.75rem;
-}
-
-.ss-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--foreground);
-}
-
-.ss-ratio-wrap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-}
-
-.ss-ratio {
-  display: inline-block;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-  opacity: 0.8;
-  transition:
-    width 0.18s ease,
-    height 0.18s ease;
-}
-
 .ss-control {
   position: relative;
   height: var(--ss-thumb);
@@ -275,7 +228,7 @@
 }
 
 /* Same inset as the rail; each stop is a zero-width anchor with its label
- * centred over it, the two end labels pinned inside the control's edges. */
+ * centred under its notch. */
 .ss-stops {
   display: flex;
   justify-content: space-between;
@@ -299,16 +252,6 @@
   white-space: nowrap;
   cursor: pointer;
   transition: color 0.12s ease;
-}
-
-.ss-stop:first-child {
-  justify-content: flex-start;
-  margin-left: calc(-1 * var(--ss-inset));
-}
-
-.ss-stop:last-child {
-  justify-content: flex-end;
-  margin-right: calc(-1 * var(--ss-inset));
 }
 
 .ss-stops--single .ss-stop {

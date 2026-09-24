@@ -1,24 +1,5 @@
 @if (options()?.length) {
   <div class="ss">
-    <div class="ss-head">
-      <span class="ss-label">
-        {{ label() }}
-        @if (axisTooltip()) {
-          <app-hint [text]="axisTooltip()"><span class="ss-info">ⓘ</span></app-hint>
-        }
-      </span>
-      @if (selectedOption(); as sel) {
-        <span class="ss-meta">
-          @if (ratioBox(sel); as box) {
-            <span class="ss-ratio-wrap">
-              <!-- data-driven shape: per-ratio width/height cannot come from a stylesheet class -->
-              <span class="ss-ratio" [style.width.px]="box.w" [style.height.px]="box.h"></span>
-            </span>
-          }
-        </span>
-      }
-    </div>
-
     @if (max() > 0) {
       <div class="ss-control">
         <div class="ss-rail" aria-hidden="true">

@@ -158,6 +158,10 @@
     {
       "file": "0038_iap_sandbox_environment.sql",
       "sha256": "7a951d781724"
+    },
+    {
+      "file": "0039_edit_tools_studio.sql",
+      "sha256": "84b60616fb26"
     }
   ]
 }

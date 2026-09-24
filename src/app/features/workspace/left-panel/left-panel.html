@@ -54,9 +54,9 @@
       <app-trend-gallery [selected]="appliedTrend()" (picked)="applyTrend($event)"/>
     }
 
-    @if (mode() === 'image' && family().capabilities.imageInput && !personaActive()) {
+    @if (mode() === 'image') {
       <div class="field">
-        @if (reference(); as ref) {
+        @if (referencePreview(); as ref) {
           <div class="ref-preview">
             <img [cachedSrc]="ref.url" [cacheKey]="ref.id ?? ''" alt="Reference"/>
             <button
@@ -70,26 +70,31 @@
           </div>
         } @else {
           <div class="ref-actions">
-            <label class="ref-drop" [class.ref-blocked]="uploading()" title="Attach an image to edit or guide the generation">
-              <ng-icon name="lucideImagePlus" size="16"/>
-              {{ uploading() ? 'Uploading…' : 'Upload' }}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                class="ref-file-input"
-                [disabled]="uploading()"
-                (change)="onFilePicked($event)"
-              />
-            </label>
-            <button
-              type="button"
-              class="ref-drop"
-              title="Use an image from your library as the reference"
-              (click)="pickReferenceRequested.emit()"
-            >
-              <ng-icon name="lucideImages" size="16"/>
-              From library
-            </button>
+            @if (referenceTiles()) {
+              <label class="ref-drop" [class.ref-blocked]="uploading()" title="Attach an image to edit or guide the generation">
+                {{ uploading() ? 'Uploading…' : 'Upload' }}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  class="ref-file-input"
+                  [disabled]="uploading()"
+                  (change)="onFilePicked($event)"
+                />
+              </label>
+              <button
+                type="button"
+                class="ref-drop"
+                title="Use an image from your library as the reference"
+                (click)="pickReferenceRequested.emit()"
+              >
+                Library
+              </button>
+            }
+            <app-persona-picker
+              [selected]="persona()"
+              (changed)="setPersona($event)"
+              (manageRequested)="managePersonasRequested.emit()"
+            />
           </div>
           @if (uploadError()) {
             <p class="ref-error">{{ uploadError() }}</p>
@@ -150,7 +155,6 @@
 
       <app-step-slider
         label="Version"
-        [axisTooltip]="axisTooltips.version"
         [options]="versionOptions()"
         [selected]="settings().version"
         (changed)="setAxis('version', $event)"
@@ -179,7 +183,6 @@
     @if (!hideAspect()) {
       <app-step-slider
         label="Aspect ratio"
-        [axisTooltip]="axisTooltips.aspect"
         [options]="aspectStops()"
         [selected]="settings().aspectRatio"
         (changed)="setAxis('aspectRatio', $event)"
@@ -189,7 +192,6 @@
     @if (!personaActive()) {
       <app-step-slider
         label="Resolution"
-        [axisTooltip]="axisTooltips.resolution"
         [options]="family().capabilities.resolutions ?? null"
         [disabled]="resolutionDisabled()"
         [selected]="settings().resolution"
@@ -198,7 +200,6 @@
 
       <app-step-slider
         label="Quality"
-        [axisTooltip]="axisTooltips.quality"
         [options]="family().capabilities.qualities ?? null"
         [disabled]="qualityDisabled()"
         [selected]="settings().quality"
@@ -209,30 +210,17 @@
     @if (mode() === 'video') {
       <app-step-slider
         label="Duration"
-        [axisTooltip]="axisTooltips.duration"
         [options]="durationOptions()"
         [selected]="settings().durationS?.toString()"
         (changed)="setDuration($event)"
       />
     }
 
-    @if (mode() === 'image') {
-      <div class="batch-group">
-        <app-step-slider
-          label="Batch"
-          [axisTooltip]="axisTooltips.batch"
-          [options]="batchOptions"
-          [selected]="batch().toString()"
-          (changed)="setBatch($event)"
-        />
-      </div>
-    }
 
     @if (audioSelectable()) {
       <div class="audio-group">
         <app-step-slider
           label="Audio"
-          axisTooltip="Soundtrack changes the price per second."
           [options]="audioOptions"
           [selected]="settings().audio ?? 'off'"
           (changed)="setAudio($event)"
@@ -248,38 +236,49 @@
     }
   </section>
 
-  @if (mode() === 'image') {
-    <section class="rail-section rail-divided rail-look">
-      <app-persona-picker
-        [selected]="persona()"
-        (changed)="setPersona($event)"
-        (manageRequested)="managePersonasRequested.emit()"
-      />
-    </section>
-  }
-
   <div class="gen-btn">
     @if (insufficient()) {
       <p class="insufficient">
         Not enough credits for this configuration — top up with “Add credits” in the top bar.
       </p>
     }
-    <button hlmBtn class="w-full" [disabled]="!canGenerate() || generating()" (click)="generate()">
-      @if (generating()) {
-        <span class="gen-spin" role="status" aria-label="Generating"></span>
-        Generating…
-      } @else {
-        <ng-icon name="lucideWandSparkles" size="16"/>
-        Generate
-        @if (personaActive()) {
-          · <span class="num">{{ unitCredits() }} cr × {{ batch() }} = {{ priceCredits() }} cr</span>
-        } @else {
-          @if (mode() === 'image' && batch() > 1) {
-            <span class="num">×{{ batch() }}</span>
-          }
-          · <span class="num">{{ priceCredits() }} cr</span>
-        }
+    <div class="gen-row">
+      @if (mode() === 'image') {
+        <div class="batch-group qty" role="group" aria-label="Batch">
+          <button
+            type="button"
+            class="qty-btn"
+            aria-label="Fewer outputs"
+            [disabled]="batch() <= batchMin"
+            (click)="stepBatch(-1)"
+          >
+            <ng-icon name="lucideMinus" size="13"/>
+          </button>
+          <span class="qty-value num" [hlmTooltip]="axisTooltips.batch">{{ batch() }}</span>
+          <button
+            type="button"
+            class="qty-btn"
+            aria-label="More outputs"
+            [disabled]="batch() >= batchMax"
+            (click)="stepBatch(1)"
+          >
+            <ng-icon name="lucidePlus" size="13"/>
+          </button>
+        </div>
       }
-    </button>
+      <button hlmBtn class="gen-action" [disabled]="!canGenerate() || generating()" (click)="generate()">
+        @if (generating()) {
+          <span class="gen-spin" role="status" aria-label="Generating"></span>
+          Generating…
+        } @else {
+          Generate
+          @if (personaActive()) {
+            · <span class="num">{{ unitCredits() }} cr × {{ batch() }} = {{ priceCredits() }} cr</span>
+          } @else {
+            · <span class="num">{{ priceCredits() }} cr</span>
+          }
+        }
+      </button>
+    </div>
   </div>
 </div>

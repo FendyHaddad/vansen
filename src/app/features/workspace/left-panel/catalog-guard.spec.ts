@@ -142,6 +142,6 @@ describe('composer and /catalog agree', () => {
   it('the image batch stepper stops where the catalog does', () => {
     const panel = makePanel();
     const nano = CATALOG.families.find((f) => f.id === 'nano-banana');
-    expect(panel.batchOptions.length).toBe(nano?.batch.max);
+    expect([panel.batchMin, panel.batchMax]).toEqual([nano?.batch.min, nano?.batch.max]);
   });
 });

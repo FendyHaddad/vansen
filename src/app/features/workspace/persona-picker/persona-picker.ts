@@ -1,19 +1,18 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideChevronDown, lucideLock, lucideUserRound } from '@ng-icons/lucide';
+import { lucideChevronDown, lucideUserRound } from '@ng-icons/lucide';
 import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { PersonaStatus } from '../../../core/enums';
-import { Hint } from '../../../shared/hint/hint';
 
 @Component({
   selector: 'app-persona-picker',
   templateUrl: './persona-picker.html',
   styleUrl: './persona-picker.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgIcon, Hint, ...HlmDropdownMenuImports],
-  providers: [provideIcons({ lucideChevronDown, lucideLock, lucideUserRound })],
+  imports: [NgIcon, ...HlmDropdownMenuImports],
+  providers: [provideIcons({ lucideChevronDown, lucideUserRound })],
 })
 export class PersonaPicker {
   private readonly store = inject(PersonaStore);
