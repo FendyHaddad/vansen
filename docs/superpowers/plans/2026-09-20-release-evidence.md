@@ -836,3 +836,16 @@ Shipped: workspace left panel with provider-logo model picker, notched step slid
 every format axis (unavailable combos dimmed, animated thumb), trend carousel under the prompt, style
 and persona in their own section. Catalog change is a label only (Nano Banana "Latest" → "Standard",
 still the default); mobile's bundled catalog regenerated (`6bc0d0b`, no store build).
+
+### 2026-09-24 — style presets removed + composer tidy (`0f2824b`)
+
+`./deploy.sh --yes` exited 0 (gates included): `DEPLOYED 0f2824b · catalog 2026-09-24.2 · api v84`.
+
+| Check | Result |
+|---|---|
+| `GET <api>/manifest` | `gitRevision` 0f2824b, `schemaVersion` 0038, `workerVersion` v37, `catalogVersion` 2026-09-24.2 |
+| `GET <api>/catalog` | no `styles` key |
+
+Shipped: style presets removed across web, api, MCP (`generate_image` has no `style`) and catalog; a
+`style` field from an old cached client is ignored, never refused. Composer headings removed, model name
+on provider-icon hover. Mobile `b8918c0` + `347b07e` pushed (no store build).
