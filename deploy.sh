@@ -189,7 +189,7 @@ REVISION="$(git rev-parse --short HEAD)"
 CATALOG_VERSION="$(grep -o "CATALOG_VERSION = '[^']*'" src/app/core/catalog/model-families.ts | head -1 | cut -d"'" -f2)"
 [ -n "$CATALOG_VERSION" ] || fail "could not read CATALOG_VERSION from src/app/core/catalog/model-families.ts"
 
-LIVE="$(curl -fsS "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "live manifest unreachable at $FUNCTIONS_URL/manifest"
+LIVE="$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "live manifest unreachable at $FUNCTIONS_URL/manifest"
 LIVE_CATALOG="$(printf '%s' "$LIVE" | jq -r '.catalogVersion // "unknown"')"
 tick
 
@@ -288,9 +288,10 @@ tick
 # 7. Prove it
 # ---------------------------------------------------------------------------
 progress "verifying running system"
-sleep 5  # the function restarts on a secret change
+sleep 5  # the function restarts on a secret change; reads below retry through
+          # the restart window (it answers with broken HTTP/2 frames for a few seconds)
 
-MANIFEST="$(curl -fsS "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "manifest unreachable after deploy"
+MANIFEST="$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$FUNCTIONS_URL/manifest" 2>>"$LOG")" || fail "manifest unreachable after deploy"
 printf '\n$ manifest\n%s\n' "$MANIFEST" >> "$LOG"
 
 MISMATCH=""
@@ -308,15 +309,15 @@ for component in job-worker cleanup-worker stripe-webhook appstore-webhook; do
   before="$(jq -r --arg name "$component" '.components[$name].version' "$COMPONENT_RECEIPT")"
   check "$component version" "v$(functionVersion "$component")" "v$((before + 1))"
 done
-check "capabilities"   "$(curl -fsS "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
-check "catalog"        "$(curl -fsS "$FUNCTIONS_URL/catalog" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
-check "web app"        "$(curl -fsS -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
-check "AS metadata"    "$(curl -fsS "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | jq -r '.issuer' 2>>"$LOG" || true)" "$ISSUER_URL"
-check "consent framing" "$(curl -fsSI "$ISSUER_URL/oauth/consent" 2>>"$LOG" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options" {print $2}')" "DENY"
+check "capabilities"   "$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$FUNCTIONS_URL/capabilities" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
+check "catalog"        "$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$FUNCTIONS_URL/catalog" 2>>"$LOG" | jq -r '.catalogVersion')" "$CATALOG_VERSION"
+check "web app"        "$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors -o /dev/null -w '%{http_code}' "$WEB_URL" 2>>"$LOG" || true)" "200"
+check "AS metadata"    "$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | jq -r '.issuer' 2>>"$LOG" || true)" "$ISSUER_URL"
+check "consent framing" "$(curl -fsSI --retry 5 --retry-delay 3 --retry-all-errors "$ISSUER_URL/oauth/consent" 2>>"$LOG" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-frame-options" {print $2}')" "DENY"
 # Whether _headers can set Content-Type on Workers static assets is unproven;
 # clients parse the body anyway, so this is recorded, not enforced.
 printf '\n$ AS metadata content-type\n%s\n' \
-  "$(curl -fsSI "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | tr -d '\r' | grep -i '^content-type' || true)" >> "$LOG"
+  "$(curl -fsSI --retry 5 --retry-delay 3 --retry-all-errors "$ISSUER_URL/.well-known/oauth-authorization-server" 2>>"$LOG" | tr -d '\r' | grep -i '^content-type' || true)" >> "$LOG"
 tick
 
 [ -z "$MISMATCH" ] || fail "deployed, but the running system disagrees with what was sent" "$MISMATCH"
