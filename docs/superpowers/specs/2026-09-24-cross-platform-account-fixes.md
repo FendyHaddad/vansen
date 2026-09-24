@@ -49,3 +49,18 @@ subscriptionSource: "stripe" | "app_store" | null
   - Refuse to start a purchase until the profile has loaded (a non-empty `applicationUserName`).
 - **#13:** refresh the profile (credits and plan) when the app resumes.
 - **#15:** a 404 on delete removes the tile.
+
+## Status (2026-09-24)
+
+- **Done and merged:** Task A (`5adb9a0`) and Task B (mobile `106e383` and `dd0e6da`). Both passed one review and one fix wave (`.superpowers/sdd/xp-review.md`).
+- **Also merged:**
+  - web Sign in with Apple (`cbd667d`), hidden until the owner enables the provider;
+  - the web AI tool lock from the served plan (`0f4d78a`);
+  - sandbox IAP granted and recorded as sandbox (`c886257`, owner decision), with the `APPLE_SANDBOX_GRANTS=off` brake.
+- **Migrations:** 0037 and 0038 are applied on production. The api and web deploy is pending with the owner, and it also ships the CORS fix `7e46c8d`.
+- **Owner:**
+  - Apple Services ID plus the Supabase Apple provider. Client IDs must list the bundle ID and the Services ID. Steps are in `.superpowers/sdd/apple-web-report.md`.
+  - GoTrue minimum password length of 8.
+  - Store-policy review.
+  - `APPLE_ENV=Production` plus `APPLE_APP_ID` before App Review.
+  - `vankode-backoffice` sandbox spend.
