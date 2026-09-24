@@ -270,7 +270,6 @@ export class WorkspacePage {
           familyId: req.family.id,
           op: routing.op,
           prompt: req.prompt,
-          style: req.style ?? undefined,
           personaId: req.personaId ?? undefined,
           trendId: req.trendId ?? undefined,
           settings: req.settings,

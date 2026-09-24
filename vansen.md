@@ -341,11 +341,10 @@ Pro rail tool `aisharpen` → `core/editing/engines/deblur-engine.ts`, NAFNet Go
 to wasm, same 16 MP ceiling as Upscale. Same-size output, alpha copied through. Free,
 on-device, no credits.
 
-**Style presets, avatar personas, trends, client analytics shipped (2026-07-24)**
-(specs: `2026-07-24-style-presets-design.md`, `2026-07-24-avatar-persona-design.md`;
-migrations 0013–0015): 20 style presets (`src/app/core/catalog/style-presets.ts` →
-`_shared/style-presets.ts` via `sync-shared`, drift-guarded); server appends the style
-modifier before moderation, stored prompt stays clean, thumbs in `public/styles`.
+**Avatar personas, trends, client analytics shipped (2026-07-24)**
+(spec: `2026-07-24-avatar-persona-design.md`; migrations 0013–0015). Style presets
+shipped alongside and were removed 2026-09-24 — trends replace them; the server ignores
+a `style` field from an old client.
 Personas = five guided photos (front, left/right ¾, left/right profile; ≥1024px short
 edge), free to create, Studio 2 / Pro 5 slots, consent recorded; `GET/POST/DELETE
 /personas`, `PUT /personas/:id/photos/:slot`; hidden `persona` family = Google Nano

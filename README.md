@@ -14,14 +14,13 @@ contributors and Claude: [`CLAUDE.md`](CLAUDE.md). Open follow-ups:
 | Path | What lives there |
 | --- | --- |
 | `src/app/features/` | Angular 22 standalone components (workspace, studio editing, auth, billing, legal, onboarding). Every component is `.ts` + `.html` + `.css`. |
-| `src/app/core/catalog/` | Shared masters: model families, style presets, trend presets. Source of truth for the edge copies. |
+| `src/app/core/catalog/` | Shared masters: model families, trend presets. Source of truth for the edge copies. |
 | `src/app/core/editing/` | Client-side Canvas2D editing engine (worker + fallback), pure pixel ops, lazy ONNX engines (MI-GAN heal, ISNet cut-out, Depth Anything bokeh, Swin2SR upscale, SlimSAM smart select). |
 | `supabase/functions/api/` | Hono gateway Edge Function. The only data path — tables are RLS deny-all, RPCs service-role only. |
 | `supabase/functions/stripe-webhook/`, `appstore-webhook/` | Sole ledger writers for Stripe top-ups and Apple IAP respectively. |
 | `supabase/functions/_shared/` | Provider adapters, moderation, push (FCM), IAP verification, generated catalog copies. Bundled into `api` on deploy. |
 | `supabase/migrations/` | Schema record `0001` … `0025`. Inventory and applied-versus-repository mapping: `docs/superpowers/specs/2026-09-20-migration-inventory.md`. |
-| `public/styles/` | Style preset thumbnails (`public/trends/` still to be generated). |
-| `scripts/` | `sync-shared.mjs` (catalog → edge copy), `gen-style-thumbs.mjs`, `gen-trend-thumbs.mjs`. |
+| `scripts/` | `sync-shared.mjs` (catalog → edge copy), `gen-trend-thumbs.mjs`. |
 | `docs/superpowers/specs/`, `plans/` | Design specs and implementation plans, dated. |
 
 Related repos: `vankode-backoffice` (admin console, reads Vansen through its own service

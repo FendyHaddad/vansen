@@ -10,7 +10,6 @@ import { CATALOG_VERSION, creditCost, familyById, MODEL_FAMILIES } from './_shar
 import type { ModelFamily } from './_shared/model-families.ts';
 import { normalizeGenerationRequest, quote } from './_shared/generation-request.ts';
 import { validateSettings } from './services/request-validation.ts';
-import { STYLE_CATEGORY_TITLES, STYLE_PRESETS } from './_shared/style-presets.ts';
 import { TREND_PRESETS } from './_shared/trend-presets.ts';
 
 const ALL_ON = MODEL_FAMILIES.map((f) => ({ id: f.id, enabled: true, min_plan: 'studio' }));
@@ -196,21 +195,8 @@ Deno.test('flat prices are the fixed retail prices', () => {
   assertEquals(CATALOG.flat.persona.creditsPerImage, 46);
 });
 
-Deno.test('every served style names its category title', () => {
-  for (const style of CATALOG.styles) {
-    assertEquals(style.categoryLabel, STYLE_CATEGORY_TITLES[style.category as keyof typeof STYLE_CATEGORY_TITLES]);
-  }
-});
-
-Deno.test('styles, trends and tool plans ride along as data', () => {
-  assertEquals(CATALOG.styles.length, STYLE_PRESETS.length);
-  assertEquals(CATALOG.styles[0], {
-    id: STYLE_PRESETS[0].id,
-    label: STYLE_PRESETS[0].name,
-    category: STYLE_PRESETS[0].category,
-    categoryLabel: STYLE_CATEGORY_TITLES[STYLE_PRESETS[0].category],
-    thumb: STYLE_PRESETS[0].thumb,
-  });
+Deno.test('trends and tool plans ride along as data', () => {
+  assertEquals('styles' in CATALOG, false);
   assertEquals(CATALOG.trends.length, TREND_PRESETS.length);
   assertEquals(CATALOG.trends[0].prompt, TREND_PRESETS[0].prompt);
   assertEquals(CATALOG.trends[0].thumb, TREND_PRESETS[0].thumb);

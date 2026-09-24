@@ -45,7 +45,7 @@ function seed(db: FakeDb, over: Record<string, unknown> = {}, snapshot: Record<s
       version: 1, op: 'generate', familyId: 'flux', prompt: 'a cat',
       settings: { aspectRatio: '1:1' }, referenceUploadIds: [],
       referenceSlots: { first: null, last: null, references: [] },
-      maskUploadId: null, personaId: null, styleId: null, trendId: null, mode: null,
+      maskUploadId: null, personaId: null, trendId: null, mode: null,
       parentId: null, catalogVersion: CATALOG_VERSION, quoteVersion: 1,
       ...snapshot,
     },

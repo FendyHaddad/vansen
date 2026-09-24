@@ -1,7 +1,7 @@
 // generate_image's inputs checked against the live catalog before anything is
 // charged: resolveModel() takes a family id or label, resolveSettings() the
-// catalog axis ids (defaults fill the rest, and must land on a real combo),
-// resolveStyle() a style id or label. Refusals list the valid values.
+// catalog axis ids (defaults fill the rest, and must land on a real combo).
+// Refusals list the valid values.
 import type {
   Catalog,
   CatalogFamily,
@@ -89,17 +89,4 @@ export function resolveSettings(
     return toolError("invalid_settings", `${family.label} can't render that combination.`, "Call list_models for the valid options.");
   }
   return { settings: combo.settings, creditsPerImage: combo.credits[0] };
-}
-
-/** A style id, null for none, or a refusal listing the valid ids. */
-export function resolveStyle(catalog: Catalog, style: string | undefined): string | null | ToolOutcome {
-  if (!style) return null;
-  const wanted = squash(style);
-  const hit = catalog.styles.find((s) => squash(s.id) === wanted || squash(s.label) === wanted);
-  if (hit) return hit.id;
-  return toolError(
-    "invalid_style",
-    `There's no style called "${style}".`,
-    `Valid styles: ${catalog.styles.map((s) => s.id).join(", ")}.`,
-  );
 }

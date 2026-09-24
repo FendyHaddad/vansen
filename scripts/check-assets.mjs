@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { TREND_PRESETS } = await import(join(root, 'src/app/core/catalog/trend-presets.ts'));
-const { STYLE_PRESETS } = await import(join(root, 'src/app/core/catalog/style-presets.ts'));
 
 function checkAssets(label, presets) {
   const missing = presets
@@ -21,5 +20,5 @@ function checkAssets(label, presets) {
   return missing.length;
 }
 
-const missingCount = checkAssets('trend', TREND_PRESETS) + checkAssets('style', STYLE_PRESETS);
+const missingCount = checkAssets('trend', TREND_PRESETS);
 process.exit(missingCount ? 1 : 0);

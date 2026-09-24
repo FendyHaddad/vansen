@@ -17,7 +17,6 @@ import {
   UPSCALER,
 } from "../_shared/model-families.ts";
 import { IMAGE_BATCH_MAX } from "../_shared/build-catalog.ts";
-import { applyStyle, styleById } from "../_shared/style-presets.ts";
 import { GenerationOp, LedgerType, MediaKind } from "../_shared/enums.ts";
 import type { StoredPayload } from "../_shared/jobs/payload.ts";
 import { captureSnapshot } from "../_shared/request-snapshot.ts";
@@ -85,11 +84,10 @@ export function createSubmitGeneration(ctx: Services) {
     c: Context,
     userId: string,
     prompt: string,
-    styled: string,
     key: string | null,
     hash: string,
   ): Promise<Response | null> {
-    const decision = await moderate({ text: styled });
+    const decision = await moderate({ text: prompt });
     if (decision.state === "unavailable") return moderationFailure(c, decision);
     if (decision.state !== "blocked") return null;
     const first = key ? await claimRefusal(userId, key, hash) : true;
@@ -124,9 +122,6 @@ export function createSubmitGeneration(ctx: Services) {
     const parentId = typeof body.parentId === "string" && body.parentId
       ? body.parentId
       : null;
-    const styleId = typeof body.style === "string" && body.style
-      ? body.style
-      : null;
     const personaId = typeof body.personaId === "string" && body.personaId
       ? body.personaId
       : null;
@@ -152,10 +147,6 @@ export function createSubmitGeneration(ctx: Services) {
     if (batch < 1 || batch > IMAGE_BATCH_MAX) {
       return fail(c, 400, "invalid_batch", `batch must be 1–${IMAGE_BATCH_MAX}`);
     }
-    if (styleId && !styleById(styleId)) {
-      return fail(c, 400, "invalid_style", "Unknown style preset");
-    }
-    const styled = applyStyle(prompt, styleId);
     if (
       (op === GenerationOp.Edit || op === GenerationOp.Upscale) && !parentId
     ) {
@@ -232,10 +223,10 @@ export function createSubmitGeneration(ctx: Services) {
       );
     }
 
-    // The provider sees the persona instruction wrapped around the styled
-    // prompt; moderation sees the customer's styled prompt (the wrapper is
-    // ours) and the stored prompt stays the customer's own text.
-    const effectivePrompt = persona ? personaPrompt(styled) : styled;
+    // The provider sees the persona instruction wrapped around the prompt;
+    // moderation sees the customer's own prompt (the wrapper is ours) and the
+    // stored prompt stays the customer's own text.
+    const effectivePrompt = persona ? personaPrompt(prompt) : prompt;
 
     let familyId: string;
     let familyName: string;
@@ -342,7 +333,7 @@ export function createSubmitGeneration(ctx: Services) {
 
     // Moderation gate (moderatePrompt). An accepted request being replayed
     // was moderated when it was accepted.
-    const refused = prior ? null : await moderatePrompt(c, userId, prompt, styled, key, hash);
+    const refused = prior ? null : await moderatePrompt(c, userId, prompt, key, hash);
     if (refused) return refused;
 
     const videoResult = await resolveVideoPrep(
@@ -412,7 +403,6 @@ export function createSubmitGeneration(ctx: Services) {
       ? LedgerType.Generate
       : (op as LedgerType);
 
-    if (styleId) settings.style = styleId;
     if (personaId && persona) settings.persona = personaId;
     if (trendId) settings.trend = trendId;
 
@@ -452,7 +442,6 @@ export function createSubmitGeneration(ctx: Services) {
       maskUploadId: maskUploadId ?? undefined,
       referenceSlots: video ? slotsOf(video) : undefined,
       personaId: personaId ?? undefined,
-      styleId: styleId ?? undefined,
       trendId: trendId ?? undefined,
       mode: video?.mode,
     };
@@ -483,7 +472,6 @@ export function createSubmitGeneration(ctx: Services) {
       },
       maskUploadId: maskUploadId ?? null,
       personaId: personaId ?? null,
-      styleId: styleId ?? null,
       trendId: trendId ?? null,
       mode: video?.mode ?? null,
       parentId: parentId ?? null,

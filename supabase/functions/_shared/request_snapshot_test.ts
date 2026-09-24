@@ -10,7 +10,6 @@ const base = {
   referenceSlots: { first: null, last: null, references: [] },
   maskUploadId: null,
   personaId: null,
-  styleId: null,
   trendId: null,
   mode: null,
   parentId: null,
@@ -48,11 +47,16 @@ Deno.test('R15: NO signed url survives into a snapshot', () => {
   assert(!json.includes('/sign/'), json);
 });
 
-Deno.test('R15: persona and style are first-class, not smuggled through settings', () => {
-  const snap = captureSnapshot({ ...base, personaId: 'p-1', styleId: 'cinematic', trendId: '90s-yearbook' });
+Deno.test('R15: persona and trend are first-class, not smuggled through settings', () => {
+  const snap = captureSnapshot({ ...base, personaId: 'p-1', trendId: '90s-yearbook' });
   assertEquals(snap.personaId, 'p-1');
-  assertEquals(snap.styleId, 'cinematic');
   assertEquals(snap.trendId, '90s-yearbook');
+});
+
+Deno.test('rehydrate drops the styleId a row stored before style presets were removed', () => {
+  const result = rehydrate({ ...captureSnapshot(base), styleId: 'cinematic' } as never, 'cat-v1');
+  assert(result.ok);
+  assertEquals('styleId' in result.request, false);
 });
 
 Deno.test('R15: a persona generation records the real family, not "persona"', () => {

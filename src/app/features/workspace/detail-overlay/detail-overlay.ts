@@ -22,7 +22,6 @@ import {
   upscaleCreditCost,
   videoFamilySupports,
 } from '../../../core/catalog/model-families';
-import { styleById } from '../../../core/catalog/style-presets';
 import { CachedSrc } from '../../../core/media/cached-src';
 import { DialogDirective } from '../../../shared/a11y/dialog.directive';
 
@@ -102,7 +101,6 @@ export class DetailOverlay {
       s.resolution ?? null,
       s.quality ?? null,
       s.durationS ? `${s.durationS}s` : null,
-      s.style ? (styleById(s.style)?.name ?? null) : null,
     ].filter((c): c is string => !!c);
   }
 

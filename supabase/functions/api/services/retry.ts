@@ -69,7 +69,6 @@ export interface RetryBody {
   batch: 1;
   settings: Record<string, unknown>;
   parentId?: string;
-  style?: string;
   personaId?: string;
   trendId?: string;
   referenceUploadId?: string;
@@ -124,7 +123,6 @@ function bodyOf(snapshot: GenerationRequestSnapshotV1): RetryBody {
     settings,
   };
   if (snapshot.parentId) body.parentId = snapshot.parentId;
-  if (snapshot.styleId) body.style = snapshot.styleId;
   if (snapshot.personaId) body.personaId = snapshot.personaId;
   if (snapshot.trendId) body.trendId = snapshot.trendId;
   if (snapshot.maskUploadId) body.maskUploadId = snapshot.maskUploadId;

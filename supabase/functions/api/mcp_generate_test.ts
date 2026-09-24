@@ -108,14 +108,6 @@ Deno.test("an invalid option is refused before any charge, with the valid values
   assertEquals(reserveCalls(db).length, 0);
 });
 
-Deno.test("a style resolves by label and reaches the submission", async () => {
-  const { app, db } = finishingApp();
-  const result = await callTool(app, "generate_image", { prompt: "a red fox", style: "Oil painting" });
-  assert(!result.isError, textOf(result));
-  const payload = reserveCalls(db)[0].args.p_payload as Record<string, unknown>;
-  assertEquals(payload.styleId, "oil-painting");
-});
-
 Deno.test("a retry with the same JSON-RPC id and arguments, inside the window, charges once", async () => {
   const { app, db } = finishingApp();
   const args = { prompt: "a red fox", model: "flux" };
@@ -347,7 +339,7 @@ function seedVariable(db: FakeDb, snapshot: Record<string, unknown> = {}) {
       version: 1, op: "generate", familyId: "flux", prompt: "a red fox",
       settings: { aspectRatio: "1:1" }, referenceUploadIds: [],
       referenceSlots: { first: null, last: null, references: [] },
-      maskUploadId: null, personaId: null, styleId: null, trendId: null, mode: null,
+      maskUploadId: null, personaId: null, trendId: null, mode: null,
       parentId: null, catalogVersion: CATALOG_VERSION, quoteVersion: 1, ...snapshot,
     },
   }];

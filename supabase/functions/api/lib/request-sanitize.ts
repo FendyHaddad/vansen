@@ -60,7 +60,6 @@ const PREF_CHECKS: ReadonlyArray<readonly [string, (v: unknown) => boolean]> = [
   ["defaultVideoFamily", (v) => typeof v === "string" && v.length <= 40],
   ["defaultVideoMode", (v) => typeof v === "string" && VIDEO_MODES.has(v)],
   ["defaultAspect", (v) => typeof v === "string" && v.length <= 10],
-  ["defaultStyle", (v) => typeof v === "string" && v.length <= 40],
   ["defaultPersona", (v) => typeof v === "string" && v.length <= 40],
   ["tourSeen", (v) => typeof v === "boolean"],
 ];

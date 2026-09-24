@@ -2,7 +2,7 @@
 // (spec §4 "Model names"): id or label, catalog axis ids, valid values back.
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { buildCatalog } from "./_shared/build-catalog.ts";
-import { resolveModel, resolveSettings, resolveStyle } from "./mcp/options.ts";
+import { resolveModel, resolveSettings } from "./mcp/options.ts";
 
 const ALL_ON = buildCatalog([
   { id: "nano-banana", enabled: true },
@@ -83,13 +83,4 @@ Deno.test("a chosen value always lands on a real catalog combo", () => {
       assertEquals(resolved.creditsPerImage, match.credits[0]);
     }
   }
-});
-
-Deno.test("styles resolve by id or label; an unknown one lists valid ids", () => {
-  const first = ALL_ON.styles[0];
-  assertEquals(resolveStyle(ALL_ON, first.id), first.id);
-  assertEquals(resolveStyle(ALL_ON, first.label.toLowerCase()), first.id);
-  assertEquals(resolveStyle(ALL_ON, undefined), null);
-  const text = errorText(resolveStyle(ALL_ON, "no-such-style"));
-  assertStringIncludes(text, first.id);
 });

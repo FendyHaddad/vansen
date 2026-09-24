@@ -33,7 +33,6 @@ export interface StoredPayload {
   maskUploadId?: string;
   referenceSlots?: { first?: string; last?: string; references?: string[] };
   personaId?: string;
-  styleId?: string;
   trendId?: string;
   mode?: VideoMode;
 }

@@ -2,7 +2,7 @@
 //
 // These assert the gateway side of 0023 — that the snapshot exists, that it
 // holds identities rather than URLs, and that the fields a retry needs (mask,
-// references, persona, style, mode) survive the trip. The RPC side (one
+// references, persona, trend, mode) survive the trip. The RPC side (one
 // snapshot per submission, none on replay, all-or-nothing) is in
 // `supabase/tests/request_snapshots.sql`, which needs a real database.
 import { assert, assertEquals } from 'jsr:@std/assert';
@@ -23,7 +23,6 @@ interface Snapshot {
   referenceSlots: { first: string | null; last: string | null; references: string[] };
   maskUploadId: string | null;
   personaId: string | null;
-  styleId: string | null;
   trendId: string | null;
   mode: string | null;
   parentId: string | null;
@@ -113,7 +112,8 @@ Deno.test('R15: a reference is recorded by upload path, never as a signed URL', 
   assert(!json.includes('/sign/'), json);
 });
 
-Deno.test('R15: style and trend are first-class in the snapshot', async () => {
+// Style presets are gone; an old cached web bundle may still send `style`.
+Deno.test('R15: trend is first-class in the snapshot; a legacy style field is ignored', async () => {
   const deps = testDeps({ adapterFor: () => fakeAdapter().adapter });
   const db = deps.admin as unknown as FakeDb;
   ready(db, 'flux');
@@ -127,15 +127,19 @@ Deno.test('R15: style and trend are first-class in the snapshot', async () => {
       familyId: 'flux',
       prompt: 'a cat',
       settings: { aspectRatio: '1:1', resolution: '1MP' },
-      style: 'cinematic',
+      style: 'no-such-style',
       trendId: '90s-yearbook',
     }),
   });
 
   assertEquals(res.status, 202, await res.text());
   const snapshot = snapshotOf(db);
-  assertEquals(snapshot.styleId, 'cinematic');
   assertEquals(snapshot.trendId, '90s-yearbook');
+  assertEquals('styleId' in snapshot, false);
+  const call = db.rpcCalls.find((r) => r.name === 'fn_reserve_generation');
+  const payload = call!.args.p_payload as Record<string, unknown>;
+  assertEquals(payload.prompt, 'a cat');
+  assertEquals('style' in (payload.settings as Record<string, unknown>), false);
 });
 
 Deno.test('R15: a keyframes video records which frame is first and which is last', async () => {

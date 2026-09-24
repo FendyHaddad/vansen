@@ -19,7 +19,6 @@ const base = {
   referenceSlots: { first: null, last: null, references: [] as string[] },
   maskUploadId: null as string | null,
   personaId: null as string | null,
-  styleId: null as string | null,
   trendId: null as string | null,
   mode: null,
   parentId: null as string | null,
@@ -96,10 +95,12 @@ Deno.test('R15: a video replays as ordered paths, not a single reference', () =>
   assertEquals(decision.body.settings.mode, 'keyframes');
 });
 
-Deno.test('R15: style and trend survive the rebuild', () => {
-  const decision = planRetry(ctx({}, { styleId: 'cinematic', trendId: '90s-yearbook' }));
+Deno.test('R15: trend survives the rebuild; a legacy styleId is dropped', () => {
+  // Rows stored while style presets existed still carry styleId.
+  const legacy = { trendId: '90s-yearbook', styleId: 'cinematic' };
+  const decision = planRetry(ctx({}, legacy));
   assert(decision.ok);
-  assertEquals(decision.body.style, 'cinematic');
+  assertEquals('style' in decision.body, false);
   assertEquals(decision.body.trendId, '90s-yearbook');
 });
 

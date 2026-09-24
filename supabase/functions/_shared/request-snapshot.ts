@@ -34,7 +34,6 @@ export interface GenerationRequestSnapshotV1 {
   referenceSlots: ReferenceSlots;
   maskUploadId: string | null;
   personaId: string | null;
-  styleId: string | null;
   trendId: string | null;
   mode: VideoMode | null;
   parentId: string | null;
@@ -86,7 +85,6 @@ export function captureSnapshot(
     },
     maskUploadId: input.maskUploadId,
     personaId: input.personaId,
-    styleId: input.styleId,
     trendId: input.trendId,
     mode: input.mode,
     parentId: input.parentId,
@@ -130,7 +128,6 @@ export function rehydrate(
       },
       maskUploadId: snapshot.maskUploadId ?? null,
       personaId: snapshot.personaId ?? null,
-      styleId: snapshot.styleId ?? null,
       trendId: snapshot.trendId ?? null,
       mode: snapshot.mode ?? null,
       parentId: snapshot.parentId ?? null,

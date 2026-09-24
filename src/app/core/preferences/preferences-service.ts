@@ -9,8 +9,6 @@ export interface Prefs {
   defaultVideoFamily: string;
   defaultVideoMode: VideoMode;
   defaultAspect: string;
-  /** Style preset id preselected in the left panel ('' = none). */
-  defaultStyle: string;
   /** Persona id preselected in the left panel ('' = none). */
   defaultPersona: string;
   /** True once the onboarding tour was finished or skipped. */
@@ -23,7 +21,6 @@ const DEFAULTS: Prefs = {
   defaultVideoFamily: 'veo',
   defaultVideoMode: 't2v',
   defaultAspect: '1:1',
-  defaultStyle: '',
   defaultPersona: '',
   tourSeen: false,
 };

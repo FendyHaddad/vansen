@@ -1,6 +1,6 @@
 // One-off: renders each trend template with a generic subject via GPT Image and
 // writes PNGs to a temp dir. The thumb shows the trend's look — no trained
-// persona needed. Post-process to webp like the style thumbs:
+// persona needed. Post-process to webp:
 //   for f in <outDir>/*.png; do
 //     cwebp -q 80 -resize 160 0 "$f" -o "public/trends/$(basename "${f%.png}").webp"
 //   done

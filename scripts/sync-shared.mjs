@@ -116,11 +116,6 @@ export const FILES = [
     transform: withTsExtensions,
   })),
   {
-    src: 'src/app/core/catalog/style-presets.ts',
-    out: 'style-presets.ts',
-    transform: (code) => code,
-  },
-  {
     src: 'src/app/features/studio/studio-tool.ts',
     out: 'studio-tool.ts',
     transform: (code) => code,
@@ -145,7 +140,7 @@ export const FILES = [
     // Deno needs explicit extensions on the sibling imports.
     transform: (code) =>
       code.replace(
-        /from '\.\/(model-families|style-presets|trend-presets|entitlements)';/g,
+        /from '\.\/(model-families|trend-presets|entitlements)';/g,
         "from './$1.ts';",
       ),
   },

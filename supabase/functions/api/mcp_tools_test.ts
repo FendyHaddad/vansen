@@ -83,7 +83,7 @@ Deno.test("get_account without a plan says so and where to subscribe", async () 
   assertStringIncludes(textOf(result), "vansen.vankode.com/app/billing");
 });
 
-Deno.test("list_models: live image families with options, defaults, prices, and styles", async () => {
+Deno.test("list_models: live image families with options, defaults and prices", async () => {
   const { app, db } = mcpApp();
   seed(db);
   const result = await callTool(app, "list_models");
@@ -95,7 +95,6 @@ Deno.test("list_models: live image families with options, defaults, prices, and 
   assert(flux.defaults.aspectRatio);
   assert(flux.creditsPerImage > 0);
   assert(flux.creditsRange.min <= flux.creditsPerImage && flux.creditsPerImage <= flux.creditsRange.max);
-  assert(data.styles.length > 0 && data.styles[0].id);
   assertEquals(data.upscale.enabled, true);
   assertStringIncludes(textOf(result), "1 credit = $0.01");
 });

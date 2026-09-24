@@ -6,7 +6,7 @@ import { buildCatalog, IMAGE_BATCH_MAX } from "../../_shared/build-catalog.ts";
 import { GenerationOp } from "../../_shared/enums.ts";
 import { modelRows } from "../../catalog.ts";
 import { MAX_PROMPT_LEN } from "../../lib/request-sanitize.ts";
-import { resolveModel, resolveSettings, resolveStyle } from "../options.ts";
+import { resolveModel, resolveSettings } from "../options.ts";
 import { toolError } from "../results.ts";
 import { submitAndWait } from "../submit.ts";
 import { defineTool } from "../tool-kit.ts";
@@ -33,7 +33,6 @@ export const generateImage = defineTool({
     model: z.string().optional().describe("Model id or label from list_models; default the first listed."),
     options: z.record(z.string(), z.union([z.string(), z.number()])).optional()
       .describe("Option ids from list_models (e.g. aspectRatio, resolution, quality, version) to values."),
-    style: z.string().optional().describe("A style preset id or label from list_models."),
     count: z.number().int().min(1).max(IMAGE_BATCH_MAX).optional().describe("How many images (default 1)."),
     idempotency_key: z.string().max(200).optional()
       .describe("Reuse the same key when retrying the same request, so it is never charged twice."),
@@ -50,8 +49,6 @@ export const generateImage = defineTool({
     if ("result" in family) return family;
     const resolved = resolveSettings(family, args.options);
     if ("result" in resolved) return resolved;
-    const style = resolveStyle(catalog, args.style);
-    if (style && typeof style === "object") return style;
 
     const body: Record<string, unknown> = {
       op: GenerationOp.Generate,
@@ -60,7 +57,6 @@ export const generateImage = defineTool({
       batch: args.count ?? 1,
       settings: resolved.settings,
     };
-    if (style) body.style = style;
     return await submitAndWait(env, call, "generate_image", args, (key) =>
       env.ctx.submitGeneration(env.c, body, { idempotencyKey: key }));
   },

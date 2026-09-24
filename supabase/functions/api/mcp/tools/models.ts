@@ -1,6 +1,6 @@
 // list_models: the live families from buildCatalog() (the same catalog every
 // app renders), each with its options, defaults and price per image, plus
-// the styles and the upscale price. Not age-gated: /catalog is public.
+// the upscale price. Not age-gated: /catalog is public.
 import { z } from "npm:zod@4";
 import { buildCatalog, type CatalogFamily } from "../../_shared/build-catalog.ts";
 import { modelRows } from "../../catalog.ts";
@@ -30,7 +30,7 @@ export const listModels = defineTool({
   name: "list_models",
   title: "Vansen models",
   description:
-    "The image models this Vansen account can use right now, with each model's options (valid values for generate_image's `options`), defaults and price per image in credits (1 credit = $0.01), plus the style presets. Read-only.",
+    "The image models this Vansen account can use right now, with each model's options (valid values for generate_image's `options`), defaults and price per image in credits (1 credit = $0.01). Read-only.",
   inputSchema: {
     kind: z.enum(["image", "video"]).optional().describe("Model kind; default image. Video is not available through this connection."),
   },
@@ -47,7 +47,6 @@ export const listModels = defineTool({
     const result = {
       catalogVersion: catalog.catalogVersion,
       models: live.map(familyView),
-      styles: catalog.styles.map((s) => ({ id: s.id, label: s.label, category: s.categoryLabel })),
       upscale: { creditsPerImage: catalog.flat.upscale.credits, enabled: catalog.flat.upscale.enabled, plan: catalog.flat.upscale.plan },
     };
     const names = live.map((f) => f.label).join(", ") || "none";

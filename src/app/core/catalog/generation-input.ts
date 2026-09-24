@@ -25,7 +25,7 @@ export const PROMPT_MAX_CHARS = 2000;
 
 /**
  * Tokens billed for the prompt, assumed on every token-billed generation.
- * 2000 characters of English is ~500 tokens; the style modifier and a persona
- * trigger word add under 30 more. 800 covers that with room for dense text.
+ * 2000 characters of English is ~500 tokens; a persona trigger word adds
+ * under 30 more. 800 covers that with room for dense text.
  */
 export const PROMPT_TOKEN_ALLOWANCE = 800;
