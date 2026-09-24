@@ -781,3 +781,25 @@ Behaviour-preserving refactor (spec `specs/2026-09-23-clean-code-revamp-design.m
 workspace-page, canvas-viewport, tool-options, edit-session split by concern. `npm run verify` 9/9 PASS;
 tests unchanged except import paths. `./deploy.sh --yes` exited 0: `DEPLOYED 988777b · catalog
 2026-09-23.4 · api v75`. Read-back: `/catalog` 200 at .4 with 9 families; `/profile` unauthenticated 401.
+
+### 2026-09-24 — MCP connection, shipped dark (`887c9ce`)
+
+Spec `specs/2026-09-23-mcp-connection-design.md` §R. The spike's Supabase OAuth 2.1 server was dropped
+after the final review's C1 reproduced locally (`.superpowers/sdd/mcp/c1-repro.md`): its tokens are full
+GoTrue sessions (password set, email change, global sign-out). Owner decision: our own authorization
+server in `api` issuing opaque hashed tokens (`vsn_at_`/`vsn_rt_`) that only `/mcp` accepts. Two final
+reviews, two fix waves. `supabase db push --linked` applied `0035_mcp_client.sql` and `0036_mcp_oauth.sql`;
+`./deploy.sh --yes` deployed all five functions and the web Worker (its closing manifest curl hit a
+transient HTTP/2 framing error; the read-back below replaces it). Supabase's OAuth server stays disabled.
+
+| Check | Result |
+|---|---|
+| `GET <api>/manifest` | `gitRevision` 887c9ce, `schemaVersion` 0036, `workerVersion` v31, catalog 2026-09-23.4; `api` v77, `verify_jwt` false |
+| `GET https://vansen.vankode.com/.well-known/oauth-authorization-server` | 200 `application/json`, `access-control-allow-origin: *`, issuer `https://vansen.vankode.com`, endpoints on `<api>/oauth/*` |
+| Framing | `x-frame-options: DENY` + `frame-ancestors 'none'` on `/` and `/oauth/consent` |
+| `GET <api>/mcp/.well-known/oauth-protected-resource` | 200, `authorization_servers` `["https://vansen.vankode.com"]`, scope `vansen` |
+| `POST <api>/mcp`, `POST <api>/oauth/register` | 503 `mcp_disabled` (`MCP_ENABLED` unset) |
+| Local e2e | MCP Inspector 2.7.0: PRM → metadata → DCR → consent → token → tools → refresh → revoke → 401; `vsn_at_` refused on `/profile` (401) and GoTrue `/auth/v1/user` (403) |
+
+Mobile `5580fce`: sign-out pinned to local scope. Still owner-gated: set `MCP_ENABLED=on`, paid smoke with
+Claude and ChatGPT (connect, one image each, revoke, next call fails), then the FAQ entry.
