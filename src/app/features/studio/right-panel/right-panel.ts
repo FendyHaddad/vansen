@@ -43,12 +43,14 @@ import {
   toolLabels,
   toolsFor,
 } from '../../../core/catalog/entitlements';
+import { EditToolCatalog } from '../../../core/catalog/edit-tool-catalog';
 import {
   EDIT_TOOLS,
   PLAN_CREDITS,
   PLAN_PRICE_USD,
   PLAN_PROMO_USD,
   PRO_EXTRA_CREDIT_PERCENT,
+  type EditTool,
 } from '../../../core/catalog/model-families';
 import { EditSession } from '../../../core/editing/edit-session';
 import { LiquifyMode } from '../../../core/editing/ops/liquify';
@@ -144,6 +146,7 @@ export class RightPanel {
   readonly session = inject(EditSession);
   private readonly ledger = inject(LedgerService);
   private readonly profileStore = inject(ProfileStore);
+  private readonly editToolCatalog = inject(EditToolCatalog);
 
   /** True while the workspace is in edit mode (panel is a teaser otherwise). */
   readonly editing = input(false);
@@ -197,15 +200,27 @@ export class RightPanel {
   readonly exportOpen = signal(false);
   readonly exportFormats = EXPORT_FORMATS;
 
-  /** Until /profile answers, the rail shows a spinner — rendering either branch
-   * early flashes the wrong one at somebody (tools at visitors, or the subscribe
-   * pitch at subscribers whose cache was cleared). */
-  readonly ready = this.profileStore.loaded;
+  /** Until /profile AND the AI edit tools' served plans answer, the rail shows
+   * a spinner — rendering either branch early flashes the wrong one at
+   * somebody (tools at visitors, an unlocked AI tool that is actually pro-only,
+   * or the subscribe pitch at subscribers whose cache was cleared). */
+  readonly ready = computed(() => this.profileStore.loaded() && this.editToolCatalog.loaded());
 
   readonly locked = computed(() => this.profileStore.loaded() && !this.studioActive());
 
-  /** Pro tools lock: pro/owner subscribers only. Waits for /profile like `locked`. */
+  /** Pro tools lock: pro/owner subscribers only. Waits for /profile like `locked`.
+   * This still covers the local Pro-preview tools (ENTITLEMENTS) — every one of
+   * them is pro-tier by definition. */
   readonly proLocked = computed(() => this.profileStore.loaded() && !this.profileStore.proActive());
+
+  /** Whether any AI edit tool is out of reach on the visitor's current plan —
+   * drives the "AI Tools" section note. Each tool's own floor comes from the
+   * server (`flat.editTools[].plan`), not a blanket "AI tools are Pro" rule. */
+  readonly anyAiToolLocked = computed(() => this.aiTools.some((tool) => this.aiToolLocked(tool)));
+
+  /** True once at least one AI edit tool is unlocked — the "not enough
+   * credits" hint is only useful while there is something to spend them on. */
+  readonly anyAiToolUnlocked = computed(() => this.aiTools.some((tool) => !this.aiToolLocked(tool)));
 
   /** A Studio subscriber who switched to the Pro tab: sell the upgrade rather
    * than the tools they already have. */
@@ -249,6 +264,25 @@ export class RightPanel {
     return this.totalCredits() >= priceCredits;
   }
 
+  /** The plan this AI edit tool actually needs, per the server's `models.min_plan`. */
+  aiToolPlan(tool: EditTool): 'studio' | 'pro' {
+    return this.editToolCatalog.planFor(tool.id);
+  }
+
+  /** This panel only renders the AI tools once the visitor is studioActive
+   * (`showPitch` covers everyone below that), so a studio-plan tool is never
+   * locked here — only a pro-plan tool can be, for a non-pro subscriber. */
+  aiToolLocked(tool: EditTool): boolean {
+    return this.aiToolPlan(tool) === 'pro' && !this.profileStore.proActive();
+  }
+
+  /** Names the plan the tool actually needs, so the copy matches whatever
+   * `min_plan` the server has configured instead of always saying "Pro". */
+  aiToolLockTitle(tool: EditTool): string {
+    const planLabel = this.aiToolPlan(tool) === 'pro' ? 'Pro' : 'Studio';
+    return `${planLabel} tool — upgrade to unlock`;
+  }
+
   /** Client-side download of the current canvas in the chosen format. */
   async exportAs(format: ExportFormat): Promise<void> {
     this.exportOpen.set(false);
@@ -264,18 +298,16 @@ export class RightPanel {
   }
 
   runAiTool(toolId: string): void {
-    if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === toolId);
-    if (!tool || !this.affordable(tool.creditCost)) return;
+    if (!tool || this.aiToolLocked(tool) || !this.affordable(tool.creditCost)) return;
     if (tool.needsPrompt && !this.fillPrompt().trim()) return;
     this.aiToolRequested.emit({ toolId, prompt: this.fillPrompt().trim() });
   }
 
   /** AI edit scoped to an Ai Select mask — priced like the mask-painted flow. */
   onAiSelection(req: { toolId: string; prompt: string; maskPngBase64: string }): void {
-    if (this.proLocked()) return;
     const tool = this.aiTools.find((t) => t.id === req.toolId);
-    if (!tool || !this.affordable(tool.creditCost)) return;
+    if (!tool || this.aiToolLocked(tool) || !this.affordable(tool.creditCost)) return;
     this.aiToolRequested.emit(req);
   }
 }

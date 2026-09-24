@@ -144,8 +144,8 @@
     <section class="tool-section ai-section">
       <h3 class="section-title">
         AI Tools
-        @if (proLocked()) {
-          <span class="ai-note">· Pro</span>
+        @if (anyAiToolLocked()) {
+          <span class="ai-note">· some Pro</span>
         } @else {
           <span class="ai-note">· uses credits</span>
         }
@@ -155,15 +155,15 @@
           <button
             type="button"
             class="ai-run"
-            [disabled]="!editing() || proLocked() || !affordable(tool.creditCost)"
-            [title]="proLocked() ? 'Pro tool — upgrade to unlock' : tool.blurb"
+            [disabled]="!editing() || aiToolLocked(tool) || !affordable(tool.creditCost)"
+            [title]="aiToolLocked(tool) ? aiToolLockTitle(tool) : tool.blurb"
             (click)="runAiTool(tool.id)"
           >
-            <ng-icon [name]="proLocked() ? 'lucideLock' : 'lucideSparkles'" size="14" />
+            <ng-icon [name]="aiToolLocked(tool) ? 'lucideLock' : 'lucideSparkles'" size="14" />
             <span>{{ tool.name }}</span>
             <span class="price-chip">{{ tool.creditCost }} cr</span>
           </button>
-          @if (tool.needsPrompt && editing() && !proLocked()) {
+          @if (tool.needsPrompt && editing() && !aiToolLocked(tool)) {
             <input
               class="fill-prompt"
               type="text"
@@ -174,7 +174,7 @@
           }
         </div>
       }
-      @if (editing() && !proLocked() && totalCredits() < 5) {
+      @if (editing() && anyAiToolUnlocked() && totalCredits() < 5) {
         <p class="ai-note">Not enough credits — top up with “Add credits” in the top bar.</p>
       }
     </section>
