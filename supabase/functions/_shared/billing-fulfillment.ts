@@ -29,6 +29,9 @@ export interface FulfillmentRequest {
   /** Upgrade semantics: top the plan bucket up, never take credits away. */
   neverLower?: boolean;
   clearPending?: boolean;
+  /** Apple only: 'sandbox' for App Review / TestFlight purchases, recorded on
+   * billing_transactions.environment so revenue can leave them out. */
+  environment?: 'production' | 'sandbox';
 }
 
 export interface FulfillmentResult {
@@ -131,6 +134,9 @@ export async function applyFulfillment(
       p_entitlement: req.entitlement ?? null,
       p_never_lower: req.neverLower ?? false,
       p_clear_pending: req.clearPending ?? false,
+      // Production is the column default and is left out, so a build that
+      // reaches a database without 0038 still settles production money.
+      ...(req.environment === 'sandbox' ? { p_environment: 'sandbox' } : {}),
     });
     if (error) throw new Error(error.message);
     if (!data) throw new Error('fn_apply_fulfillment returned no result');

@@ -220,4 +220,113 @@ begin
   assert (v_res->>'applied')::boolean, 'an ungranted session must still apply';
 end $$;
 
+-- 12. App Store sandbox (App Review, TestFlight): granted, recorded as sandbox.
+do $$
+declare
+  v_user uuid := 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  v_res jsonb; v_pack int; v_env text; v_rows int;
+begin
+  insert into auth.users (id, email) values (v_user, 'sandbox@example.com') on conflict do nothing;
+  insert into public.profiles (id, birth_date) values (v_user, '1990-01-01') on conflict do nothing;
+
+  v_res := public.fn_apply_fulfillment(
+    p_source => 'apple', p_txn_id => 'sb_tx_1', p_user => v_user, p_kind => 'pack_grant',
+    p_plan => null, p_credits => 1000, p_period_end => null, p_event_at => now(),
+    p_environment => 'sandbox');
+  assert (v_res->>'applied')::boolean, 'a sandbox purchase must be granted';
+  select bal.pack_credits into v_pack from public.fn_balances(v_user) bal;
+  assert v_pack = 1000, format('sandbox grant must credit 1000, got %s', v_pack);
+  select environment into v_env from public.billing_transactions
+    where source = 'apple' and business_txn_id = 'sb_tx_1';
+  assert v_env = 'sandbox', format('recorded as %s, expected sandbox', v_env);
+
+  -- Redelivery, in either environment, is a replay: no second grant.
+  v_res := public.fn_apply_fulfillment(
+    p_source => 'apple', p_txn_id => 'sb_tx_1', p_user => v_user, p_kind => 'pack_grant',
+    p_plan => null, p_credits => 1000, p_period_end => null, p_event_at => now(),
+    p_environment => 'sandbox');
+  assert (v_res->>'replay')::boolean, 'a redelivered sandbox purchase must replay';
+  v_res := public.fn_apply_fulfillment('apple','sb_tx_1',v_user,'pack_grant',null,1000,
+    null, now(), null, false, false);
+  assert (v_res->>'replay')::boolean, 'the same transaction id replays across environments';
+  select bal.pack_credits into v_pack from public.fn_balances(v_user) bal;
+  assert v_pack = 1000, format('sandbox purchase granted twice: %s', v_pack);
+  select count(*) into v_rows from public.billing_transactions where business_txn_id = 'sb_tx_1';
+  assert v_rows = 1, format('one row per transaction, got %s', v_rows);
+end $$;
+
+-- 13. Production is the default, for Apple and Stripe alike (the 11-argument
+-- call the deployed functions make still resolves).
+do $$
+declare
+  v_user uuid := 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'; v_envs text[];
+begin
+  insert into auth.users (id, email) values (v_user, 'prod@example.com') on conflict do nothing;
+  insert into public.profiles (id, birth_date) values (v_user, '1990-01-01') on conflict do nothing;
+  perform public.fn_apply_fulfillment('apple','prod_tx_1',v_user,'pack_grant',null,1000,
+    null, now(), null, false, false);
+  perform public.fn_apply_fulfillment('stripe','cs_prod_1',v_user,'pack_grant',null,1000,
+    null, now(), null, false, false);
+  select array_agg(distinct environment) into v_envs from public.billing_transactions
+    where user_id = v_user;
+  assert v_envs = array['production'], format('expected production, got %s', v_envs);
+end $$;
+
+-- 14. Only Apple can be sandbox; an unknown environment is refused.
+do $$
+declare v_user uuid := 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'; v_refused int := 0;
+begin
+  begin
+    perform public.fn_apply_fulfillment(
+      p_source => 'stripe', p_txn_id => 'cs_sb', p_user => v_user, p_kind => 'pack_grant',
+      p_plan => null, p_credits => 1000, p_period_end => null, p_event_at => now(),
+      p_environment => 'sandbox');
+  exception when check_violation then v_refused := v_refused + 1;
+  end;
+  begin
+    perform public.fn_apply_fulfillment(
+      p_source => 'apple', p_txn_id => 'xc_tx', p_user => v_user, p_kind => 'pack_grant',
+      p_plan => null, p_credits => 1000, p_period_end => null, p_event_at => now(),
+      p_environment => 'xcode');
+  exception when check_violation then v_refused := v_refused + 1;
+  end;
+  assert v_refused = 2, format('expected both refused, got %s', v_refused);
+end $$;
+
+-- 15. Reporting: an account carried by a sandbox grant is not a paying
+-- subscriber; the same plan bought in production is.
+do $$
+declare
+  v_sandbox uuid := 'f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1';
+  v_paying uuid := 'f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2';
+  v_moved uuid := 'f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3';
+  v_before int; v_after int;
+  v_active jsonb := jsonb_build_object('plan','studio','status','active',
+                      'current_period_end', (now() + interval '30 days')::text);
+begin
+  select (public.backoffice_summary()->>'active_subscriptions')::int into v_before;
+  insert into auth.users (id, email) values
+    (v_sandbox, 'reviewer@example.com'), (v_paying, 'paying@example.com'), (v_moved, 'moved@example.com')
+    on conflict do nothing;
+  insert into public.profiles (id, birth_date) values
+    (v_sandbox, '1990-01-01'), (v_paying, '1990-01-01'), (v_moved, '1990-01-01')
+    on conflict do nothing;
+
+  perform public.fn_apply_fulfillment('apple','sb_sub_1',v_sandbox,'subscription_grant','studio',1500,
+    now() + interval '30 days', now(), v_active, false, false, 'sandbox');
+  perform public.fn_apply_fulfillment('apple','prod_sub_1',v_paying,'subscription_grant','studio',1500,
+    now() + interval '30 days', now(), v_active, false, false, 'production');
+  -- Tested in sandbox, then paid through Stripe for a later period.
+  perform public.fn_apply_fulfillment('apple','sb_sub_2',v_moved,'subscription_grant','studio',1500,
+    now() + interval '3 days', now(), v_active, false, false, 'sandbox');
+  perform public.fn_apply_fulfillment('stripe','in_moved_1',v_moved,'subscription_grant','studio',1500,
+    now() + interval '30 days', now(), v_active, false, false);
+
+  assert public.fn_sandbox_entitlement(v_sandbox), 'the reviewer is carried by sandbox';
+  assert not public.fn_sandbox_entitlement(v_paying), 'a production purchase is not sandbox';
+  assert not public.fn_sandbox_entitlement(v_moved), 'the later Stripe period carries the row';
+  select (public.backoffice_summary()->>'active_subscriptions')::int into v_after;
+  assert v_after - v_before = 2, format('expected +2 paying subscriptions, got +%s', v_after - v_before);
+end $$;
+
 rollback;

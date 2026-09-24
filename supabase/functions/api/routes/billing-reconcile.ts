@@ -5,7 +5,11 @@ import type Stripe from "npm:stripe@17";
 import { CREDIT_PACKS, packCredits } from "../_shared/model-families.ts";
 import { applyIapTransaction } from "../_shared/iap-grants.ts";
 import { applyFulfillment } from "../_shared/billing-fulfillment.ts";
-import { looksLikeJws, receiptNeverVerifies } from "../_shared/apple-verifier.ts";
+import {
+  environmentOf,
+  looksLikeJws,
+  receiptNeverVerifies,
+} from "../_shared/apple-verifier.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
 
@@ -77,8 +81,10 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
   // Reconcile fallback for a dropped App Store notification: the client submits
   // its own purchase JWS for server-side re-validation. The appAccountToken baked
   // into the transaction must be the caller — nobody redeems another user's
-  // receipt. Grants are idempotent (iaptx marker + stripe_ref UNIQUE), so calling
-  // this after every purchase is safe and doubles as the instant-grant path.
+  // receipt. Grants are idempotent (fn_apply_fulfillment, keyed on the Apple
+  // transaction id), so calling this after every purchase is safe and doubles
+  // as the instant-grant path. A sandbox receipt (App Review, TestFlight) is
+  // granted too and recorded as sandbox, which keeps it out of revenue.
   app.post("/iap/verify", async (c) => {
     const userId = c.get("userId");
     const body = await c.req.json().catch(() => ({}));
@@ -100,13 +106,24 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
       if (tx.appAccountToken !== userId) {
         return fail(c, 403, "forbidden", "Receipt belongs to another account");
       }
+      const environment = environmentOf(tx);
       const result = await applyIapTransaction(admin, userId, {
         productId: tx.productId ?? "",
         transactionId: tx.transactionId ?? "",
         originalTransactionId: tx.originalTransactionId ?? "",
         expiresDate: tx.expiresDate,
         revocationDate: tx.revocationDate,
+        environment,
       });
+      console.info(JSON.stringify({
+        event: "iap_verified",
+        environment,
+        transactionId: tx.transactionId ?? null,
+        productId: tx.productId ?? null,
+        outcome: result.outcome,
+        rejection: result.rejection ?? null,
+        requestId: c.get("requestId") ?? null,
+      }));
       // The client must be able to tell "your credits are here" from "try again
       // in a moment" — a retryable failure that reads as success strands paid
       // money, and one that reads as a hard error sends the user to support.
@@ -120,9 +137,8 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
       });
     } catch (e) {
       logError(c, "iap_verify_failed", e);
-      // Sandbox receipts against production land here too (INVALID_ENVIRONMENT).
-      // They are refused, never re-verified in sandbox: sandbox purchases are
-      // free, so granting them on production would give credits away.
+      // Only a receipt that neither production nor sandbox accepts reaches
+      // here as a permanent refusal; a sandbox receipt was granted above.
       if (receiptNeverVerifies(e)) return rejected();
       const res = fail(
         c,

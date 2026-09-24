@@ -350,3 +350,88 @@ Deno.test('a refund of the Apple subscription Apple is paying for still expires 
   assertEquals(db.tables.applied.length, 1);
   assertEquals((db.tables.applied[0].p_entitlement as { status: string }).status, 'expired');
 });
+
+// ── Sandbox notifications (App Review, TestFlight) ─────────────────────────
+// Apple sends them with environment "Sandbox". If they reach this endpoint
+// they are granted like production money and recorded as sandbox.
+
+function sandboxDeps(db: FakeDb, over: Record<string, unknown> = {}) {
+  return deps(db, {
+    verifyNotification: () =>
+      Promise.resolve({ ...NOTIFICATION, data: { ...NOTIFICATION.data, environment: 'Sandbox' } }),
+    verifyTransaction: () =>
+      Promise.resolve({
+        productId: 'vansen.studio.monthly',
+        transactionId: 'tx_sb',
+        originalTransactionId: 'otx_sb',
+        expiresDate: FUTURE,
+        appAccountToken: TEST_USER,
+        environment: 'Sandbox',
+      }),
+    ...over,
+  });
+}
+
+Deno.test('a sandbox subscription notification grants, recorded as sandbox', async () => {
+  const db = fakeDb();
+  assertEquals((await createAppstoreWebhook(sandboxDeps(db))(post())).status, 200);
+  assertEquals(db.tables.applied.length, 1);
+  assertEquals(db.tables.applied[0].p_txn_id, 'tx_sb');
+  assertEquals(db.tables.applied[0].p_credits, 1500);
+  assertEquals(db.tables.applied[0].p_environment, 'sandbox');
+});
+
+Deno.test('a production notification leaves the environment to the column default', async () => {
+  const db = fakeDb();
+  assertEquals((await createAppstoreWebhook(deps(db))(post())).status, 200);
+  assertEquals('p_environment' in db.tables.applied[0], false);
+});
+
+Deno.test('a sandbox refund claws back, recorded as sandbox', async () => {
+  const db = fakeDb();
+  db.tables.ledger_entries = [{ user_id: TEST_USER, stripe_ref: 'apple:sb_pack', amount_credits: 1000 }];
+  const handler = createAppstoreWebhook(sandboxDeps(db, {
+    verifyNotification: () =>
+      Promise.resolve({ ...NOTIFICATION, notificationType: 'REFUND', data: { environment: 'Sandbox', signedTransactionInfo: 'jws' } }),
+    verifyTransaction: () =>
+      Promise.resolve({
+        productId: 'vansen.pack.s',
+        transactionId: 'sb_pack',
+        originalTransactionId: 'sb_pack',
+        appAccountToken: TEST_USER,
+        environment: 'Sandbox',
+      }),
+  }));
+  assertEquals((await handler(post())).status, 200);
+  assertEquals(db.tables.applied[0].p_kind, 'clawback');
+  assertEquals(db.tables.applied[0].p_environment, 'sandbox');
+});
+
+Deno.test('the sandbox receipt inbox row names the environment', async () => {
+  const db = fakeDb();
+  await createAppstoreWebhook(sandboxDeps(db))(post());
+  const receipt = db.rpcCalls.find((c) => c.name === 'fn_record_billing_delivery');
+  assertEquals((receipt?.args.p_request as { environment?: string }).environment, 'sandbox');
+});
+
+Deno.test('a notification logs one structured line naming the environment', async () => {
+  const db = fakeDb();
+  const original = console.info;
+  const lines: Record<string, unknown>[] = [];
+  console.info = (...args: unknown[]) => {
+    try {
+      lines.push(JSON.parse(String(args[0])));
+    } catch {
+      // not a structured line
+    }
+  };
+  try {
+    await createAppstoreWebhook(sandboxDeps(db))(post());
+  } finally {
+    console.info = original;
+  }
+  const line = lines.find((l) => l.event === 'appstore_notification');
+  assertEquals(line?.environment, 'sandbox');
+  assertEquals(line?.transactionId, 'tx_sb');
+  assertEquals(line?.notificationUUID, 'uuid-1');
+});

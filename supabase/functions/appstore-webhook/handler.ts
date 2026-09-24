@@ -2,6 +2,8 @@
 // Trust anchor: Apple's JWS x5c chain (no JWT). All money goes through
 // fn_apply_fulfillment, keyed on Apple's transactionId, so a redelivery is
 // settled by the database rather than by a marker written ahead of the grant.
+// Sandbox notifications (environment "Sandbox": App Review, TestFlight) are
+// handled exactly like production ones and recorded as sandbox.
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { actionFor } from './_shared/iap-notifications.ts';
 import {
@@ -14,6 +16,7 @@ import {
   setIapSubscriptionStatus,
 } from './_shared/iap-grants.ts';
 import { deliverVerified, type Settlement } from './_shared/billing-fulfillment.ts';
+import { environmentOf } from './_shared/apple-verifier.ts';
 
 // deno-lint-ignore no-explicit-any
 type Decoded = any;
@@ -59,7 +62,20 @@ export function createAppstoreWebhook(
       expiresDate: raw.expiresDate,
       revocationDate: raw.revocationDate,
       appAccountToken: raw.appAccountToken,
+      // The transaction is the money record, so its verifier decides.
+      environment: environmentOf(raw),
     };
+    console.info(JSON.stringify({
+      event: 'appstore_notification',
+      environment: tx.environment,
+      notificationEnvironment: environmentOf(payload.data),
+      notificationType: payload.notificationType ?? null,
+      subtype: payload.subtype ?? null,
+      action,
+      notificationUUID: payload.notificationUUID ?? null,
+      transactionId: tx.transactionId || null,
+      productId: tx.productId || null,
+    }));
     // Verified event time, kept for ordering. Expiry is judged against the
     // current clock inside applyIapTransaction, not against this.
     const eventAt = payload.signedDate
@@ -85,7 +101,12 @@ export function createAppstoreWebhook(
       eventId: delivery.eventId,
       businessTxnId,
       userId: tx.appAccountToken ?? null,
-      request: { notificationType: payload.notificationType, subtype: payload.subtype, productId: tx.productId },
+      request: {
+        notificationType: payload.notificationType,
+        subtype: payload.subtype,
+        productId: tx.productId,
+        environment: tx.environment,
+      },
     }, async () => {
       const userId = tx.appAccountToken ??
         await findUserByOriginalTransaction(admin, tx.originalTransactionId);

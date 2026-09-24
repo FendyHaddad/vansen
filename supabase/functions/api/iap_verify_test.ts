@@ -1,8 +1,10 @@
 // POST /iap/verify: a receipt that can never verify is a 422 the app finishes
 // (it treats 400/403/404/422 as permanent); only a genuine upstream or
-// database failure is a 503 it leaves open to retry.
-import { assertEquals } from 'jsr:@std/assert';
+// database failure is a 503 it leaves open to retry. A sandbox receipt (App
+// Review, TestFlight) is granted and recorded as sandbox, out of revenue.
+import { assert, assertEquals } from 'jsr:@std/assert';
 import {
+  Environment,
   VerificationException,
   VerificationStatus,
 } from 'npm:@apple/app-store-server-library@1.6.0';
@@ -49,7 +51,7 @@ function post(app: ReturnType<typeof createApp>, jws: string) {
 }
 
 const PERMANENT: [string, () => unknown][] = [
-  ['a sandbox receipt sent to the production verifier', () =>
+  ['a receipt neither production nor sandbox accepts (e.g. Xcode)', () =>
     new VerificationException(VerificationStatus.INVALID_ENVIRONMENT)],
   ['a receipt for another bundle or app id', () =>
     new VerificationException(VerificationStatus.INVALID_APP_IDENTIFIER)],
@@ -123,4 +125,81 @@ Deno.test('/iap/verify: a database failure while granting stays 503', async () =
   );
   db.failNext('rpc.fn_apply_fulfillment', 'connection reset');
   assertEquals((await post(app, JWS)).status, 503);
+});
+
+const PACK_TX = {
+  appAccountToken: TEST_USER,
+  productId: 'vansen.pack.s',
+  transactionId: 'tx_1',
+  originalTransactionId: 'tx_1',
+};
+
+function grantCalls(db: FakeDb) {
+  return db.rpcCalls.filter((c) => c.name === 'fn_apply_fulfillment');
+}
+
+/** Runs fn with console.info captured; returns the parsed JSON lines. */
+async function infoLines(fn: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const original = console.info;
+  const lines: Record<string, unknown>[] = [];
+  console.info = (...args: unknown[]) => {
+    try {
+      lines.push(JSON.parse(String(args[0])));
+    } catch {
+      // not a structured line
+    }
+  };
+  try {
+    await fn();
+  } finally {
+    console.info = original;
+  }
+  return lines;
+}
+
+Deno.test('/iap/verify: a production receipt is granted and recorded as production', async () => {
+  const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.PRODUCTION }));
+  const res = await post(app, JWS);
+  assertEquals(res.status, 200);
+  assertEquals((await res.json()).outcome, 'applied');
+  const calls = grantCalls(db);
+  assertEquals(calls.length, 1);
+  // Production is the column default; the argument is left out so this build
+  // also runs against a database that predates 0038.
+  assertEquals('p_environment' in calls[0].args, false);
+});
+
+Deno.test('/iap/verify: a sandbox receipt (App Review, TestFlight) is granted and recorded as sandbox', async () => {
+  const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+  const res = await post(app, JWS);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  assertEquals(body.outcome, 'applied');
+  assertEquals(body.granted, true);
+  const calls = grantCalls(db);
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].args.p_environment, 'sandbox');
+  assertEquals(calls[0].args.p_txn_id, 'tx_1');
+});
+
+Deno.test('/iap/verify: a redelivered sandbox receipt is a replay, not a second grant', async () => {
+  const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+  let applied = 0;
+  db.rpcHandlers.fn_apply_fulfillment = () => {
+    applied += 1;
+    const replay = applied > 1;
+    return { applied: !replay, replay, reason: null, credits: { plan: 0, pack: 1000 } };
+  };
+  assertEquals((await (await post(app, JWS)).json()).outcome, 'applied');
+  assertEquals((await (await post(app, JWS)).json()).outcome, 'already_applied');
+});
+
+Deno.test('/iap/verify: logs one structured line naming the environment', async () => {
+  const { app } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+  const lines = await infoLines(async () => await post(app, JWS));
+  const line = lines.find((l) => l.event === 'iap_verified');
+  assert(line, 'no iap_verified line');
+  assertEquals(line.environment, 'sandbox');
+  assertEquals(line.transactionId, 'tx_1');
+  assertEquals(line.outcome, 'applied');
 });

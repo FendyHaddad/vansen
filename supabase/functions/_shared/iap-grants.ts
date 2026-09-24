@@ -9,6 +9,7 @@ import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { PLAN_CREDITS } from './model-families.ts';
 import { IAP_PRODUCTS, iapGrant, iapPlanFor } from './iap-products.ts';
 import { applyFulfillment, type Settlement } from './billing-fulfillment.ts';
+import type { AppleEnvironment } from './apple-verifier.ts';
 
 /** Set by the webhook when deliverVerified already opened the receipt. */
 export interface OpenDelivery {
@@ -23,6 +24,8 @@ export interface IapTransaction {
   expiresDate?: number;
   revocationDate?: number;
   appAccountToken?: string;
+  /** Which verifier accepted it; sandbox money is granted but kept out of revenue. */
+  environment?: AppleEnvironment;
 }
 
 export type IapOutcome = 'applied' | 'already_applied' | 'rejected';
@@ -70,6 +73,7 @@ export async function applyIapTransaction(
     const result = await applyFulfillment(admin, {
       ...delivery,
       source: 'apple',
+      environment: tx.environment,
       businessTxnId: tx.transactionId,
       userId,
       kind: 'subscription_grant',
@@ -91,6 +95,7 @@ export async function applyIapTransaction(
   const result = await applyFulfillment(admin, {
     ...delivery,
     source: 'apple',
+    environment: tx.environment,
     businessTxnId: tx.transactionId,
     userId,
     kind: 'pack_grant',
@@ -146,6 +151,7 @@ export async function clawBackIap(
   await applyFulfillment(admin, {
     ...delivery,
     source: 'apple',
+    environment: tx.environment,
     businessTxnId: `refund:${tx.transactionId}`,
     userId,
     kind: 'clawback',
@@ -176,6 +182,7 @@ async function refundSubscription(
   await applyFulfillment(admin, {
     ...delivery,
     source: 'apple',
+    environment: tx.environment,
     businessTxnId: `refund:${tx.transactionId}`,
     userId,
     kind: 'subscription_grant',

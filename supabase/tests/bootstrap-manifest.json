@@ -154,6 +154,10 @@
     {
       "file": "0037_entitlement_grace.sql",
       "sha256": "48a9a9204485"
+    },
+    {
+      "file": "0038_iap_sandbox_environment.sql",
+      "sha256": "485551e8ac78"
     }
   ]
 }
