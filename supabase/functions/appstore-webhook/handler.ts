@@ -13,10 +13,11 @@ import {
   type IapResult,
   type IapTransaction,
   type OpenDelivery,
+  sandboxGrantsEnabled,
   setIapSubscriptionStatus,
 } from './_shared/iap-grants.ts';
 import { deliverVerified, type Settlement } from './_shared/billing-fulfillment.ts';
-import { environmentOf } from './_shared/apple-verifier.ts';
+import { environmentOf, verifierErrorSummary } from './_shared/apple-verifier.ts';
 
 // deno-lint-ignore no-explicit-any
 type Decoded = any;
@@ -92,6 +93,19 @@ export function createAppstoreWebhook(
       return;
     }
 
+    // I3 brake: the owner can stop sandbox grants without a code deploy. The
+    // notification is acknowledged (200, delivery marker written by serve())
+    // so Apple never retries it, but nothing is opened or granted.
+    if (tx.environment === 'sandbox' && !sandboxGrantsEnabled()) {
+      console.info(JSON.stringify({
+        event: 'appstore_sandbox_grants_disabled',
+        action,
+        transactionId: tx.transactionId || null,
+        notificationUUID: payload.notificationUUID ?? null,
+      }));
+      return;
+    }
+
     // Money from here on. The receipt is written before the account lookup,
     // so a verified refund or purchase we then fail to place stays visible.
     const delivery: OpenDelivery = { eventId: payload.notificationUUID, receiptOpen: true };
@@ -129,7 +143,14 @@ export function createAppstoreWebhook(
     let payload: Decoded;
     try {
       payload = await verifyNotification(signedPayload);
-    } catch {
+    } catch (e) {
+      // Every rejection here used to be swallowed into the same bare 401,
+      // including a misconfigured server: APPLE_ENV=Production with no
+      // APPLE_APP_ID throws a plain Error from the SignedDataVerifier
+      // constructor (not a VerificationException), and every notification
+      // would fail with nothing in the logs to explain why. Log the error
+      // shape only -- never the signed payload itself.
+      console.error('appstore_notification_verify_failed', verifierErrorSummary(e));
       return new Response('invalid signature', { status: 401 });
     }
 

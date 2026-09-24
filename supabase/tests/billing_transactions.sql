@@ -6,6 +6,39 @@
 -- How to run: see the header of supabase/tests/upload_ownership.sql.
 begin;
 
+-- 0. I1: 0038's backfill re-tags a pre-existing Apple row. Run first, before
+-- any other test in this file inserts an 'apple' row, so the migration's own
+-- unconditional `where source = 'apple'` cannot touch anything but this one.
+do $$
+declare
+  v_user uuid := '00000000-0000-4000-8000-000000000000';
+  v_env text;
+begin
+  insert into auth.users (id, email) values (v_user, 'legacy-apple@example.com')
+    on conflict (id) do nothing;
+  insert into public.profiles (id, birth_date) values (v_user, '1990-01-01')
+    on conflict (id) do nothing;
+
+  -- Simulates a row written before 0038: an Apple grant with no p_environment,
+  -- which lands on the column's own 'production' default -- the same shape
+  -- every real pre-0038 Apple row has.
+  perform public.fn_apply_fulfillment('apple', 'legacy_apple_tx', v_user, 'pack_grant', null, 1000,
+    null, now(), null, false, false);
+  select environment into v_env from public.billing_transactions
+    where source = 'apple' and business_txn_id = 'legacy_apple_tx';
+  assert v_env = 'production', format('pre-backfill row should start production, got %s', v_env);
+
+  -- The exact statement 0038 runs once, live, against whatever Apple rows
+  -- already existed. At this point in the file it is still true that no other
+  -- Apple row exists yet, so this reproduces the migration's blanket
+  -- `where source = 'apple'` without disturbing later sections.
+  update public.billing_transactions set environment = 'sandbox' where source = 'apple';
+
+  select environment into v_env from public.billing_transactions
+    where source = 'apple' and business_txn_id = 'legacy_apple_tx';
+  assert v_env = 'sandbox', format('0038 backfill must re-tag pre-existing Apple rows, got %s', v_env);
+end $$;
+
 do $$
 declare
   v_user uuid := '33333333-3333-4333-8333-333333333333';

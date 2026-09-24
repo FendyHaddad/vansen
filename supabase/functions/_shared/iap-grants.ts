@@ -28,6 +28,15 @@ export interface IapTransaction {
   environment?: AppleEnvironment;
 }
 
+/**
+ * The owner's brake on sandbox money (I3): unset or 'on' grants sandbox
+ * purchases as before; 'off' stops them without a code deploy. See
+ * docs/superpowers/plans/2026-09-20-release-runbook.md § App Store environment.
+ */
+export function sandboxGrantsEnabled(): boolean {
+  return Deno.env.get('APPLE_SANDBOX_GRANTS') !== 'off';
+}
+
 export type IapOutcome = 'applied' | 'already_applied' | 'rejected';
 
 function iapOutcome(result: { replay: boolean; applied: boolean }): IapOutcome {

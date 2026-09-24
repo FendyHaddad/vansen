@@ -556,3 +556,49 @@ and cron execution, secret presence by name, R2 configuration, and each enabled
 family's smoke evidence. **A capability boolean does not establish that a
 migration, a storage backend or a provider works.** Record anything unknown as
 unknown and leave that capability off.
+
+---
+
+## 10. App Store environment
+
+Today: `APPLE_ENV=Sandbox`, `APPLE_APP_ID` unset. `api`/`appstore-webhook`
+verify against the sandbox only, and every sandbox purchase (App Review,
+TestFlight, any dev build) is granted and recorded as `environment = 'sandbox'`
+(0038). That is correct for pre-launch, but two things must both be set
+**before App Review submission, not on launch day**:
+
+| Secret | Value | What fails without it |
+|---|---|---|
+| `APPLE_ENV` | `Production` | Left at `Sandbox`, a live production receipt gets `INVALID_ENVIRONMENT` and a permanent 422 once the app is live — the paying customer's transaction never finishes. |
+| `APPLE_APP_ID` | the App Store Connect numeric app id | With `APPLE_ENV=Production` and no `APPLE_APP_ID`, the `SignedDataVerifier` constructor throws before it can check anything: **every receipt on `/iap/verify` answers 503**, and **every App Store Server Notification is rejected 401** by `appstore-webhook` (renewals, refunds, cancellations — all of it, logged as `appstore_notification_verify_failed`). Sandbox (App Review, TestFlight) is affected too, since production is tried first. |
+
+Set both together, verify one sandbox purchase (App Review's own test account
+is fine) still grants, and only then submit for review. `APPLE_BUNDLE_ID`
+defaults to `com.vankode.vansenMobile` and does not need to change.
+
+**The brake — `APPLE_SANDBOX_GRANTS`.** The sandbox is not limited to App
+Review: any TestFlight tester, internal or external, buys for free, and a
+sandbox subscription renews on an accelerated clock, so each renewal tops the
+plan bucket back up. That is spent on real provider calls. `APPLE_SANDBOX_GRANTS`
+is the switch to stop it without a redeploy:
+
+- unset or `on` (the default) — sandbox purchases are granted and recorded as
+  `environment = 'sandbox'`, same as today.
+- `off` — `/iap/verify` refuses a sandbox receipt with a permanent 422
+  `sandbox_disabled` (the app finishes the transaction rather than retrying
+  forever), and `appstore-webhook` acknowledges a sandbox notification (200,
+  Apple never retries it) without opening a receipt or granting anything.
+  Both log `*_sandbox_grants_disabled` with the transaction id. Production
+  money is never touched by this flag.
+
+Flip it to `off` the moment sandbox exposure looks wrong (a public TestFlight
+link, an unexpected spend spike), and back to `on`/unset to resume App Review
+testing.
+
+**Reporting.** A sandbox grant is real credits for the tester but never
+revenue: `backoffice_summary().active_subscriptions` and anything that reports
+paying customers already exclude `environment = 'sandbox'` rows
+(`fn_sandbox_entitlement`, 0038). `vankode-backoffice` (a separate repo) does
+**not** yet make this distinction — its credit-spend economics still count
+sandbox-funded generations as if they were revenue. That is a known gap,
+tracked as a ticket against that repo, not a blocker on this one.

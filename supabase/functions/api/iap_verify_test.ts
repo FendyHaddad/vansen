@@ -203,3 +203,64 @@ Deno.test('/iap/verify: logs one structured line naming the environment', async 
   assertEquals(line.transactionId, 'tx_1');
   assertEquals(line.outcome, 'applied');
 });
+
+// ── I3: the owner's brake on sandbox grants ─────────────────────────────────
+
+function withEnv(name: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
+  const previous = Deno.env.get(name);
+  if (value === undefined) Deno.env.delete(name);
+  else Deno.env.set(name, value);
+  return fn().finally(() => {
+    if (previous === undefined) Deno.env.delete(name);
+    else Deno.env.set(name, previous);
+  });
+}
+
+Deno.test('/iap/verify: APPLE_SANDBOX_GRANTS=off refuses a sandbox receipt with 422 sandbox_disabled', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+    const res = await post(app, JWS);
+    assertEquals(res.status, 422);
+    assertEquals((await res.json()).error.code, 'sandbox_disabled');
+    assertEquals(grantCalls(db), [], 'no grant call must be made while the brake is on');
+  }));
+
+Deno.test('/iap/verify: APPLE_SANDBOX_GRANTS=off is permanent, so the app finishes the transaction', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    // 422, not 503: retrying this receipt can never succeed while the flag is off.
+    const { app } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+    assertEquals((await post(app, JWS)).status, 422);
+  }));
+
+Deno.test('/iap/verify: APPLE_SANDBOX_GRANTS=off never touches a production receipt', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.PRODUCTION }));
+    const res = await post(app, JWS);
+    assertEquals(res.status, 200);
+    assertEquals(grantCalls(db).length, 1);
+  }));
+
+Deno.test('/iap/verify: APPLE_SANDBOX_GRANTS unset still grants sandbox (the default is on)', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', undefined, async () => {
+    const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+    const res = await post(app, JWS);
+    assertEquals(res.status, 200);
+    assertEquals(grantCalls(db).length, 1);
+  }));
+
+Deno.test('/iap/verify: APPLE_SANDBOX_GRANTS=on grants sandbox explicitly', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'on', async () => {
+    const { app, db } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+    const res = await post(app, JWS);
+    assertEquals(res.status, 200);
+    assertEquals(grantCalls(db).length, 1);
+  }));
+
+Deno.test('/iap/verify: a refused sandbox receipt is logged', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const { app } = verifyWith(() => Promise.resolve({ ...PACK_TX, environment: Environment.SANDBOX }));
+    const lines = await infoLines(async () => await post(app, JWS));
+    const line = lines.find((l) => l.event === 'iap_verify_sandbox_grants_disabled');
+    assert(line, 'no iap_verify_sandbox_grants_disabled line');
+    assertEquals(line.transactionId, 'tx_1');
+  }));

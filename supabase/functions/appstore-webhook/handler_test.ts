@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert';
+import { assert, assertEquals } from 'jsr:@std/assert';
 import { FakeDb, TEST_USER } from './_shared/testing/fakes.ts';
 import { createAppstoreWebhook } from './handler.ts';
 
@@ -434,4 +434,133 @@ Deno.test('a notification logs one structured line naming the environment', asyn
   assertEquals(line?.environment, 'sandbox');
   assertEquals(line?.transactionId, 'tx_sb');
   assertEquals(line?.notificationUUID, 'uuid-1');
+});
+
+// ── I3: the owner's brake on sandbox grants ─────────────────────────────────
+
+function withEnv(name: string, value: string | undefined, fn: () => Promise<void>): Promise<void> {
+  const previous = Deno.env.get(name);
+  if (value === undefined) Deno.env.delete(name);
+  else Deno.env.set(name, value);
+  return fn().finally(() => {
+    if (previous === undefined) Deno.env.delete(name);
+    else Deno.env.set(name, previous);
+  });
+}
+
+/** Runs fn with console.info captured; returns the parsed JSON lines. */
+async function capturedInfoLines(fn: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const original = console.info;
+  const lines: Record<string, unknown>[] = [];
+  console.info = (...args: unknown[]) => {
+    try {
+      lines.push(JSON.parse(String(args[0])));
+    } catch {
+      // not a structured line
+    }
+  };
+  try {
+    await fn();
+  } finally {
+    console.info = original;
+  }
+  return lines;
+}
+
+Deno.test('APPLE_SANDBOX_GRANTS=off acknowledges a sandbox subscription without granting', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const db = fakeDb();
+    const lines = await capturedInfoLines(async () => {
+      const res = await createAppstoreWebhook(sandboxDeps(db))(post());
+      assertEquals(res.status, 200);
+    });
+    assertEquals(db.tables.applied ?? [], []);
+    // Acknowledged: the delivery marker is still written so Apple never retries.
+    assertEquals(db.tables.webhook_events.some((e) => e.id === 'uuid-1'), true);
+    const line = lines.find((l) => l.event === 'appstore_sandbox_grants_disabled');
+    assertEquals(line?.transactionId, 'tx_sb');
+  }));
+
+Deno.test('APPLE_SANDBOX_GRANTS=off also refuses a sandbox refund, without touching the ledger', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const db = fakeDb();
+    db.tables.ledger_entries = [{ user_id: TEST_USER, stripe_ref: 'apple:sb_pack', amount_credits: 1000 }];
+    const handler = createAppstoreWebhook(sandboxDeps(db, {
+      verifyNotification: () =>
+        Promise.resolve({ ...NOTIFICATION, notificationType: 'REFUND', data: { environment: 'Sandbox', signedTransactionInfo: 'jws' } }),
+      verifyTransaction: () =>
+        Promise.resolve({
+          productId: 'vansen.pack.s',
+          transactionId: 'sb_pack',
+          originalTransactionId: 'sb_pack',
+          appAccountToken: TEST_USER,
+          environment: 'Sandbox',
+        }),
+    }));
+    assertEquals((await handler(post())).status, 200);
+    assertEquals(db.tables.applied ?? [], []);
+  }));
+
+Deno.test('APPLE_SANDBOX_GRANTS unset still grants sandbox money (the default is on)', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', undefined, async () => {
+    const db = fakeDb();
+    assertEquals((await createAppstoreWebhook(sandboxDeps(db))(post())).status, 200);
+    assertEquals(db.tables.applied.length, 1);
+  }));
+
+Deno.test('APPLE_SANDBOX_GRANTS=on grants sandbox money explicitly', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'on', async () => {
+    const db = fakeDb();
+    assertEquals((await createAppstoreWebhook(sandboxDeps(db))(post())).status, 200);
+    assertEquals(db.tables.applied.length, 1);
+  }));
+
+Deno.test('APPLE_SANDBOX_GRANTS=off never touches a production notification', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const db = fakeDb();
+    assertEquals((await createAppstoreWebhook(deps(db))(post())).status, 200);
+    assertEquals(db.tables.applied.length, 1);
+  }));
+
+Deno.test('APPLE_SANDBOX_GRANTS=off still updates a sandbox status-only notification', () =>
+  withEnv('APPLE_SANDBOX_GRANTS', 'off', async () => {
+    const db = fakeDb();
+    db.tables.subscriptions = [
+      { user_id: TEST_USER, plan: 'studio', status: 'active', iap_original_transaction_id: 'otx_sb' },
+    ];
+    const handler = createAppstoreWebhook(sandboxDeps(db, {
+      verifyNotification: () =>
+        Promise.resolve({ ...NOTIFICATION, notificationType: 'EXPIRED', subtype: 'VOLUNTARY', data: { environment: 'Sandbox', signedTransactionInfo: 'jws' } }),
+    }));
+    assertEquals((await handler(post())).status, 200);
+    assertEquals(db.tables.subscriptions[0].status, 'expired');
+  }));
+
+// ── I2: a missing production verifier is refused AND logged ────────────────
+
+Deno.test('a notification the verifier could not even attempt (missing APPLE_APP_ID) is logged, not swallowed', async () => {
+  const db = fakeDb();
+  const original = console.error;
+  const calls: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    calls.push(args);
+  };
+  let res: Response;
+  try {
+    res = await createAppstoreWebhook(
+      deps(db, {
+        verifyNotification: () =>
+          Promise.reject(new Error('appAppleId is required when the environment is Production')),
+      }),
+    )(post());
+  } finally {
+    console.error = original;
+  }
+  assertEquals(res!.status, 401);
+  assertEquals(db.tables.applied ?? [], []);
+  const logged = calls.find((c) => c[0] === 'appstore_notification_verify_failed');
+  assert(logged, 'the verify failure must be logged, not swallowed');
+  const summary = logged![1] as { name: string; message: string };
+  assertEquals(summary.name, 'Error');
+  assertEquals(summary.message, 'appAppleId is required when the environment is Production');
 });

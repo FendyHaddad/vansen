@@ -3,7 +3,7 @@
 // JWS). Both settle idempotently, so calling them after every purchase is safe.
 import type Stripe from "npm:stripe@17";
 import { CREDIT_PACKS, packCredits } from "../_shared/model-families.ts";
-import { applyIapTransaction } from "../_shared/iap-grants.ts";
+import { applyIapTransaction, sandboxGrantsEnabled } from "../_shared/iap-grants.ts";
 import { applyFulfillment } from "../_shared/billing-fulfillment.ts";
 import {
   environmentOf,
@@ -107,6 +107,24 @@ export function registerBillingReconcileRoutes(app: App, ctx: ApiContext): void 
         return fail(c, 403, "forbidden", "Receipt belongs to another account");
       }
       const environment = environmentOf(tx);
+      // I3 brake: the owner can stop sandbox grants (App Review/TestFlight
+      // testers buying free, unlimited, forever) without a code deploy.
+      // Permanent refusal, so the app finishes the transaction rather than
+      // retrying forever against a receipt that will never be granted.
+      if (environment === "sandbox" && !sandboxGrantsEnabled()) {
+        console.info(JSON.stringify({
+          event: "iap_verify_sandbox_grants_disabled",
+          transactionId: tx.transactionId ?? null,
+          productId: tx.productId ?? null,
+          requestId: c.get("requestId") ?? null,
+        }));
+        return fail(
+          c,
+          422,
+          "sandbox_disabled",
+          "Sandbox purchases are not being granted right now.",
+        );
+      }
       const result = await applyIapTransaction(admin, userId, {
         productId: tx.productId ?? "",
         transactionId: tx.transactionId ?? "",

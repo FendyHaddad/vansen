@@ -7,10 +7,12 @@
 -- but not money: billing_transactions.environment records which is which, and
 -- anything that reports revenue or paying customers leaves 'sandbox' out.
 --
--- Dedupe is unchanged: unique (source, business_txn_id). Apple transaction ids
--- do not collide across environments, and a redelivery of the same
--- transaction must replay whatever environment it claims, so the environment
--- is deliberately NOT part of the key.
+-- Dedupe is unchanged: unique (source, business_txn_id). The environment is
+-- Apple-signed, never client-claimed, so no redelivery can "claim the other
+-- environment" for an id it already used. Environment stays out of the key
+-- because Apple transaction ids do not collide across environments in
+-- practice; if that ever changed, the second delivery would read as a replay
+-- of the first (fn_apply_fulfillment's replay branch, unchanged here).
 --
 -- Deploy order: this migration first. It is backward compatible with the
 -- deployed functions (p_environment defaults to 'production'), and the new
@@ -19,9 +21,25 @@
 --
 -- Written 2026-09-24. NOT applied anywhere yet.
 
+-- The table is tiny pre-launch, but a stuck billing transaction should make
+-- this migration fail fast rather than queue every grant behind an
+-- ACCESS EXCLUSIVE lock. Applied via `db push` or MCP, both of which wrap the
+-- file in a transaction, so this is scoped to just this migration.
+set local lock_timeout = '5s';
+
 alter table public.billing_transactions
   add column environment text not null default 'production'
     check (environment in ('production', 'sandbox'));
+
+-- Every Apple row written before this migration was bought in Apple's
+-- sandbox: hosted APPLE_ENV has been "Sandbox" since 2026-07-18 (verified by
+-- secret digest 2026-09-24), the sandbox-only verifier that ran until now
+-- cannot accept a production payload, and production had 0 billing_transactions
+-- rows on 2026-09-24. The column default above would otherwise mislabel every
+-- one of them 'production' -- counting App Review/TestFlight accounts as
+-- paying customers and pulling them into revenue queries. Re-tag them before
+-- anything reads the new column.
+update public.billing_transactions set environment = 'sandbox' where source = 'apple';
 
 -- Stripe has a test mode, never a sandbox receipt on this project.
 alter table public.billing_transactions

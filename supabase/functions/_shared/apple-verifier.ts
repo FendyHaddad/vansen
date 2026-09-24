@@ -29,15 +29,27 @@ export interface AppleVerifier {
   verifyAndDecodeNotification(signedPayload: string): Promise<ResponseBodyV2DecodedPayload>;
 }
 
+// One SignedDataVerifier per environment, reused for the life of the process.
+// A fresh instance discards the library's own verified-key cache, so every
+// call would pay for an OCSP lookup again -- doubling the transient-503
+// surface now that a sandbox payload can also be checked against production
+// first. The two verifiers never change (Apple's root, our bundle id and app
+// id are fixed for the process), so caching them is safe.
+const verifierCache = new Map<Environment, SignedDataVerifier>();
+
 function verifierFor(environment: Environment): SignedDataVerifier {
+  const cached = verifierCache.get(environment);
+  if (cached) return cached;
   const appAppleId = Number(Deno.env.get('APPLE_APP_ID') ?? '') || undefined;
-  return new SignedDataVerifier(
+  const verifier = new SignedDataVerifier(
     [Buffer.from(APPLE_ROOT_CA_G3_BASE64, 'base64')],
     true,
     environment,
     BUNDLE_ID,
     environment === Environment.PRODUCTION ? appAppleId : undefined,
   );
+  verifierCache.set(environment, verifier);
+  return verifier;
 }
 
 /**
@@ -69,8 +81,22 @@ export async function productionThenSandbox<T>(
     return await production();
   } catch (error) {
     if (!belongsToSandbox(error)) throw error;
+    try {
+      return await sandbox();
+    } catch (sandboxError) {
+      // The thrown status is the sandbox verdict, which can mislead: a
+      // production payload refused for a wrong APPLE_APP_ID is reported as
+      // INVALID_ENVIRONMENT once sandbox also refuses it. Record what
+      // production actually said as a side property rather than overwriting
+      // `.cause` -- VerificationException already uses `.cause` for the
+      // sandbox verdict's own OCSP failure, which receiptNeverVerifies reads.
+      if (sandboxError instanceof Error) {
+        (sandboxError as Error & { productionStatus?: unknown }).productionStatus =
+          error instanceof VerificationException ? error.status : error;
+      }
+      throw sandboxError;
+    }
   }
-  return await sandbox();
 }
 
 export function appleVerifier(): AppleVerifier {
@@ -126,6 +152,24 @@ export function receiptNeverVerifies(error: unknown): boolean {
   const cause = (error as { cause?: unknown }).cause;
   if (!cause) return true;
   return cause instanceof Error && TOKEN_ERRORS.has(cause.name);
+}
+
+/**
+ * Compact, payload-free description of a verification failure, safe to log.
+ * Includes the production status productionThenSandbox recorded when the
+ * sandbox fallback also refused the payload, so a misconfiguration (for
+ * example APPLE_ENV=Production with no APPLE_APP_ID, which throws a plain
+ * Error from the SignedDataVerifier constructor rather than a
+ * VerificationException) still shows up instead of a bare 401.
+ */
+export function verifierErrorSummary(error: unknown): Record<string, unknown> {
+  const productionStatus = (error as { productionStatus?: unknown } | null)?.productionStatus;
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    status: error instanceof VerificationException ? String(error.status) : null,
+    message: error instanceof Error ? error.message : String(error),
+    ...(productionStatus !== undefined ? { productionStatus: String(productionStatus) } : {}),
+  };
 }
 
 function jsonObjectOf(part: string): boolean {
