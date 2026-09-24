@@ -24,6 +24,7 @@ function response(subscription: SubFixture | null): ProfileResponse {
     subscription: subscription
       ? { pendingPlan: null, pendingAt: null, entitled: true, ...subscription }
       : null,
+    subscriptionSource: subscription ? 'stripe' : null,
   };
 }
 
@@ -153,6 +154,35 @@ describe('ProfileStore plan computeds', () => {
     expect(store.plan()).toBeNull();
     expect(store.studioActive()).toBe(false);
     expect(store.proActive()).toBe(false);
+  });
+
+  it('subscriptionSource follows the server; app_store means the App Store manages the plan', async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    apiMock.get.mockResolvedValue({
+      ...response({ plan: 'studio', status: 'active', currentPeriodEnd: future }),
+      subscriptionSource: 'app_store',
+    });
+    const store = make();
+    await store.load();
+    expect(store.subscriptionSource()).toBe('app_store');
+    expect(store.managedInAppStore()).toBe(true);
+
+    apiMock.get.mockResolvedValue(
+      response({ plan: 'studio', status: 'active', currentPeriodEnd: future }),
+    );
+    await store.load();
+    expect(store.subscriptionSource()).toBe('stripe');
+    expect(store.managedInAppStore()).toBe(false);
+  });
+
+  it('a cached profile from before subscriptionSource existed reads as null', async () => {
+    const legacy = { ...response(null) } as Partial<ProfileResponse>;
+    delete legacy.subscriptionSource;
+    apiMock.get.mockResolvedValue(legacy);
+    const store = make();
+    await store.load();
+    expect(store.subscriptionSource()).toBeNull();
+    expect(store.managedInAppStore()).toBe(false);
   });
 
   it('a cached profile from before entitled existed reads as not entitled', async () => {

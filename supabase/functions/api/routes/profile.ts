@@ -1,7 +1,10 @@
 // Profile, age gate, prefs and push devices: GET/PATCH/DELETE /profile,
 // POST /profile/age (an underage answer closes the account), PUT /prefs and
 // POST/DELETE /devices. Closure itself is services/account-closure.ts.
+// GET /profile also says which rail wrote the subscription row
+// (`subscriptionSource`), so both apps know who manages the plan.
 import { isEntitled } from "../services/entitlement.ts";
+import { subscriptionSourceOf } from "../services/subscription-source.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
 import { sanitizePrefs } from "../lib/request-sanitize.ts";
@@ -47,6 +50,11 @@ export function registerProfileRoutes(app: App, ctx: ApiContext): void {
           .maybeSingle(),
       ]);
     if (error || !profile) return fail(c, 404, "not_found", "Profile missing");
+    const subscriptionSource = await subscriptionSourceOf(
+      admin,
+      userId,
+      subscription,
+    );
     return c.json({
       profile: {
         id: profile.id,
@@ -67,6 +75,7 @@ export function registerProfileRoutes(app: App, ctx: ApiContext): void {
           entitled: isEntitled(subscription, Date.now()),
         }
         : null,
+      subscriptionSource,
     });
   });
 

@@ -668,12 +668,20 @@ export function installRegistryRpcs(db: FakeDb): void {
     }
     if (existing) return existing.result;
 
-    // `activePlan`'s rule exactly: anything but expired, and a canceled plan
-    // only until its paid period ends.
+    // The gateway's `isEntitled` rule exactly (0037): anything but expired; a
+    // canceled plan until its paid period ends; an active plan until 3 days
+    // after it.
+    const nowMs = self.now().getTime();
+    const endMs = (s: Row) =>
+      s.current_period_end ? new Date(String(s.current_period_end)).getTime() : null;
+    const lapsed = (s: Row) => {
+      const end = endMs(s);
+      if (end === null) return false;
+      if (s.status === "canceled") return end < nowMs;
+      return end <= nowMs - 3 * 86_400_000;
+    };
     const sub = (self.tables.subscriptions ?? []).find((s) =>
-      s.user_id === args.p_user && s.status !== "expired" &&
-      !(s.status === "canceled" && s.current_period_end &&
-        new Date(String(s.current_period_end)).getTime() < self.now().getTime())
+      s.user_id === args.p_user && s.status !== "expired" && !lapsed(s)
     );
     if (!sub) throw new Error("subscription_required");
 

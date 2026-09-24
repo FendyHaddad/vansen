@@ -19,6 +19,8 @@ import { SiteFooter } from '../../shared/site-footer/site-footer';
 import { AuthService } from '../../core/auth/auth-service';
 import { BillingService } from '../../core/billing/billing-service';
 import { CheckoutIntent } from '../../core/billing/checkout-intent';
+import { billingErrorText } from '../../core/billing/billing-error-text';
+import { ApiError } from '../../core/api/api-service';
 import {
   CREDIT_PACKS,
   MODEL_FAMILIES,
@@ -125,11 +127,15 @@ export class PlansPage {
     this.busyPlan.set(plan);
     try {
       await this.billing.subscribe(plan);
-    } catch {
+    } catch (e) {
       // Success redirects away; only a failure lands back here. The likeliest
-      // cause is an existing subscription, which the portal — not checkout — owns.
+      // cause is an existing subscription, which the portal — not checkout — owns,
+      // or one bought in the App Store, which Apple owns.
       this.busyPlan.set(null);
-      this.error.set('Could not start checkout. If you already subscribe, manage your plan under Settings → Subscription.');
+      const generic =
+        'Could not start checkout. If you already subscribe, manage your plan under Settings → Subscription.';
+      const inAppStore = e instanceof ApiError && e.code === 'subscribed_in_app_store';
+      this.error.set(inAppStore ? billingErrorText(e, generic) : generic);
     }
   }
 

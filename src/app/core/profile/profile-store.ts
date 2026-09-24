@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { SessionLifecycle } from '../auth/session-lifecycle';
 import { ApiService } from '../api/api-service';
-import { ProfileDto, ProfileResponse, SubscriptionDto } from '../api/dtos';
+import { ProfileDto, ProfileResponse, SubscriptionDto, SubscriptionSource } from '../api/dtos';
 import { SubscriptionPlan, SubscriptionStatus } from '../enums';
 import { LedgerService } from '../ledger/ledger-service';
 import { PreferencesService } from '../preferences/preferences-service';
@@ -15,10 +15,15 @@ export class ProfileStore {
 
   private readonly profileSig = signal<ProfileDto | null>(null);
   private readonly subscriptionSig = signal<SubscriptionDto | null>(null);
+  private readonly subscriptionSourceSig = signal<SubscriptionSource | null>(null);
   private readonly loadedSig = signal(false);
 
   readonly profile = this.profileSig.asReadonly();
   readonly subscription = this.subscriptionSig.asReadonly();
+  /** Which rail wrote the subscription row; null when there is none. */
+  readonly subscriptionSource = this.subscriptionSourceSig.asReadonly();
+  /** The App Store bills this plan, so the Stripe controls do not apply. */
+  readonly managedInAppStore = computed(() => this.subscriptionSourceSig() === 'app_store');
   readonly loaded = this.loadedSig.asReadonly();
 
   readonly displayName = computed(() => this.profileSig()?.displayName ?? '');
@@ -86,6 +91,8 @@ export class ProfileStore {
   private apply(response: ProfileResponse): void {
     this.profileSig.set(response.profile);
     this.subscriptionSig.set(response.subscription);
+    // A snapshot cached before the field existed has none: read it as null.
+    this.subscriptionSourceSig.set(response.subscriptionSource ?? null);
     this.ledger.setCredits(response.credits);
     this.prefsService.applyServerPrefs(response.profile.prefs);
     this.loadedSig.set(true);
@@ -105,6 +112,7 @@ export class ProfileStore {
   reset(): void {
     this.profileSig.set(null);
     this.subscriptionSig.set(null);
+    this.subscriptionSourceSig.set(null);
     this.loadedSig.set(false);
   }
 }

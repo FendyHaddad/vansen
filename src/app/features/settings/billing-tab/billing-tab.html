@@ -110,7 +110,20 @@
           </p>
         }
         <div class="studio-actions">
-          @if (canceledPending()) {
+          @if (plan() && managedInAppStore()) {
+            <p class="small app-store-note">Managed in the App Store</p>
+            <a
+              class="app-store-link"
+              hlmBtn
+              size="sm"
+              variant="outline"
+              [href]="appStoreUrl"
+              target="_blank"
+              rel="noopener"
+            >
+              Manage in the App Store
+            </a>
+          } @else if (canceledPending()) {
             <button hlmBtn size="sm" [disabled]="busy()" (click)="resume()">
               Resume subscription
             </button>
@@ -138,7 +151,7 @@
             </button>
           }
         </div>
-        @if (plan() && !canceledPending() && !isOwner()) {
+        @if (plan() && !canceledPending() && !isOwner() && !managedInAppStore()) {
           <button type="button" class="cancel-link" [disabled]="busy()" (click)="openCancel()">
             Cancel subscription
           </button>
@@ -157,7 +170,7 @@
     </div>
   </div>
 
-  @if (plan() && !isOwner()) {
+  @if (plan() && !isOwner() && !managedInAppStore()) {
     <div class="card-row">
       <div class="panel">
         <span class="eyebrow">Next invoice</span>

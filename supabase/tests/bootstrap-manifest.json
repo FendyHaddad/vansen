@@ -150,6 +150,10 @@
     {
       "file": "0036_mcp_oauth.sql",
       "sha256": "cecd168863de"
+    },
+    {
+      "file": "0037_entitlement_grace.sql",
+      "sha256": "b4bd222a7b8e"
     }
   ]
 }

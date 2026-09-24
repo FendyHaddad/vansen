@@ -120,6 +120,12 @@
   margin-top: auto;
 }
 
+.app-store-note {
+  margin: 0;
+  align-self: center;
+  font-weight: 500;
+}
+
 .warn-text {
   color: var(--warn);
 }

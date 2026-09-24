@@ -278,6 +278,38 @@ begin
   assert v_err = 'subscription_required', format('an expired plan: got "%s"', v_err);
 end $$;
 
+-- 11b. The gateway's 3-day grace (0037): an active row whose period ended
+--      under 3 days ago still reserves (a late renewal webhook); from 3 days
+--      on it does not (a missed App Store EXPIRED). A canceled row gets no grace.
+do $$
+declare v_user uuid := 'aaaa3333-0000-4000-8000-000000000006'; v_err text := '';
+begin
+  perform pg_temp.seed_user(v_user, 'studio');
+  update public.subscriptions set status = 'active', current_period_end = now() - interval '2 days'
+   where user_id = v_user;
+  assert (public.fn_reserve_persona(v_user, gen_random_uuid(), 'h11d', 'Late renewal')->>'personaId') is not null,
+    'an active plan inside the 3-day grace can reserve';
+
+  update public.subscriptions set current_period_end = now() - interval '3 days 1 second' where user_id = v_user;
+  begin
+    perform public.fn_reserve_persona(v_user, gen_random_uuid(), 'h11e', 'Stale active');
+  exception when others then v_err := sqlerrm;
+  end;
+  assert v_err = 'subscription_required', format('an active plan past the grace: got "%s"', v_err);
+
+  v_err := '';
+  update public.subscriptions set current_period_end = now() - interval '3 days' where user_id = v_user;
+  begin
+    perform public.fn_reserve_persona(v_user, gen_random_uuid(), 'h11f', 'At the boundary');
+  exception when others then v_err := sqlerrm;
+  end;
+  assert v_err = 'subscription_required', format('exactly 3 days is outside the grace: got "%s"', v_err);
+
+  update public.subscriptions set current_period_end = null where user_id = v_user;
+  assert (public.fn_reserve_persona(v_user, gen_random_uuid(), 'h11g', 'No period end')->>'personaId') is not null,
+    'an active plan with no period end can reserve';
+end $$;
+
 -- 12. The persona kill switch ships off, until the live smoke passes.
 do $$
 begin

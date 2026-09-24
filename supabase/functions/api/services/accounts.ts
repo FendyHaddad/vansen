@@ -1,9 +1,11 @@
 // Per-user account reads the routes gate on: suspension, a model's kill
-// switch and plan floor, credit balances, the Stripe customer and the
-// active plan. createAccounts(admin, stripe) returns them; none cache.
+// switch and plan floor, credit balances, the Stripe customer, the active
+// plan and the rail that wrote the subscription. createAccounts(admin,
+// stripe) returns them; none cache.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import type Stripe from "npm:stripe@17";
 import { isEntitled } from "./entitlement.ts";
+import { type SubscriptionSource, subscriptionSourceOf } from "./subscription-source.ts";
 
 const SUSPEND_STRIKES = 2;
 
@@ -74,11 +76,26 @@ export function createAccounts(admin: SupabaseClient, stripe: Stripe) {
     return data.plan as "studio" | "pro" | "owner";
   }
 
+  /** Which rail wrote the subscription row; null when there is none. A failed
+   * read throws, so a caller in a try block refuses rather than guesses. */
+  async function subscriptionSource(
+    userId: string,
+  ): Promise<SubscriptionSource | null> {
+    const { data, error } = await admin
+      .from("subscriptions")
+      .select("stripe_subscription_id, iap_original_transaction_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw new Error(`subscription_read_failed ${error.message}`);
+    return await subscriptionSourceOf(admin, userId, data);
+  }
+
   return {
     isSuspended,
     modelGate,
     creditsOf,
     stripeCustomerFor,
     activePlan,
+    subscriptionSource,
   };
 }

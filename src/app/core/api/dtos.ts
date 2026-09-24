@@ -50,10 +50,15 @@ export interface CreditsDto {
   pack: number;
 }
 
+/** The rail that wrote the subscription row; decides who manages the plan. */
+export type SubscriptionSource = 'stripe' | 'app_store';
+
 export interface ProfileResponse {
   profile: ProfileDto;
   credits: CreditsDto;
   subscription: SubscriptionDto | null;
+  /** null when there is no subscription row. 'app_store' → managed in the App Store. */
+  subscriptionSource: SubscriptionSource | null;
 }
 
 export interface LedgerEntryDto {

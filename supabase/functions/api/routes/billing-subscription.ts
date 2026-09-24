@@ -2,16 +2,44 @@
 // GET /billing/lane, GET /billing/overview, POST /billing/cancel,
 // POST /billing/resume and POST /billing/portal. Credits always land via
 // the webhook's invoice.paid; these routes only mirror plan and status.
+// A subscription the App Store wrote is managed there: the Stripe routes
+// answer 409 managed_in_app_store and overview makes no Stripe call.
+import type { Context } from "jsr:@hono/hono";
 import { laneFor } from "../_shared/billing-lanes.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { fail } from "../lib/http.ts";
+
+const EMPTY_OVERVIEW = {
+  cancelAtPeriodEnd: false,
+  upcoming: null,
+  paymentMethod: null,
+};
 
 export function registerBillingSubscriptionRoutes(
   app: App,
   ctx: ApiContext,
 ): void {
-  const { admin, stripe, stripeCustomerFor, appOrigin, logError, PLAN_PRICE_IDS } =
-    ctx;
+  const {
+    admin,
+    stripe,
+    stripeCustomerFor,
+    subscriptionSource,
+    appOrigin,
+    logError,
+    PLAN_PRICE_IDS,
+  } = ctx;
+
+  /** Refuses before any Stripe call when the App Store wrote the row. */
+  async function managedInAppStore(c: Context): Promise<Response | null> {
+    const source = await subscriptionSource(c.get("userId"));
+    if (source !== "app_store") return null;
+    return fail(
+      c,
+      409,
+      "managed_in_app_store",
+      "Your plan is billed by the App Store. Manage it there.",
+    );
+  }
 
   /**
    * Studio <-> Pro. Swaps the price on the EXISTING subscription rather than
@@ -50,6 +78,8 @@ export function registerBillingSubscriptionRoutes(
     }
 
     try {
+      const refused = await managedInAppStore(c);
+      if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
         customer,
@@ -201,6 +231,11 @@ export function registerBillingSubscriptionRoutes(
   app.get("/billing/overview", async (c) => {
     const userId = c.get("userId");
     try {
+      // An App Store subscriber has nothing in Stripe to show, and opening
+      // Billing must not create a Stripe customer for them.
+      if (await subscriptionSource(userId) === "app_store") {
+        return c.json(EMPTY_OVERVIEW);
+      }
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
         customer,
@@ -213,13 +248,7 @@ export function registerBillingSubscriptionRoutes(
           s.status === "active" || s.status === "trialing" ||
           s.status === "past_due",
       );
-      if (!sub) {
-        return c.json({
-          cancelAtPeriodEnd: false,
-          upcoming: null,
-          paymentMethod: null,
-        });
-      }
+      if (!sub) return c.json(EMPTY_OVERVIEW);
 
       let upcoming: { amountUsd: number; date: string | null } | null = null;
       if (!sub.cancel_at_period_end) {
@@ -261,6 +290,8 @@ export function registerBillingSubscriptionRoutes(
       ? body.reason.slice(0, 120)
       : "";
     try {
+      const refused = await managedInAppStore(c);
+      if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
         customer,
@@ -318,6 +349,8 @@ export function registerBillingSubscriptionRoutes(
   app.post("/billing/resume", async (c) => {
     const userId = c.get("userId");
     try {
+      const refused = await managedInAppStore(c);
+      if (refused) return refused;
       const customer = await stripeCustomerFor(userId, c.get("email"));
       const list = await stripe.subscriptions.list({
         customer,
@@ -360,6 +393,8 @@ export function registerBillingSubscriptionRoutes(
   app.post("/billing/portal", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     try {
+      const refused = await managedInAppStore(c);
+      if (refused) return refused;
       const customer = await stripeCustomerFor(c.get("userId"), c.get("email"));
       const returnUrl = body.platform === "mobile"
         ? "vansen://billing-return?status=portal"

@@ -5,6 +5,10 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { LedgerService, LedgerEntry } from '../../../core/ledger/ledger-service';
 import { ProfileStore } from '../../../core/profile/profile-store';
 import { BillingService } from '../../../core/billing/billing-service';
+import {
+  APP_STORE_SUBSCRIPTIONS_URL,
+  billingErrorText,
+} from '../../../core/billing/billing-error-text';
 import { ApiError } from '../../../core/api/api-service';
 import { BillingOverviewDto } from '../../../core/api/dtos';
 import { SubscriptionStatus } from '../../../core/enums';
@@ -66,6 +70,9 @@ export class BillingTab {
   readonly profileLoaded = this.profileStore.loaded;
   readonly subscription = this.profileStore.subscription;
   readonly daysUntilPurge = this.profileStore.daysUntilPurge;
+  /** Apple bills this plan: link there instead of the Stripe controls. */
+  readonly managedInAppStore = this.profileStore.managedInAppStore;
+  readonly appStoreUrl = APP_STORE_SUBSCRIPTIONS_URL;
 
   readonly packs = CREDIT_PACKS;
   readonly busy = signal(false);
@@ -227,9 +234,8 @@ export class BillingTab {
         case 'same_plan':
           return 'You are already on this plan.';
       }
-      return e.message;
     }
-    return 'Could not change your plan — check your connection and try again.';
+    return billingErrorText(e, 'Could not change your plan — check your connection and try again.');
   }
 
   // ── Cancel flow ────────────────────────────────────────────────────────────
@@ -256,7 +262,7 @@ export class BillingTab {
       this.cancelDone.set(true);
     } catch (e) {
       this.cancelError.set(
-        e instanceof ApiError ? e.message : 'Could not cancel — check your connection and try again.',
+        billingErrorText(e, 'Could not cancel — check your connection and try again.'),
       );
     } finally {
       this.cancelBusy.set(false);
@@ -269,7 +275,7 @@ export class BillingTab {
     try {
       await op();
     } catch (e) {
-      this.error.set(e instanceof ApiError ? e.message : 'Billing action failed');
+      this.error.set(billingErrorText(e, 'Billing action failed'));
     } finally {
       this.busy.set(false);
     }

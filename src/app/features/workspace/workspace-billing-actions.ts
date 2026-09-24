@@ -5,6 +5,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ApiError } from '../../core/api/api-service';
 import { BillingService } from '../../core/billing/billing-service';
+import { billingErrorText } from '../../core/billing/billing-error-text';
 import { CheckoutIntent } from '../../core/billing/checkout-intent';
 import { LedgerService } from '../../core/ledger/ledger-service';
 import { ProfileStore } from '../../core/profile/profile-store';
@@ -158,8 +159,7 @@ export class WorkspaceBillingActions {
         case 'same_plan':
           return 'You are already on this plan.';
       }
-      return e.message;
     }
-    return 'Could not change your plan — check your connection and try again.';
+    return billingErrorText(e, 'Could not change your plan — check your connection and try again.');
   }
 }

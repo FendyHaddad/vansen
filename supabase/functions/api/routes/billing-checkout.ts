@@ -1,9 +1,16 @@
 // Stripe checkout starts: POST /billing/subscribe and POST /billing/pack.
 // Both refuse on iOS storefronts where Apple requires an in-app purchase
-// (requireWebLane). Stripe, not our mirror, decides "already subscribed".
+// (requireWebLane). Stripe, not our mirror, decides "already subscribed" —
+// except that an entitled App Store subscription is refused before Stripe is
+// touched, and any App Store history forfeits the Stripe launch offer.
 import type { Context } from "jsr:@hono/hono";
 import { CREDIT_PACKS, packCredits } from "../_shared/model-families.ts";
 import { laneFor } from "../_shared/billing-lanes.ts";
+import { isEntitled } from "../services/entitlement.ts";
+import {
+  appStoreEverRecorded,
+  subscriptionSourceOf,
+} from "../services/subscription-source.ts";
 import type { ApiContext, App } from "../lib/context.ts";
 import { clientOf, fail } from "../lib/http.ts";
 
@@ -51,7 +58,9 @@ export function registerBillingCheckoutRoutes(app: App, ctx: ApiContext): void {
     }
     const { data: ownSub } = await admin
       .from("subscriptions")
-      .select("plan, status, stripe_subscription_id")
+      .select(
+        "plan, status, current_period_end, stripe_subscription_id, iap_original_transaction_id",
+      )
       .eq("user_id", userId)
       .maybeSingle();
     if (ownSub?.plan === "owner" && ownSub.status === "active") {
@@ -63,6 +72,17 @@ export function registerBillingCheckoutRoutes(app: App, ctx: ApiContext): void {
       );
     }
     try {
+      // One plan per person across both rails: a second subscription through
+      // Stripe would bill twice and fight Apple over the single row.
+      const source = await subscriptionSourceOf(admin, userId, ownSub);
+      if (source === "app_store" && isEntitled(ownSub, Date.now())) {
+        return fail(
+          c,
+          409,
+          "subscribed_in_app_store",
+          "Your plan is billed by the App Store. Manage it there.",
+        );
+      }
       const customer = await stripeCustomerFor(userId, c.get("email"));
       // Ask Stripe, not our mirror. The `subscriptions` table is written only by the
       // webhook, so it lags (or, if the webhook failed, never arrives) and it holds one
@@ -91,7 +111,10 @@ export function registerBillingCheckoutRoutes(app: App, ctx: ApiContext): void {
       }
       // Launch promo: first-time subscribers only. Keyed off Stripe's full history
       // rather than the mirror, so a missing row cannot hand out the coupon twice.
-      const firstTime = history.data.length === 0;
+      // Offers do not stack across rails: an App Store subscription (and so
+      // Apple's own intro offer) ever recorded forfeits it.
+      const firstTime = history.data.length === 0 &&
+        !appStoreEverRecorded(ownSub);
       const returns = checkoutReturnUrls(c, body);
       const session = await stripe.checkout.sessions.create({
         customer,
