@@ -32,6 +32,7 @@ import { ProfileStore } from '../../core/profile/profile-store';
 import { PreferencesService } from '../../core/preferences/preferences-service';
 import { JobPoller } from '../../core/jobs/job-poller';
 import { ModelAvailability } from '../../core/models/model-availability';
+import { EditToolCatalog } from '../../core/catalog/edit-tool-catalog';
 import type { RetryableDto } from '../../core/api/dtos';
 import { referenceRoutingFor } from './reference-routing';
 import { EditSession } from '../../core/editing/edit-session';
@@ -116,6 +117,8 @@ export class WorkspacePage {
   private readonly prefsService = inject(PreferencesService);
   private readonly poller = inject(JobPoller);
   private readonly availability = inject(ModelAvailability);
+  /** AI edit tools' served plan floors — the right panel's lock state waits on it too. */
+  private readonly editToolCatalog = inject(EditToolCatalog);
   readonly tour = inject(TourService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -246,7 +249,12 @@ export class WorkspacePage {
 
   private async refresh(): Promise<void> {
     try {
-      await Promise.all([this.profileStore.load(), this.store.load(), this.availability.load()]);
+      await Promise.all([
+        this.profileStore.load(),
+        this.store.load(),
+        this.availability.load(),
+        this.editToolCatalog.load(),
+      ]);
     } catch (e) {
       this.notices.showError(e, 'Could not load your workspace');
     }
