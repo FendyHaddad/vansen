@@ -822,3 +822,17 @@ grace, Apple events spare Stripe-paid rows, replay before moderation), sandbox I
 sandbox (`APPLE_SANDBOX_GRANTS=off` brake), web Sign in with Apple (hidden until the provider is enabled),
 AI edit tool locks from the served plan. Mobile `dd0e6da` (pushed to `github.com/FendyHaddad/vansen-mobile`,
 no store build). Not yet proven: a browser generate end to end (Gate B).
+
+### 2026-09-24 — left panel redesign + catalog 2026-09-24.1 (`d547955`)
+
+`./deploy.sh --yes` exited 0 (gates included): `DEPLOYED d547955 · catalog 2026-09-24.1 · api v82`.
+
+| Check | Result |
+|---|---|
+| `GET <api>/manifest` | `gitRevision` d547955, `schemaVersion` 0038, `workerVersion` v35, `catalogVersion` 2026-09-24.1 |
+| `GET <api>/catalog` | Nano Banana `standard` served with label "Standard" |
+
+Shipped: workspace left panel with provider-logo model picker, notched step sliders for version and
+every format axis (unavailable combos dimmed, animated thumb), trend carousel under the prompt, style
+and persona in their own section. Catalog change is a label only (Nano Banana "Latest" → "Standard",
+still the default); mobile's bundled catalog regenerated (`6bc0d0b`, no store build).
