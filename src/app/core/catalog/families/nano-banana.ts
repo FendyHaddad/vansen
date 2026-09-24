@@ -1,5 +1,5 @@
 /**
- * Google Nano Banana (Gemini image): Fast, Latest and Pro versions, priced per
+ * Google Nano Banana (Gemini image): Fast, Standard and Pro versions, priced per
  * output plus per-token input (prompt and reference images) and, on Pro, a
  * thinking-token allowance. Entry points: NANO_BANANA, NANO_PRO_THINKING_TOKENS.
  */
@@ -39,7 +39,7 @@ export const NANO_BANANA: ModelFamily = {
   provider: 'Google',
   logo: '/logos/google.svg',
   kind: 'image',
-  blurb: 'Google’s all-rounder — Fast, Latest, and Pro tiers.',
+  blurb: 'Google’s all-rounder — Fast, Standard, and Pro tiers.',
   capabilities: {
     versions: [
       {
@@ -49,8 +49,8 @@ export const NANO_BANANA: ModelFamily = {
       },
       {
         value: 'standard',
-        label: 'Latest',
-        tag: 'Latest',
+        label: 'Standard',
+        isDefault: true,
         tooltip: 'Gemini 3.1 Flash Image — current generation, up to 4K.',
       },
       {

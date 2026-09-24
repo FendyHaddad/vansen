@@ -10,4 +10,4 @@
  * sync-shared`, regenerate mobile's bundled copy with `npm run catalog:mobile
  * <path>`, then paste the new fingerprint here.
  */
-export const recordedCatalogFingerprint = '24d409ee';
+export const recordedCatalogFingerprint = '-17e42959';

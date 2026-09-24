@@ -9,7 +9,6 @@ import {
 } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
-  lucideChevronDown,
   lucideImage,
   lucideImagePlus,
   lucideLock,
@@ -18,7 +17,6 @@ import {
   lucideX,
 } from '@ng-icons/lucide';
 import { HlmButton } from '@spartan-ng/helm/button';
-import { HlmDropdownMenuImports } from '@spartan-ng/helm/dropdown-menu';
 import {
   AUDIO_OPTIONS,
   FamilyOption,
@@ -43,14 +41,14 @@ import { PreferencesService } from '../../../core/preferences/preferences-servic
 import { ApiService } from '../../../core/api/api-service';
 import { UploadResponse } from '../../../core/api/dtos';
 import { ModelAvailability } from '../../../core/models/model-availability';
-import { OptionGroup } from '../option-group/option-group';
+import { StepSlider } from '../step-slider/step-slider';
 import { Hint } from '../../../shared/hint/hint';
 import { CachedSrc } from '../../../core/media/cached-src';
 import { styleById } from '../../../core/catalog/style-presets';
 import { StylePicker } from '../style-picker/style-picker';
 import { PersonaStore } from '../../../core/personas/persona-store';
 import { PersonaPicker } from '../persona-picker/persona-picker';
-import { TrendPreset } from '../../../core/catalog/trend-presets';
+import { TrendPreset, trendById } from '../../../core/catalog/trend-presets';
 import { TrendGallery } from '../trend-gallery/trend-gallery';
 import { ModePicker } from './mode-picker/mode-picker';
 import { ReferenceDrop, RefSlot } from './reference-drop/reference-drop';
@@ -105,7 +103,7 @@ const AXIS_TOOLTIPS = {
   imports: [
     NgIcon,
     HlmButton,
-    OptionGroup,
+    StepSlider,
     Hint,
     CachedSrc,
     StylePicker,
@@ -113,7 +111,6 @@ const AXIS_TOOLTIPS = {
     TrendGallery,
     ModePicker,
     ReferenceDrop,
-    ...HlmDropdownMenuImports,
   ],
   providers: [
     provideIcons({
@@ -123,7 +120,6 @@ const AXIS_TOOLTIPS = {
       lucideWandSparkles,
       lucideImagePlus,
       lucideX,
-      lucideChevronDown,
     }),
   ],
 })
@@ -167,6 +163,10 @@ export class LeftPanel {
   /** Set when the prompt came from a trend prefill; survives edits, dies with the prompt. */
   readonly appliedTrend = signal<string | null>(null);
   readonly reference = signal<ReferenceSelection | null>(null);
+  readonly appliedTrendPreset = computed(() => {
+    const id = this.appliedTrend();
+    return id ? trendById(id) : null;
+  });
 
   readonly axisTooltips = AXIS_TOOLTIPS;
 
@@ -213,6 +213,11 @@ export class LeftPanel {
     })),
   );
 
+  /** The slider runs tall to wide, so the thumb moves the way the frame stretches. */
+  readonly aspectStops = computed<FamilyOption[]>(() =>
+    [...this.aspectOptions()].sort((a, b) => ratioOf(a.value) - ratioOf(b.value)),
+  );
+
   // Both of these read the catalog's own helpers rather than naming versions
   // here. The hardcoded form withheld 2K and 4K from GPT Image 2.5 the day it
   // shipped, and the server uses the same two functions, so the chips on offer
@@ -228,6 +233,15 @@ export class LeftPanel {
     if (!f.capabilities.qualities) return null;
     return qualitiesFor(f, this.settings().version);
   });
+
+  /** Every tier stays on the slider; the ones this version or ratio cannot run are dimmed. */
+  readonly resolutionDisabled = computed(() =>
+    unavailable(this.family().capabilities.resolutions, this.resolutionOptions()),
+  );
+
+  readonly qualityDisabled = computed(() =>
+    unavailable(this.family().capabilities.qualities, this.qualityOptions()),
+  );
 
   readonly durationOptions = computed<FamilyOption[] | null>(() => {
     const durations = this.family().capabilities.durations;
@@ -397,6 +411,12 @@ export class LeftPanel {
     }
   }
 
+  /** The trend chip's ×: the trend's prompt goes with it. */
+  clearTrend(): void {
+    this.appliedTrend.set(null);
+    this.prompt.set('');
+  }
+
   setPersona(id: string | null): void {
     this.persona.set(id);
     // A persona supplies its own five references; a lingering composer
@@ -497,4 +517,14 @@ export class LeftPanel {
 
 function firstFamilyOf(kind: ModelKind): ModelFamily {
   return MODEL_FAMILIES.find((f) => f.kind === kind)!;
+}
+
+function ratioOf(value: string): number {
+  const [w, h] = value.split(':').map(Number);
+  return w && h ? w / h : 1;
+}
+
+function unavailable(all: FamilyOption[] | undefined, allowed: FamilyOption[] | null): string[] {
+  if (!all || !allowed) return [];
+  return all.filter((o) => !allowed.some((a) => a.value === o.value)).map((o) => o.value);
 }

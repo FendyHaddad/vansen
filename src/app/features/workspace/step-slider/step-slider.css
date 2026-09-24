@@ -1,0 +1,330 @@
+/* Notched slider, modelled on the iOS text-size control: a thin track with a
+ * tick per stop and a white thumb that snaps between them. The rail is inset by
+ * the thumb radius so the first and last ticks sit under the thumb's centre. */
+:host {
+  /* Native thumb = invisible hit area; the dot is drawn separately so it can animate. */
+  --ss-thumb: 20px;
+  --ss-inset: calc(var(--ss-thumb) / 2);
+  --ss-dot: 13px;
+  --ss-accent: #0a84ff;
+  display: block;
+}
+
+.ss {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ss-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+}
+
+/* Matches the left panel's .field-label. */
+.ss-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.ss-info {
+  font-size: 0.75rem;
+}
+
+.ss-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--foreground);
+}
+
+.ss-ratio-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.ss-ratio {
+  display: inline-block;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.8;
+  transition:
+    width 0.18s ease,
+    height 0.18s ease;
+}
+
+.ss-control {
+  position: relative;
+  height: var(--ss-thumb);
+}
+
+.ss-rail {
+  position: absolute;
+  left: var(--ss-inset);
+  right: var(--ss-inset);
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: color-mix(in oklch, var(--muted-foreground) 32%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Zero-width anchors keep every tick centred exactly on its stop. */
+.ss-tick {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+.ss-tick::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -4px;
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: color-mix(in oklch, var(--muted-foreground) 55%, transparent);
+}
+
+.ss-tick--off::before {
+  background: color-mix(in oklch, var(--muted-foreground) 18%, transparent);
+}
+
+.ss-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ss-input:focus {
+  outline: none;
+}
+
+.ss-input::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.ss-input::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+
+.ss-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--ss-thumb);
+  height: var(--ss-thumb);
+  border: none;
+  background: transparent;
+}
+
+.ss-input::-moz-range-thumb {
+  width: var(--ss-thumb);
+  height: var(--ss-thumb);
+  border: none;
+  background: transparent;
+}
+
+.ss-lane {
+  position: absolute;
+  inset: 0 var(--ss-inset);
+  pointer-events: none;
+}
+
+.ss-thumb {
+  position: absolute;
+  top: 50%;
+  width: var(--ss-dot);
+  height: var(--ss-dot);
+  border-radius: 50%;
+  background: var(--ss-accent);
+  box-shadow: 0 1px 4px color-mix(in oklch, var(--ss-accent) 55%, transparent);
+  transform: translate(-50%, -50%);
+  transition: left 0.32s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.ss-input:focus-visible ~ .ss-lane .ss-thumb {
+  box-shadow:
+    0 1px 4px color-mix(in oklch, var(--ss-accent) 55%, transparent),
+    0 0 0 3px color-mix(in oklch, var(--ss-accent) 35%, transparent);
+}
+
+/* Two identical animations, alternated per move, so every move replays. */
+.ss-thumb--a {
+  animation: ss-squish-a 0.32s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.ss-thumb--b {
+  animation: ss-squish-b 0.32s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@keyframes ss-squish-a {
+  45% {
+    transform: translate(-50%, -50%) scale(0.45);
+  }
+}
+
+@keyframes ss-squish-b {
+  45% {
+    transform: translate(-50%, -50%) scale(0.45);
+  }
+}
+
+/* A comet tail: it stretches out behind the thumb as it leaves, then
+ * retracts into the thumb's new spot. */
+.ss-trail {
+  --ss-from: left center;
+  --ss-to: right center;
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: linear-gradient(to right, transparent, var(--ss-accent));
+  opacity: 0;
+}
+
+.ss-trail--back {
+  --ss-from: right center;
+  --ss-to: left center;
+  background: linear-gradient(to left, transparent, var(--ss-accent));
+}
+
+.ss-trail--a {
+  animation: ss-trail-a 0.5s ease-out forwards;
+}
+
+.ss-trail--b {
+  animation: ss-trail-b 0.5s ease-out forwards;
+}
+
+@keyframes ss-trail-a {
+  0% {
+    opacity: 0.8;
+    transform: scaleX(0);
+    transform-origin: var(--ss-from);
+  }
+  45% {
+    opacity: 0.8;
+    transform: scaleX(1);
+    transform-origin: var(--ss-from);
+  }
+  46% {
+    transform: scaleX(1);
+    transform-origin: var(--ss-to);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(0);
+    transform-origin: var(--ss-to);
+  }
+}
+
+@keyframes ss-trail-b {
+  0% {
+    opacity: 0.8;
+    transform: scaleX(0);
+    transform-origin: var(--ss-from);
+  }
+  45% {
+    opacity: 0.8;
+    transform: scaleX(1);
+    transform-origin: var(--ss-from);
+  }
+  46% {
+    transform: scaleX(1);
+    transform-origin: var(--ss-to);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(0);
+    transform-origin: var(--ss-to);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-thumb {
+    transition: none;
+    animation: none;
+  }
+
+  .ss-trail {
+    display: none;
+  }
+}
+
+/* Same inset as the rail; each stop is a zero-width anchor with its label
+ * centred over it, the two end labels pinned inside the control's edges. */
+.ss-stops {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 var(--ss-inset);
+}
+
+.ss-stops--single {
+  justify-content: flex-start;
+}
+
+.ss-stop {
+  display: flex;
+  justify-content: center;
+  width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.ss-stop:first-child {
+  justify-content: flex-start;
+  margin-left: calc(-1 * var(--ss-inset));
+}
+
+.ss-stop:last-child {
+  justify-content: flex-end;
+  margin-right: calc(-1 * var(--ss-inset));
+}
+
+.ss-stops--single .ss-stop {
+  justify-content: flex-start;
+}
+
+.ss-stop:hover:not(:disabled) {
+  color: var(--foreground);
+}
+
+.ss-stop--on {
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.ss-stop--off {
+  color: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+  cursor: not-allowed;
+}

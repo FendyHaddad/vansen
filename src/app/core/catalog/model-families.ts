@@ -13,7 +13,7 @@
  * with 409 catalog_stale. `catalog-version.spec.ts` fails if the catalog
  * content hash changes without a bump.
  */
-export const CATALOG_VERSION = '2026-09-23.4';
+export const CATALOG_VERSION = '2026-09-24.1';
 
 export type {
   AudioCapability,

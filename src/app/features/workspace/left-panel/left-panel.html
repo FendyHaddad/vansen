@@ -24,8 +24,17 @@
 
   <section class="rail-section">
 
-    <div class="field mb-5">
+    <div class="field">
       <span class="field-label">Prompt</span>
+      @if (appliedTrendPreset(); as trend) {
+        <span class="trend-chip">
+          <img [src]="trend.thumb" alt="" class="trend-chip-thumb"/>
+          {{ trend.name }}
+          <button type="button" class="trend-chip-clear" aria-label="Clear trend" (click)="clearTrend()">
+            <ng-icon name="lucideX" size="12"/>
+          </button>
+        </span>
+      }
       <textarea
         rows="3"
         class="prompt-input"
@@ -40,6 +49,10 @@
         </span>
       }
     </div>
+
+    @if (mode() === 'image') {
+      <app-trend-gallery [selected]="appliedTrend()" (picked)="applyTrend($event)"/>
+    }
 
     @if (mode() === 'image' && family().capabilities.imageInput && !personaActive()) {
       <div class="field">
@@ -121,43 +134,36 @@
   <section class="rail-section rail-divided rail-settings">
 
     @if (!personaActive()) {
-      <div class="og">
-        <span class="og-label">
-          Model
-          <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
-            <span class="og-info">ⓘ</span>
-          </app-hint>
+      <div class="field model-field">
+        <span class="field-label">
+          <span class="field-label-main">
+            Model
+            <app-hint text="The AI model that runs your prompt. Each has its own look, strengths, and price.">
+              <span class="og-info">ⓘ</span>
+            </app-hint>
+          </span>
+          <span class="model-name">{{ family().name }}</span>
         </span>
-        <button type="button" class="og-trigger" [hlmDropdownMenuTrigger]="modelMenu" align="end">
-          <img [src]="family().logo" [alt]="family().provider" class="family-logo"/>
-          <span class="og-trigger-label">{{ family().name }}</span>
-          <ng-icon name="lucideChevronDown" size="13" class="og-chevron"/>
-        </button>
-        <ng-template #modelMenu>
-          <div hlmDropdownMenu class="model-menu">
-            @for (f of families(); track f.id) {
-              <button
-                hlmDropdownMenuItem
-                class="model-item"
-                [class.model-item-active]="familyId() === f.id"
-                [disabled]="disabledFamily(f.id)"
-                (triggered)="!disabledFamily(f.id) && selectFamily(f.id)"
-              >
-                <span class="model-item-top">
-                  <img [src]="f.logo" [alt]="f.provider" class="family-logo"/>
-                  <span class="model-item-name">{{ f.name }}</span>
-                  @if (disabledFamily(f.id)) {
-                    <span class="model-item-soon">{{ mode() === 'video' ? 'Coming soon' : 'Unavailable' }}</span>
-                  }
-                </span>
-                <span class="model-item-blurb">{{ f.blurb }}</span>
-              </button>
-            }
-          </div>
-        </ng-template>
+        <div class="provider-row" role="radiogroup" aria-label="Model">
+          @for (f of families(); track f.id) {
+            <button
+              type="button"
+              role="radio"
+              class="provider-btn"
+              [class.provider-btn--on]="familyId() === f.id"
+              [attr.aria-checked]="familyId() === f.id"
+              [attr.aria-label]="f.name + ' · ' + f.provider"
+              [attr.title]="disabledFamily(f.id) ? f.name + ' · ' + (mode() === 'video' ? 'Coming soon' : 'Unavailable') : f.name + ' · ' + f.provider"
+              [disabled]="disabledFamily(f.id)"
+              (click)="selectFamily(f.id)"
+            >
+              <img [src]="f.logo" alt="" class="provider-logo"/>
+            </button>
+          }
+        </div>
       </div>
 
-      <app-option-group
+      <app-step-slider
         label="Version"
         [axisTooltip]="axisTooltips.version"
         [options]="versionOptions()"
@@ -185,46 +191,38 @@
       />
     }
 
-    @if (mode() === 'image') {
-      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
-      <app-persona-picker
-        [selected]="persona()"
-        (changed)="setPersona($event)"
-        (manageRequested)="managePersonasRequested.emit()"
-      />
-      <app-trend-gallery (picked)="applyTrend($event)"/>
-    }
-
     @if (!hideAspect()) {
-      <app-option-group
+      <app-step-slider
         label="Aspect ratio"
         [axisTooltip]="axisTooltips.aspect"
-        [options]="aspectOptions()"
+        [options]="aspectStops()"
         [selected]="settings().aspectRatio"
         (changed)="setAxis('aspectRatio', $event)"
       />
     }
 
     @if (!personaActive()) {
-      <app-option-group
+      <app-step-slider
         label="Resolution"
         [axisTooltip]="axisTooltips.resolution"
-        [options]="resolutionOptions()"
+        [options]="family().capabilities.resolutions ?? null"
+        [disabled]="resolutionDisabled()"
         [selected]="settings().resolution"
         (changed)="setAxis('resolution', $event)"
       />
 
-      <app-option-group
+      <app-step-slider
         label="Quality"
         [axisTooltip]="axisTooltips.quality"
-        [options]="qualityOptions()"
+        [options]="family().capabilities.qualities ?? null"
+        [disabled]="qualityDisabled()"
         [selected]="settings().quality"
         (changed)="setAxis('quality', $event)"
       />
     }
 
     @if (mode() === 'video') {
-      <app-option-group
+      <app-step-slider
         label="Duration"
         [axisTooltip]="axisTooltips.duration"
         [options]="durationOptions()"
@@ -235,7 +233,7 @@
 
     @if (mode() === 'image') {
       <div class="batch-group">
-        <app-option-group
+        <app-step-slider
           label="Batch"
           [axisTooltip]="axisTooltips.batch"
           [options]="batchOptions"
@@ -247,7 +245,7 @@
 
     @if (audioSelectable()) {
       <div class="audio-group">
-        <app-option-group
+        <app-step-slider
           label="Audio"
           axisTooltip="Soundtrack changes the price per second."
           [options]="audioOptions"
@@ -264,6 +262,17 @@
       </p>
     }
   </section>
+
+  @if (mode() === 'image') {
+    <section class="rail-section rail-divided rail-look">
+      <app-style-picker [selected]="style()" (changed)="setStyle($event)"/>
+      <app-persona-picker
+        [selected]="persona()"
+        (changed)="setPersona($event)"
+        (manageRequested)="managePersonasRequested.emit()"
+      />
+    </section>
+  }
 
   <div class="gen-btn">
     @if (insufficient()) {

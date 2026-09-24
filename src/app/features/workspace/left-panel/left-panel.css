@@ -21,6 +21,10 @@
 /* Settings render as compact rows — rows carry their own height, so the
  * section gap shrinks; the title keeps a little extra air below it. */
 .rail-settings {
+  gap: 20px;
+}
+
+.rail-look {
   gap: 4px;
 }
 
@@ -131,7 +135,7 @@
   letter-spacing: 0;
 }
 
-/* Model settings row — same tokens as option-group (encapsulation keeps
+/* Model settings row — same tokens as the settings rows (encapsulation keeps
  * those styles out of this template, so they are repeated here). */
 
 .og {
@@ -152,79 +156,74 @@
   color: var(--muted-foreground);
 }
 
-.og-trigger {
+.field-label-main {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  border: none;
-  border-radius: calc(var(--radius) - 4px);
-  background: transparent;
-  color: var(--foreground);
-  padding: 5px 4px 5px 8px;
+  gap: 6px;
+}
+
+.model-name {
   font-size: 0.8125rem;
   font-weight: 550;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
+  color: var(--foreground);
 }
 
-.og-trigger:hover {
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
-}
-
-.og-trigger-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.og-chevron {
-  color: var(--muted-foreground);
-  flex-shrink: 0;
-}
-
-.family-logo {
-  height: 14px;
-  width: auto;
-  opacity: 0.9;
-  flex-shrink: 0;
-}
-
-.model-menu {
-  width: 296px;
-  padding: 4px;
-}
-
-.model-item {
+/* One logo per family, spread across the rail; the pick is a soft tile,
+ * the rest recede until hovered. */
+.provider-row {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  padding: 9px 10px;
-  border-radius: calc(var(--radius) - 4px);
-  text-align: left;
+  justify-content: space-between;
 }
 
-.model-item-active {
-  background: color-mix(in oklch, var(--primary) 10%, transparent);
-}
-
-.model-item-top {
-  display: flex;
+.provider-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
+  justify-content: center;
+  width: 46px;
+  height: 40px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
 }
 
-.model-item-name {
-  font-size: 0.8125rem;
-  font-weight: 600;
+.provider-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 0.45;
+  filter: grayscale(1);
+  transition:
+    opacity 0.15s ease,
+    filter 0.15s ease;
 }
 
-.model-item-blurb {
-  font-size: 0.6875rem;
-  color: var(--muted-foreground);
-  line-height: 1.35;
+.provider-btn:hover:not(:disabled):not(.provider-btn--on) .provider-logo {
+  opacity: 0.8;
+  filter: none;
+}
+
+.provider-btn--on {
+  background: color-mix(in oklch, var(--muted) 85%, transparent);
+}
+
+.provider-btn--on .provider-logo {
+  opacity: 1;
+  filter: none;
+}
+
+.provider-btn:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.provider-btn:disabled {
+  cursor: not-allowed;
+}
+
+.provider-btn:disabled .provider-logo {
+  opacity: 0.2;
 }
 
 .audio-note {
@@ -300,6 +299,44 @@
   cursor: pointer;
 }
 
+.trend-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 2px 4px 2px 2px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 85%, transparent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.trend-chip-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.trend-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.trend-chip-clear:hover {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+
 .prompt-input {
   width: 100%;
   resize: vertical;
@@ -345,15 +382,6 @@
   font-size: 0.75rem;
   color: var(--loss);
   margin-top: 6px;
-}
-
-.model-item-soon {
-  margin-left: auto;
-  font-size: 0.625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted-foreground);
 }
 
 .persona-pipeline-chip {

@@ -1,0 +1,78 @@
+@if (options()?.length) {
+  <div class="ss">
+    <div class="ss-head">
+      <span class="ss-label">
+        {{ label() }}
+        @if (axisTooltip()) {
+          <app-hint [text]="axisTooltip()"><span class="ss-info">ⓘ</span></app-hint>
+        }
+      </span>
+      @if (selectedOption(); as sel) {
+        <span class="ss-meta">
+          @if (ratioBox(sel); as box) {
+            <span class="ss-ratio-wrap">
+              <!-- data-driven shape: per-ratio width/height cannot come from a stylesheet class -->
+              <span class="ss-ratio" [style.width.px]="box.w" [style.height.px]="box.h"></span>
+            </span>
+          }
+        </span>
+      }
+    </div>
+
+    @if (max() > 0) {
+      <div class="ss-control">
+        <div class="ss-rail" aria-hidden="true">
+          @for (option of options()!; track option.value) {
+            <span class="ss-tick" [class.ss-tick--off]="isDisabled(option)"></span>
+          }
+        </div>
+        <input
+          type="range"
+          class="ss-input"
+          min="0"
+          step="1"
+          [max]="max()"
+          [value]="index()"
+          [attr.aria-label]="label()"
+          [attr.aria-valuetext]="selectedOption()?.label"
+          (input)="onInput($event)"
+        />
+        <!-- data-driven positions: the thumb and trail sit at a computed percent of the track -->
+        <div class="ss-lane" aria-hidden="true">
+          @if (move(); as m) {
+            <span
+              class="ss-trail"
+              [class.ss-trail--a]="phase() === 'a'"
+              [class.ss-trail--b]="phase() === 'b'"
+              [class.ss-trail--back]="m.to < m.from"
+              [style.left.%]="trailStart()"
+              [style.width.%]="trailWidth()"
+            ></span>
+          }
+          <span
+            class="ss-thumb"
+            [class.ss-thumb--a]="phase() === 'a'"
+            [class.ss-thumb--b]="phase() === 'b'"
+            [style.left.%]="position(index())"
+          ></span>
+        </div>
+      </div>
+    }
+
+    <div class="ss-stops" [class.ss-stops--single]="max() === 0">
+      @for (option of options()!; track option.value; let i = $index) {
+        <button
+          type="button"
+          tabindex="-1"
+          class="ss-stop"
+          [class.ss-stop--on]="i === index()"
+          [class.ss-stop--off]="isDisabled(option)"
+          [disabled]="isDisabled(option)"
+          (click)="pick(i)"
+        >
+          <span class="ss-stop-text" [hlmTooltip]="option.tooltip">{{ option.label }}</span>
+        </button>
+      }
+    </div>
+  </div>
+}

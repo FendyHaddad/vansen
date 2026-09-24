@@ -1,118 +1,174 @@
-/* Settings row, identical tokens to option-group — component encapsulation
- * means those styles don't reach in here, so they are repeated. */
-.og {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
+:host {
+  display: block;
 }
 
-.og-label {
+.tc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Matches the left panel's .field-label. */
+.tc-label {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--muted-foreground);
 }
 
-.og-info {
+.tc-info {
   font-size: 0.75rem;
-  text-transform: none;
-  letter-spacing: 0;
 }
 
-.og-trigger {
+.tc-frame {
+  --tc-fade: 22px;
+  position: relative;
+  /* Bleed to the sidebar edges so tiles slide in from off-panel. */
+  margin: 0 -18px;
+}
+
+/* Fade whichever edge still has tiles behind it. */
+.tc-track {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  border: none;
-  border-radius: calc(var(--radius) - 4px);
-  background: transparent;
-  color: var(--foreground);
-  padding: 5px 4px 5px 8px;
-  font-size: 0.8125rem;
-  font-weight: 550;
-  cursor: pointer;
-  transition: background-color 0.12s ease;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 18px;
+  scrollbar-width: none;
+  /* Room above and below for the hover zoom, which overflow would clip. */
+  padding: 14px 18px;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--tc-fade),
+    #000 calc(100% - var(--tc-fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--tc-fade),
+    #000 calc(100% - var(--tc-fade)),
+    transparent
+  );
 }
 
-.og-trigger:hover {
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
+.tc-frame--start .tc-track {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--tc-fade)), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--tc-fade)), transparent);
 }
 
-.og-trigger-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tc-frame--end .tc-track {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--tc-fade));
+  mask-image: linear-gradient(to right, transparent, #000 var(--tc-fade));
 }
 
-.og-chevron {
-  color: var(--muted-foreground);
-  flex-shrink: 0;
+.tc-frame--start.tc-frame--end .tc-track {
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
-.trend-trigger-icon {
-  color: var(--muted-foreground);
+.tc-track::-webkit-scrollbar {
+  display: none;
 }
 
-.trend-menu {
-  width: 300px;
-  max-height: 420px;
-  overflow-y: auto;
-  padding: 10px;
-}
-
-.trend-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.trend-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid transparent;
-  border-radius: calc(var(--radius) - 2px);
-  background: none;
-  cursor: pointer;
-}
-
-.trend-tile img {
-  width: 100%;
+.tc-tile {
+  position: relative;
+  flex: 0 0 66px;
   aspect-ratio: 3 / 4;
-  border-radius: calc(var(--radius) - 4px);
-  object-fit: cover;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  overflow: hidden;
   background: var(--muted);
+  cursor: pointer;
+  scroll-snap-align: start;
+  transform-origin: center;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
-/* Same footprint as the thumbnail it replaces, so a missing asset does not
-   reflow the grid — it just reads as a plain tile. */
-.trend-fallback {
-  display: flex;
+.tc-tile:first-child {
+  transform-origin: left center;
+}
+
+.tc-tile:last-child {
+  transform-origin: right center;
+}
+
+.tc-tile img,
+.tc-fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tc-tile:hover,
+.tc-tile:focus-visible {
+  z-index: 1;
+  transform: scale(1.28);
+  box-shadow: 0 8px 20px rgb(0 0 0 / 0.45);
+  outline: none;
+}
+
+.tc-tile--on {
+  box-shadow: 0 0 0 2px var(--foreground);
+}
+
+.tc-tile--on:hover,
+.tc-tile--on:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--foreground),
+    0 8px 20px rgb(0 0 0 / 0.45);
+}
+
+.tc-name {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 16px 5px 5px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.78));
+}
+
+/* Mouse users get edge arrows on hover; trackpads just swipe. */
+.tc-arrow {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  aspect-ratio: 3 / 4;
-  padding: 6px;
-  border: 1px dashed var(--border);
-  border-radius: calc(var(--radius) - 4px);
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 10px;
-  line-height: 1.25;
-  text-align: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  color: var(--foreground);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.15s ease;
+  z-index: 2;
 }
 
-.trend-tile-name {
-  font-size: 10px;
-  color: var(--muted-foreground);
-  text-align: center;
-  line-height: 1.2;
+.tc-arrow--prev {
+  left: 8px;
+}
+
+.tc-arrow--next {
+  right: 8px;
+}
+
+.tc-frame:hover .tc-arrow,
+.tc-arrow:focus-visible {
+  opacity: 1;
 }

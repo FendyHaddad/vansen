@@ -109,7 +109,7 @@ describe('catalog version', () => {
     // `npm run sync-shared`, regenerate mobile's bundled catalog with
     // `npm run catalog:mobile <path>`, then paste the new fingerprint here.
     expect({ version: CATALOG_VERSION, fingerprint: fingerprint() }).toEqual({
-      version: '2026-09-23.4',
+      version: '2026-09-24.1',
       fingerprint: recordedCatalogFingerprint,
     });
   });
