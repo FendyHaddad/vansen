@@ -99,7 +99,7 @@
 - Run every gate: `npm run verify` (set `VANSEN_LOCAL_DB` or the SQL gates are
   scored as a failure, because a skipped check is not a passed check).
 - Local stack: `npm run db:test:start` / `npm run db:test:stop`. Start refuses a
-  Supabase CLI other than the pinned 2.114.0, or a migration whose hash is not in
+  Supabase CLI other than the pinned 2.117.0, or a migration whose hash is not in
   `supabase/tests/bootstrap-manifest.json`.
 - Staging: `./dev.sh` (or `npm run stage`) starts the local stack + `functions serve`
   + `ng serve`; `./kill.sh` stops everything, including orphans a closed terminal left.

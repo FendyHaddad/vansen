@@ -1,6 +1,6 @@
 {
-  "cliVersion": "2.114.0",
-  "recordedAt": "2026-09-23",
+  "cliVersion": "2.117.0",
+  "recordedAt": "2026-09-24",
   "note": "Regenerate with: node scripts/supabase-test-stack.mjs write-manifest",
   "migrations": [
     {
