@@ -864,3 +864,12 @@ Shipped: owner decision — Remove Object / Generative Fill / Expand / Remove Ba
 Studio (still credit-priced); fixed-width high-contrast price badges; edit hint only for an empty
 library; composer reference row Upload · Library · Persona, batch stepper beside Generate. Mobile
 `6fc83bc` pushed (no store build).
+
+### 2026-09-24 — app-wide toasts, plan switch removed (`20c778c`)
+
+`./deploy.sh --yes` exited 0 (gates included): `DEPLOYED 20c778c · catalog 2026-09-24.2 · api v86`.
+Manifest: `gitRevision` 20c778c 0039 v39, `schemaVersion` , `workerVersion` . Web only (no migration).
+
+Shipped: top-right toasts for every user action in settings and the workspace (generation notifications
+included, with View); right-panel Studio/Pro switch and downgrade card removed; locked Pro tools open the
+upgrade dialog on click.
