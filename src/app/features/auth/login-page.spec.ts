@@ -3,18 +3,27 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoginPage } from './login-page';
 import { AuthService } from '../../core/auth/auth-service';
+import { AppleAuthAvailability } from '../../core/auth/apple-auth-availability';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 import { CONSENT_RETURN_KEY } from './consent-page/consent-return';
 
 const capabilities = { load: vi.fn(() => Promise.resolve()), enabledFamilyIds: () => [] };
 
-function make(returnUrl: string | null, auth: Partial<AuthService>) {
+function make(
+  returnUrl: string | null,
+  auth: Partial<AuthService>,
+  appleEnabled = false,
+) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
       { provide: AuthService, useValue: auth },
       { provide: PublicCapabilitiesService, useValue: capabilities },
+      {
+        provide: AppleAuthAvailability,
+        useValue: { load: vi.fn(() => Promise.resolve()), enabled: () => appleEnabled },
+      },
       {
         provide: ActivatedRoute,
         useValue: {
@@ -126,5 +135,56 @@ describe('LoginPage consent return across the Supabase hop', () => {
     await page.submit();
     expect(page.signupDone()).toBe(true);
     expect(sessionStorage.getItem(CONSENT_RETURN_KEY)).toBe('/oauth/consent?authorization_id=abc');
+  });
+});
+
+/**
+ * The Apple button must track the hosted project's own answer: never shown
+ * on a promise the deployment cannot keep, and — when shown — behaving
+ * exactly like the Google button (same redirect leg, same consent-return
+ * stash) since Supabase treats both as ordinary OAuth providers.
+ */
+describe('LoginPage Apple sign-in', () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it('hides the Apple button when the provider is not enabled', () => {
+    const { fixture } = make(null, {}, false);
+    const button: HTMLElement | null = fixture.nativeElement.querySelector('.apple-btn');
+    expect(button).toBeNull();
+  });
+
+  it('shows the Apple button when the provider is enabled', () => {
+    const { fixture } = make(null, {}, true);
+    const button: HTMLElement | null = fixture.nativeElement.querySelector('.apple-btn');
+    expect(button).not.toBeNull();
+  });
+
+  it('stashes the consent return before Apple sign-in leaves the page', async () => {
+    let storedAtCall: string | null = 'not called';
+    const auth = {
+      signInWithApple: vi.fn(() => {
+        storedAtCall = sessionStorage.getItem(CONSENT_RETURN_KEY);
+        return Promise.resolve();
+      }),
+    };
+    const { page } = make('/oauth/consent?authorization_id=abc', auth, true);
+    await page.signInApple();
+    expect(storedAtCall).toBe('/oauth/consent?authorization_id=abc');
+  });
+
+  it('stashes nothing for Apple sign-in with a hostile returnUrl', async () => {
+    const auth = { signInWithApple: vi.fn(() => Promise.resolve()) };
+    const { page } = make('https://evil.example/oauth/consent', auth, true);
+    await page.signInApple();
+    expect(auth.signInWithApple).toHaveBeenCalled();
+    expect(sessionStorage.getItem(CONSENT_RETURN_KEY)).toBeNull();
+  });
+
+  it('surfaces an Apple sign-in failure without getting stuck busy', async () => {
+    const auth = { signInWithApple: vi.fn(() => Promise.reject(new Error('popup blocked'))) };
+    const { page } = make(null, auth, true);
+    await page.signInApple();
+    expect(page.error()).toBe('popup blocked');
+    expect(page.appleBusy()).toBe(false);
   });
 });

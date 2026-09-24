@@ -4,6 +4,7 @@ import { HlmButton } from '@spartan-ng/helm/button';
 import { HlmInput } from '@spartan-ng/helm/input';
 import { HlmLabel } from '@spartan-ng/helm/label';
 import { AuthService } from '../../core/auth/auth-service';
+import { AppleAuthAvailability } from '../../core/auth/apple-auth-availability';
 import { MODEL_FAMILIES } from '../../core/catalog/model-families';
 import { PublicCapabilitiesService } from '../../core/catalog/public-capabilities';
 import { safeConsentReturnUrl } from './consent-page/consent-return-url';
@@ -24,9 +25,11 @@ export class LoginPage {
   private readonly route = inject(ActivatedRoute);
   private readonly capabilities = inject(PublicCapabilitiesService);
   private readonly consentReturn = inject(ConsentReturn);
+  private readonly appleAuth = inject(AppleAuthAvailability);
 
   constructor() {
     void this.capabilities.load();
+    void this.appleAuth.load();
   }
 
   /** The splash caption named Sora, which has no adapter. Live families only. */
@@ -43,7 +46,11 @@ export class LoginPage {
   readonly error = signal('');
   readonly busy = signal(false);
   readonly googleBusy = signal(false);
+  readonly appleBusy = signal(false);
   readonly signupDone = signal(false);
+
+  /** Shown only once GoTrue itself reports the provider configured. */
+  readonly appleEnabled = computed(() => this.appleAuth.enabled());
 
   readonly submitLabel = computed(() =>
     this.mode() === 'signin' ? 'Sign in' : 'Create account',
@@ -81,6 +88,22 @@ export class LoginPage {
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : 'Google sign-in failed');
       this.googleBusy.set(false);
+    }
+  }
+
+  async signInApple(): Promise<void> {
+    if (this.appleBusy()) return;
+    this.appleBusy.set(true);
+    this.error.set('');
+    // Apple comes back to /app, not here: carry the consent return over, same
+    // as Google.
+    this.consentReturn.set(this.rawReturnUrl());
+    try {
+      await this.auth.signInWithApple();
+      // Supabase redirects the browser; stay busy until the page unloads.
+    } catch (e) {
+      this.error.set(e instanceof Error ? e.message : 'Apple sign-in failed');
+      this.appleBusy.set(false);
     }
   }
 

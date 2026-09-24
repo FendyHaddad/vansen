@@ -36,6 +36,13 @@
         {{ googleBusy() ? 'Redirecting…' : 'Continue with Google' }}
       </button>
 
+      @if (appleEnabled()) {
+        <button type="button" class="apple-btn mt-3" [disabled]="appleBusy()" (click)="signInApple()">
+          <img src="/logos/apple.svg" alt="" class="apple-logo" />
+          {{ appleBusy() ? 'Redirecting…' : 'Continue with Apple' }}
+        </button>
+      }
+
       <div class="divider">
         <span>or with email</span>
       </div>
