@@ -203,3 +203,40 @@ Deno.test('a failed drain does not fail the tick', async () => {
 
   assertEquals(summary.notifications, 0);
 });
+
+Deno.test('with a background runner the tick answers 202 at once and keeps working after the response', async () => {
+  const { admin, rec } = stub({ jobs: [], notifications: [] });
+  const background: Promise<unknown>[] = [];
+  const worker = createWorker({ ...deps(admin, rec), runInBackground: (work) => background.push(work) });
+  const res = await worker(
+    new Request('http://worker/', { method: 'POST', headers: { 'x-worker-secret': SECRET } }),
+  );
+  assertEquals(res.status, 202);
+  assertEquals(background.length, 1);
+  await Promise.all(background);
+  assertEquals(rec.rpcCalls.some((r) => r.name === 'fn_claim_jobs'), true);
+});
+
+Deno.test('a background tick that throws is logged, never an unhandled rejection', async () => {
+  const { admin, rec } = stub({});
+  const broken = {
+    ...admin,
+    rpc: () => Promise.resolve({ data: null, error: { message: 'db down' } }),
+  } as unknown as SupabaseClient;
+  const background: Promise<unknown>[] = [];
+  const worker = createWorker({ ...deps(broken, rec), runInBackground: (work) => background.push(work) });
+  const res = await worker(
+    new Request('http://worker/', { method: 'POST', headers: { 'x-worker-secret': SECRET } }),
+  );
+  assertEquals(res.status, 202);
+  await Promise.all(background);
+});
+
+Deno.test('an unauthenticated request starts no background work', async () => {
+  const { admin, rec } = stub({ jobs: [job()] });
+  const background: Promise<unknown>[] = [];
+  const worker = createWorker({ ...deps(admin, rec), runInBackground: (work) => background.push(work) });
+  const res = await worker(new Request('http://worker/', { method: 'POST' }));
+  assertEquals(res.status, 401);
+  assertEquals(background.length, 0);
+});

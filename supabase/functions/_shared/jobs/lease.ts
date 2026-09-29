@@ -30,6 +30,8 @@ export interface ClaimedJob {
   submit_attempts: number;
   poll_attempts: number;
   cancel_requested_at: string | null;
+  /** Last real state change (0026). For a submitting job: when the submit began. */
+  progress_at?: string;
 }
 
 export interface ReleaseOptions {

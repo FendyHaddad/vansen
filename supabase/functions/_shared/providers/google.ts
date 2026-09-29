@@ -1,10 +1,10 @@
 // Google Gemini image adapter — Nano Banana Fast/Standard/Pro. generateContent
 // returns image bytes inline, so submit answers synchronously and check() is a
 // defensive no-op for inline refs.
-import { encodeBase64 } from 'jsr:@std/encoding/base64';
+import { decodeBase64, encodeBase64 } from 'jsr:@std/encoding/base64';
 import { CheckResult, ProviderAdapter, SubmitCtx } from './types.ts';
 import { GOOGLE_API_BASE, googleHeaders } from './google-common.ts';
-import { ProviderError } from './provider-errors.ts';
+import { classifyStatus, ProviderError } from './provider-errors.ts';
 
 /** One image as an inline part, or null when there is no URL or it cannot be read. */
 async function referenceInline(url?: string): Promise<Record<string, unknown> | null> {
@@ -18,6 +18,7 @@ async function referenceInline(url?: string): Promise<Record<string, unknown> | 
 
 export const googleAdapter: ProviderAdapter = {
   provider: 'google',
+  answersInline: true,
 
   async submit(ctx: SubmitCtx) {
     // Nano Banana was already correct; moving it onto the same seam as the
@@ -58,8 +59,12 @@ export const googleAdapter: ProviderAdapter = {
         },
         safetySettings: [],
       }),
+      signal: ctx.signal,
     });
-    if (!res.ok) throw new Error(`google submit ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      // Google answered without an image; the status says whether to try again.
+      throw new ProviderError(`google submit ${res.status}: ${await res.text()}`, classifyStatus(res.status), res.status);
+    }
     const data = await res.json();
     // Token usage per run, so the persona price can be checked against what
     // Google actually billed (thinking and five input photos vary).
@@ -78,7 +83,8 @@ export const googleAdapter: ProviderAdapter = {
         'unknown';
       throw new ProviderError(`google: no image in response (${reason})`, 'terminal');
     }
-    const bytes = Uint8Array.from(atob(inline.data), (ch) => ch.charCodeAt(0));
+    // std's decoder: a per-byte callback costs most of a request's 2 s CPU at 4K.
+    const bytes = decodeBase64(inline.data);
     const contentType = inline.mime_type ?? inline.mimeType ?? 'image/png';
     return {
       providerRef: 'inline',

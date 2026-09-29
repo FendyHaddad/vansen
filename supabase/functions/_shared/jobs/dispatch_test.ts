@@ -2,7 +2,14 @@ import { assertEquals } from 'jsr:@std/assert';
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { FakeDb, type Row } from '../testing/fakes.ts';
 import { type ClaimedJob } from './lease.ts';
-import { type JobDeps, type ReconcileResult, runJob } from './dispatch.ts';
+import {
+  INLINE_OWNER_GONE_AFTER_S,
+  type JobDeps,
+  MAX_INLINE_SUBMITS,
+  type ReconcileResult,
+  runJob,
+} from './dispatch.ts';
+import { ProviderError } from '../providers/provider-errors.ts';
 import type { CheckResult, ProviderAdapter, SubmitCtx } from '../providers/types.ts';
 
 const USER = 'u0';
@@ -28,6 +35,11 @@ function harness(opts: {
   reconcile?: () => Promise<ReconcileResult>;
   /** What P4's finisher would do to the generation. */
   finish?: (db: FakeDb, result: CheckResult) => void;
+  /** A synchronous provider (OpenAI, Google): no pollable reference, no cancel. */
+  inline?: boolean;
+  /** When the submit began (jobs.progress_at). */
+  progressAt?: string;
+  submitAttempts?: number;
 } = {}): Harness {
   const db = new FakeDb();
   const state = opts.state ?? 'ready';
@@ -37,9 +49,10 @@ function harness(opts: {
   db.tables.jobs = [{
     id: 'j0', user_id: USER, generation_id: 'g0', provider: 'fal', state,
     provider_ref: opts.providerRef ?? null, lease_token: 'lease-1',
-    lease_until: '2099-01-01T00:00:00Z', submit_attempts: 0, poll_attempts: 0,
+    lease_until: '2099-01-01T00:00:00Z', submit_attempts: opts.submitAttempts ?? 0, poll_attempts: 0,
     next_run_at: '2026-09-21T00:00:00Z', dispatch_key: 'dk-1', payload: {},
     cancel_requested_at: opts.cancelRequested ? '2026-09-21T00:00:00Z' : null,
+    progress_at: opts.progressAt ?? '2026-09-21T00:00:00Z',
   }];
   wireLeaseRpcs(db);
 
@@ -48,7 +61,8 @@ function harness(opts: {
   const cancels: string[] = [];
   const finished: CheckResult[] = [];
   const adapter: ProviderAdapter = {
-    provider: 'fal',
+    provider: opts.inline ? 'openai' : 'fal',
+    answersInline: opts.inline,
     submit: (ctx) => {
       submits.push(ctx);
       if (opts.submit) return opts.submit();
@@ -65,13 +79,15 @@ function harness(opts: {
       return Promise.resolve('cancelled');
     },
   };
+  if (opts.inline) delete adapter.cancel;
 
   const job: ClaimedJob = {
     id: 'j0', user_id: USER, generation_id: 'g0', family_id: 'flux', kind: 'image',
     state, provider_ref: opts.providerRef ?? null, dispatch_key: 'dk-1',
     lease_token: 'lease-1', lease_until: '2099-01-01T00:00:00Z', payload: {},
-    submit_attempts: 0, poll_attempts: 0,
+    submit_attempts: opts.submitAttempts ?? 0, poll_attempts: 0,
     cancel_requested_at: opts.cancelRequested ? '2026-09-21T00:00:00Z' : null,
+    progress_at: opts.progressAt ?? '2026-09-21T00:00:00Z',
   };
 
   return {
@@ -146,6 +162,7 @@ function wireLeaseRpcs(db: FakeDb): void {
     if (leased && !matches) return { settled: false, previous: gen.status, refunded: 0 };
     if (gen.status !== 'pending') return { settled: false, previous: gen.status, refunded: 0 };
     gen.status = args.p_outcome === 'done' ? 'done' : 'failed';
+    gen.failure_code = args.p_failure_code ?? null;
     gen.media_path = args.p_media_path ?? gen.media_path;
     job.state = 'done';
     job.lease_token = null;
@@ -349,8 +366,8 @@ Deno.test('a saved reference recovers a submitting job without resubmitting', as
   assertEquals(h.checks, ['req_saved']);
   assertEquals(h.submits.length, 0);
 });
-Deno.test('an inline reference remains uncertain and is never polled or resubmitted', async () => {
-  const h = harness({ state: 'submitting', providerRef: 'inline' });
+Deno.test('an inline reference is never polled or resubmitted, and waits while its request could be open', async () => {
+  const h = harness({ state: 'submitting', providerRef: 'inline', progressAt: new Date().toISOString() });
   await runJob(h.deps, h.job);
   assertEquals(h.checks, []);
   assertEquals(h.submits, []);
@@ -378,4 +395,101 @@ Deno.test('twelve reconciliation ticks persist attempts and raise an operator al
   assertEquals(h.db.rpcCalls.some(c => c.name === 'fn_raise_alert' && c.args.p_kind === 'jobs_stuck'), true);
   assertEquals(h.submits, []);
   assertEquals(h.db.tables.generations[0].status, 'pending');
+});
+
+// ------------------------------------------------ synchronous (inline) providers
+//
+// OpenAI and Google answer on the submit connection itself. There is no
+// reference to poll and nothing to cancel: once the process holding that
+// connection is gone, no result can ever arrive for the job.
+
+const LONG_AGO = '2026-09-21T00:00:00Z';
+const tiny = { state: 'done' as const, bytes: new Uint8Array([1]), contentType: 'image/png' };
+
+Deno.test('inline: an interrupted submit with no reference is refunded once its request cannot still be open', async () => {
+  const h = harness({ inline: true, state: 'submitting', providerRef: null, progressAt: LONG_AGO });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(h.db.tables.generations[0].failure_code, 'timeout');
+  assertEquals(job(h).state, 'done');
+  assertEquals(h.submits.length, 0, 'an interrupted inline submit is never repeated on a guess');
+});
+
+Deno.test('inline: a recently interrupted submit waits out the platform wall clock before settling', async () => {
+  const h = harness({ inline: true, state: 'reconciling', providerRef: null, progressAt: new Date().toISOString() });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'pending');
+  assertEquals(job(h).state, 'reconciling');
+  const waitS = (Date.parse(String(job(h).next_run_at)) - Date.now()) / 1000;
+  assertEquals(waitS > INLINE_OWNER_GONE_AFTER_S - 5 && waitS <= INLINE_OWNER_GONE_AFTER_S + 1, true);
+});
+
+Deno.test('inline: a submitted job holding the "inline" ref is settled, never polled forever', async () => {
+  const h = harness({ inline: true, state: 'submitted', providerRef: 'inline', progressAt: LONG_AGO });
+  await runJob(h.deps, h.job);
+  assertEquals(h.checks, [], 'check("inline") can only ever answer running');
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(job(h).state, 'done');
+});
+
+Deno.test('inline: cancelling an interrupted submit refunds it as cancelled', async () => {
+  const h = harness({
+    inline: true, state: 'reconciling', providerRef: null, progressAt: LONG_AGO, cancelRequested: true,
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(h.db.tables.generations[0].failure_code, 'cancelled');
+  assertEquals(job(h).state, 'done');
+});
+
+Deno.test('inline: cancelling a ready job refunds it without calling the provider', async () => {
+  const h = harness({ inline: true, state: 'ready', cancelRequested: true });
+  await runJob(h.deps, h.job);
+  assertEquals(h.submits.length, 0);
+  assertEquals(h.db.tables.generations[0].failure_code, 'cancelled');
+});
+
+Deno.test('inline: a submit that timed out on our deadline is refunded now', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => Promise.reject(new DOMException('Signal timed out.', 'TimeoutError')),
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(h.db.tables.generations[0].failure_code, 'timeout');
+  assertEquals(job(h).state, 'done');
+});
+
+Deno.test('inline: a provider that answered 429 made no image, so the job goes back to ready', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => Promise.reject(new ProviderError('openai generate 429: slow down', 'retryable', 429)),
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(job(h).state, 'ready');
+  assertEquals(h.db.tables.generations[0].status, 'pending');
+});
+
+Deno.test('inline: a provider that keeps answering 503 is refunded after the last attempt', async () => {
+  const h = harness({
+    inline: true,
+    submitAttempts: MAX_INLINE_SUBMITS - 1,
+    submit: () => Promise.reject(new ProviderError('openai generate 503: busy', 'retryable', 503)),
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(h.db.tables.generations[0].failure_code, 'provider_error');
+});
+
+Deno.test('inline: a result that arrives after the lease was lost is not stored against a job we no longer own', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => {
+      h.db.tables.jobs[0].lease_token = 'next-tick';
+      return Promise.resolve({ providerRef: 'inline', inline: tiny });
+    },
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(h.finished.length, 0);
+  assertEquals(h.db.tables.generations[0].status, 'pending', 'the new owner decides');
 });

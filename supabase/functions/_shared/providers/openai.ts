@@ -4,7 +4,9 @@
 // The model id and the `size` string come from the normalized request, never
 // from a table in this file: the quote is computed from the same object, so a
 // price the customer paid cannot describe a request we did not send.
+import { decodeBase64 } from 'jsr:@std/encoding/base64';
 import { CheckResult, ProviderAdapter, SubmitCtx } from './types.ts';
+import { classifyStatus, ProviderError } from './provider-errors.ts';
 
 function key(): string {
   const k = Deno.env.get('OPENAI_API_KEY');
@@ -12,8 +14,22 @@ function key(): string {
   return k;
 }
 
+/**
+ * std's decoder, not `Uint8Array.from(atob(...), cb)`: the callback-per-byte
+ * form spent ~0.9 s of CPU on one 4K image, and an Edge Function request gets
+ * 2 s. Two images in one tick was enough to kill the isolate mid-save.
+ */
 function base64ToBytes(b64: string): Uint8Array {
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return decodeBase64(b64);
+}
+
+/**
+ * OpenAI answered, with an error instead of an image. The status travels with
+ * it: an answered request made no image, which is what lets the worker retry
+ * it honestly rather than guess.
+ */
+async function answeredWithError(what: string, res: Response): Promise<ProviderError> {
+  return new ProviderError(`${what} ${res.status}: ${await res.text()}`, classifyStatus(res.status), res.status);
 }
 
 async function urlToBlob(url: string): Promise<Blob> {
@@ -57,8 +73,9 @@ async function submitReference(ctx: SubmitCtx, model: string, size: string, qual
     method: 'POST',
     headers: { Authorization: `Bearer ${key()}` },
     body: form,
+    signal: ctx.signal,
   });
-  if (!res.ok) throw new Error(`openai edit ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw await answeredWithError('openai edit', res);
   const data = await res.json();
   logUsage('edits', model, size, quality, data);
   const bytes = base64ToBytes(data.data[0].b64_json);
@@ -70,6 +87,7 @@ async function submitReference(ctx: SubmitCtx, model: string, size: string, qual
 
 export const openaiAdapter: ProviderAdapter = {
   provider: 'openai',
+  answersInline: true,
 
   async submit(ctx: SubmitCtx) {
     const n = ctx.normalized;
@@ -87,8 +105,9 @@ export const openaiAdapter: ProviderAdapter = {
       method: 'POST',
       headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, prompt: ctx.prompt, size, quality, user: ctx.safetyId, n: 1 }),
+      signal: ctx.signal,
     });
-    if (!res.ok) throw new Error(`openai generate ${res.status}: ${await res.text()}`);
+    if (!res.ok) throw await answeredWithError('openai generate', res);
     const data = await res.json();
     logUsage('generations', model, size, quality, data);
     const bytes = base64ToBytes(data.data[0].b64_json);

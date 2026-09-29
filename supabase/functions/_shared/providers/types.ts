@@ -34,6 +34,12 @@ export interface SubmitCtx {
   parentVideoUrl?: string;
   /** Omni conversation id for extend/edit. */
   interactionId?: string;
+  /**
+   * Fires when the worker tick is about to run out of wall clock. Inline
+   * adapters pass it to their fetch: an answer that cannot arrive before the
+   * isolate is killed is better abandoned on our terms than on the platform's.
+   */
+  signal?: AbortSignal;
 }
 
 export type CheckResult =
@@ -68,6 +74,12 @@ export type CancelOutcome = 'cancelled' | 'too_late' | 'unsupported' | 'unreacha
 
 export interface ProviderAdapter {
   readonly provider: ProviderName;
+  /**
+   * True when submit() holds the connection open until the image is back
+   * (OpenAI, Google). Such a job has no reference to poll and nothing to
+   * cancel: its only result is the one on that connection.
+   */
+  readonly answersInline?: boolean;
   /** Start async work. May return an inline result when the provider answers synchronously. */
   submit(ctx: SubmitCtx): Promise<SubmitResult>;
   check(providerRef: string): Promise<CheckResult>;

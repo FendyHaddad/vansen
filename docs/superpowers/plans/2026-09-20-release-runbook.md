@@ -451,7 +451,9 @@ cd /Users/user/IdeaProjects/vansen && git diff --stat $REV HEAD -- supabase/func
 
 Empty diff: safe. Otherwise, grep `$REV`'s functions for every object dropped
 by a migration newer than the one it last knew, then serve it on the local
-stack (below). The job-worker tick must return 200.
+stack (below). The job-worker tick must return 202 (since 2026-09-29 it runs
+after the response; its summary is the `worker_tick` log line). A build older
+than that returns 200 with the summary.
 
 ### Rolling back each component
 

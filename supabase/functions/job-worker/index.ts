@@ -19,9 +19,18 @@ const admin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
+/** Optional override; raise it on a plan with a longer wall clock (Pro: 400 s). */
+const budgetS = Number(Deno.env.get('JOB_TICK_BUDGET_S'));
+
+declare const EdgeRuntime: { waitUntil<T>(promise: Promise<T>): Promise<T> };
+
 const worker = createWorker({
   admin,
   workerSecret: Deno.env.get('JOB_WORKER_SECRET') ?? null,
+  ...(budgetS > 0 ? { tickBudgetMs: budgetS * 1000 } : {}),
+  // Answer pg_net at once and keep working: the request idle timeout is 150 s
+  // on every plan, the background wall clock is 400 s on paid ones.
+  runInBackground: (work) => void EdgeRuntime.waitUntil(work),
   jobs: {
     adapterFor,
     resolvePayload: (job: ClaimedJob) => resolvePayload({ admin, storageFor }, job),
