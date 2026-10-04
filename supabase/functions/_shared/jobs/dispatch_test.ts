@@ -481,6 +481,49 @@ Deno.test('inline: a provider that keeps answering 503 is refunded after the las
   assertEquals(h.db.tables.generations[0].failure_code, 'provider_error');
 });
 
+const NO_CREDITS = 'openai generate 429: {"error":{"type":"insufficient_quota","code":"credit_balance_exhausted"}}';
+
+Deno.test('inline: a provider out of credits is refunded at once, not retried', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => Promise.reject(new ProviderError(NO_CREDITS, 'retryable', 429)),
+  });
+  await runJob(h.deps, h.job);
+  assertEquals(h.submits.length, 1);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+  assertEquals(job(h).state, 'done');
+});
+
+Deno.test('a provider out of credits raises an operator alert naming the provider', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => Promise.reject(new ProviderError(NO_CREDITS, 'retryable', 429)),
+  });
+  await runJob(h.deps, h.job);
+  const alert = h.db.rpcCalls.find((c) => c.name === 'fn_raise_alert');
+  assertEquals(alert?.args.p_kind, 'provider_out_of_credits');
+  assertEquals(alert?.args.p_severity, 'critical');
+  assertEquals((alert?.args.p_detail as Row).provider, 'openai');
+});
+
+Deno.test('an ordinary rejection raises no alert', async () => {
+  const h = harness({ submit: () => Promise.reject(new Error('fal 400 invalid prompt')) });
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.rpcCalls.some((c) => c.name === 'fn_raise_alert'), false);
+});
+
+Deno.test('an alert that cannot be written does not undo the refund', async () => {
+  const h = harness({
+    inline: true,
+    submit: () => Promise.reject(new ProviderError(NO_CREDITS, 'retryable', 429)),
+  });
+  h.db.rpcHandlers.fn_raise_alert = () => {
+    throw new Error('alerts table unavailable');
+  };
+  await runJob(h.deps, h.job);
+  assertEquals(h.db.tables.generations[0].status, 'failed');
+});
+
 Deno.test('inline: a result that arrives after the lease was lost is not stored against a job we no longer own', async () => {
   const h = harness({
     inline: true,

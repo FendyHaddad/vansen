@@ -40,7 +40,27 @@ const NETWORK_HINTS = [
   'network',
 ];
 
+// Our provider account has no money left. OpenAI says so with a 429, the same
+// status as "slow down", so only the body tells the two apart.
+const OUT_OF_CREDITS_HINTS = [
+  'insufficient_quota',
+  'credit_balance_exhausted',
+  'billing_hard_limit_reached',
+  'exhausted balance',
+];
+
+/**
+ * Every request fails until someone tops up the provider account, so this is
+ * never worth another attempt and always worth telling an operator about.
+ */
+export function isOutOfCredits(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const lower = e.message.toLowerCase();
+  return OUT_OF_CREDITS_HINTS.some((hint) => lower.includes(hint));
+}
+
 export function classifyProviderError(e: unknown): FailureClass {
+  if (isOutOfCredits(e)) return 'terminal';
   if (e instanceof ProviderError) return e.failureClass;
   if (e instanceof DOMException && e.name === 'TimeoutError') return 'retryable';
   if (!(e instanceof Error)) return 'retryable';

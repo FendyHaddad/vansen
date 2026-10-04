@@ -19,7 +19,7 @@
 // See settleAbandonedInline for why those are refunded, and when.
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import type { CheckResult, ProviderAdapter, SubmitCtx } from '../providers/types.ts';
-import { classifyProviderError, ProviderError } from '../providers/provider-errors.ts';
+import { classifyProviderError, isOutOfCredits, ProviderError } from '../providers/provider-errors.ts';
 import { settleFailed } from './settlement.ts';
 import {
   backoffSeconds,
@@ -126,11 +126,7 @@ async function afterFailedSubmit(
   const error = String(cause).slice(0, 300);
   // A provider that rejected the request outright never started work, so the
   // customer can be refunded honestly.
-  if (classifyProviderError(cause) === 'terminal') {
-    console.error('dispatch_submit_rejected', job.id, error);
-    await settleFailed(deps.admin, job.id, error, { leaseToken: job.lease_token });
-    return;
-  }
+  if (classifyProviderError(cause) === 'terminal') return await rejectedOutright(deps, job, adapter, cause, error);
   if (adapter.answersInline) return await afterFailedInlineSubmit(deps, job, cause, error);
   // Everything else might have reached the provider. It stays ours to find out.
   console.error('dispatch_submit_unknown', job.id, error);
@@ -139,6 +135,32 @@ async function afterFailedSubmit(
     delaySeconds: backoffSeconds(job.submit_attempts + 1),
     error,
   });
+}
+
+async function rejectedOutright(
+  deps: JobDeps,
+  job: ClaimedJob,
+  adapter: ProviderAdapter,
+  cause: unknown,
+  error: string,
+): Promise<void> {
+  console.error('dispatch_submit_rejected', job.id, error);
+  await settleFailed(deps.admin, job.id, error, { leaseToken: job.lease_token });
+  if (!isOutOfCredits(cause)) return;
+  await alertOutOfCredits(deps, job, adapter);
+}
+
+/**
+ * Every job on this provider will now fail until someone tops up its account.
+ * The customer was already refunded; a failed write here must not undo that.
+ */
+async function alertOutOfCredits(deps: JobDeps, job: ClaimedJob, adapter: ProviderAdapter): Promise<void> {
+  console.error('dispatch_provider_out_of_credits', adapter.provider, job.family_id, job.id);
+  const { error } = await deps.admin.rpc('fn_raise_alert', {
+    p_kind: 'provider_out_of_credits', p_severity: 'critical',
+    p_detail: { provider: adapter.provider, familyId: job.family_id, jobId: job.id },
+  });
+  if (error) console.error('provider_out_of_credits_alert_failed', error.message);
 }
 
 /**

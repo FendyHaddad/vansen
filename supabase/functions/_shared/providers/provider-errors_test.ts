@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert';
-import { classifyProviderError, classifyStatus, ProviderError } from './provider-errors.ts';
+import { classifyProviderError, classifyStatus, isOutOfCredits, ProviderError } from './provider-errors.ts';
 
 Deno.test('rate limiting and server errors are retryable', () => {
   assertEquals(classifyStatus(429), 'retryable');
@@ -46,4 +46,21 @@ Deno.test('a status embedded in a legacy adapter message is still read', () => {
 Deno.test('a network hint wins over a number that is not a status', () => {
   assertEquals(classifyProviderError(new Error('connection reset by peer 104')), 'retryable');
   assertEquals(classifyProviderError(new Error('dns error 400 resolving host')), 'retryable');
+});
+
+// OpenAI answers an empty account with 429, the same status as "slow down".
+// Retrying cannot help until someone pays, so the body decides, not the status.
+const OPENAI_NO_CREDITS = 'openai generate 429: {"error":{"message":"You have no credits remaining.",' +
+  '"type":"insufficient_quota","param":null,"code":"credit_balance_exhausted"}}';
+
+Deno.test('a provider account with no credits left is terminal, whatever the status says', () => {
+  assertEquals(classifyProviderError(new ProviderError(OPENAI_NO_CREDITS, 'retryable', 429)), 'terminal');
+  assertEquals(classifyProviderError(new Error('fal submit 403: {"detail":"User is locked. Reason: Exhausted balance."}')), 'terminal');
+});
+
+Deno.test('only billing answers count as out of credits', () => {
+  assertEquals(isOutOfCredits(new ProviderError(OPENAI_NO_CREDITS, 'retryable', 429)), true);
+  assertEquals(isOutOfCredits(new ProviderError('openai generate 429: rate limit reached', 'retryable', 429)), false);
+  assertEquals(isOutOfCredits(new Error('connection reset by peer')), false);
+  assertEquals(isOutOfCredits('insufficient_quota'), false);
 });
